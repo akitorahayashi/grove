@@ -4,7 +4,8 @@ use crate::AppError;
 use crate::app::AppContext;
 use crate::config;
 use crate::git::{BranchDivergence, GitClient, NoopGitProgressSink, urls_match};
-use crate::repositories::{BranchTracking, RepositoryDefinition, select_repositories};
+use crate::repositories::RepositoryDefinition;
+use crate::repositories::select_repositories;
 
 #[derive(Debug, Clone)]
 pub struct StatusReport {
@@ -30,7 +31,7 @@ pub struct StatusEntry {
     source_config: String,
     branch: Option<String>,
     condition: StatusCondition,
-    default_branch: Option<BranchTracking>,
+    default_branch: Option<DefaultBranchStatus>,
     remote_mismatch: Option<RemoteUrlMismatch>,
 }
 
@@ -39,7 +40,7 @@ impl StatusEntry {
         repository: &RepositoryDefinition,
         branch: Option<String>,
         condition: StatusCondition,
-        default_branch: Option<BranchTracking>,
+        default_branch: Option<DefaultBranchStatus>,
         remote_mismatch: Option<RemoteUrlMismatch>,
     ) -> Self {
         Self {
@@ -83,13 +84,41 @@ impl StatusEntry {
         &self.condition
     }
 
-    pub fn default_branch(&self) -> Option<&BranchTracking> {
+    pub fn default_branch(&self) -> Option<&DefaultBranchStatus> {
         self.default_branch.as_ref()
     }
 
     pub fn remote_mismatch(&self) -> Option<&RemoteUrlMismatch> {
         self.remote_mismatch.as_ref()
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct DefaultBranchStatus {
+    branch: String,
+    tracking: BranchTrackingStatus,
+}
+
+impl DefaultBranchStatus {
+    pub fn new(branch: String, tracking: BranchTrackingStatus) -> Self {
+        Self { branch, tracking }
+    }
+
+    pub fn branch(&self) -> &str {
+        &self.branch
+    }
+
+    pub fn tracking(&self) -> &BranchTrackingStatus {
+        &self.tracking
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum BranchTrackingStatus {
+    Divergence { ahead: u32, behind: u32 },
+    MissingLocalBranch,
+    MissingRemoteBranch,
+    Unavailable,
 }
 
 #[derive(Debug, Clone)]
@@ -203,7 +232,7 @@ fn status_for_repository(
     });
     let default_branch = git.default_branch(repository.path(), repository.default_branch())?;
     let default_branch = if let Some(branch) = default_branch.as_deref() {
-        branch_tracking(git, repository.path(), branch)?
+        default_branch_status(git, repository, branch)?
     } else {
         None
     };
@@ -218,22 +247,40 @@ fn status_for_repository(
     Ok(entry(repository, branch, condition, default_branch, remote_mismatch))
 }
 
-fn branch_tracking(
+fn default_branch_status(
     git: &impl GitClient,
-    repository: &Path,
+    repository: &RepositoryDefinition,
     branch: &str,
-) -> Result<Option<BranchTracking>, AppError> {
-    let Some(divergence) = git.branch_divergence(repository, branch)? else {
-        return Ok(Some(BranchTracking::new(branch.to_string(), 0, 0)));
+) -> Result<Option<DefaultBranchStatus>, AppError> {
+    if !git.local_branch_exists(repository.path(), branch)? {
+        return Ok(Some(DefaultBranchStatus::new(
+            branch.to_string(),
+            BranchTrackingStatus::MissingLocalBranch,
+        )));
+    }
+    if !git.remote_branch_exists(repository.path(), branch)? {
+        return Ok(Some(DefaultBranchStatus::new(
+            branch.to_string(),
+            BranchTrackingStatus::MissingRemoteBranch,
+        )));
+    }
+    let Some(divergence) = git.branch_divergence(repository.path(), branch)? else {
+        return Ok(Some(DefaultBranchStatus::new(
+            branch.to_string(),
+            BranchTrackingStatus::Unavailable,
+        )));
     };
-    Ok(Some(BranchTracking::new(branch.to_string(), divergence.ahead(), divergence.behind())))
+    Ok(Some(DefaultBranchStatus::new(
+        branch.to_string(),
+        BranchTrackingStatus::Divergence { ahead: divergence.ahead(), behind: divergence.behind() },
+    )))
 }
 
 fn entry(
     repository: &RepositoryDefinition,
     branch: Option<String>,
     condition: StatusCondition,
-    default_branch: Option<BranchTracking>,
+    default_branch: Option<DefaultBranchStatus>,
     remote_mismatch: Option<RemoteUrlMismatch>,
 ) -> StatusEntry {
     StatusEntry::from_repository(repository, branch, condition, default_branch, remote_mismatch)

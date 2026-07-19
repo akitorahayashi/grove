@@ -95,8 +95,7 @@ src/
 - `src/app/` owns use-case orchestration and dependency wiring.
 - `src/config/` owns `grove.toml` discovery, include resolution, path
   normalization, and validation.
-- `src/repositories/` owns repository names, definitions, selection, and state
-  models.
+- `src/repositories/` owns repository names, definitions, and target selection.
 - `src/git/` owns the system `git` command boundary.
 - `src/error.rs` owns application-wide errors.
 

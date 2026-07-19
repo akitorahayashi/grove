@@ -47,7 +47,6 @@ src/
     definition.rs
     name.rs
     selection.rs
-    state.rs
   git/
     client.rs
     command.rs
@@ -93,7 +92,7 @@ and paths that leave the managed root.
 
 `src/repositories` owns repository-domain data. `RepositoryName` validates CLI
 target names. `RepositoryDefinition` represents a repository after config
-resolution. Selection and state structures live beside those domain types.
+resolution. Selection logic lives beside those domain types.
 
 ### git/
 

@@ -149,6 +149,104 @@ url = "https://user:ghp_expected@example.com/org/repo.git?password=expected_secr
 }
 
 #[test]
+fn status_target_reports_missing_local_default_branch() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    let config = ctx.write_config(&format!(
+        r#"
+version = 1
+
+[[repo]]
+name = "blog"
+path = "blog"
+url = "{}"
+"#,
+        remote.url()
+    ));
+
+    ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
+    let repository = ctx.workspace().join("blog");
+    run_git(&repository, &["switch", "-c", "feature"]);
+    run_git(&repository, &["branch", "-D", "main"]);
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("status")
+        .arg("blog")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Default:"))
+        .stdout(predicate::str::contains("main"))
+        .stdout(predicate::str::contains("Tracking:"))
+        .stdout(predicate::str::contains("local branch missing"))
+        .stdout(predicate::str::contains("up to date").not());
+}
+
+#[test]
+fn status_target_reports_missing_remote_default_branch() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    let config = ctx.write_config(&format!(
+        r#"
+version = 1
+
+[[repo]]
+name = "blog"
+path = "blog"
+url = "{}"
+"#,
+        remote.url()
+    ));
+
+    ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
+    run_git(&ctx.workspace().join("blog"), &["update-ref", "-d", "refs/remotes/origin/main"]);
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("status")
+        .arg("blog")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Default:"))
+        .stdout(predicate::str::contains("main"))
+        .stdout(predicate::str::contains("Tracking:"))
+        .stdout(predicate::str::contains("remote branch missing"))
+        .stdout(predicate::str::contains("up to date").not());
+}
+
+#[test]
+fn status_table_preserves_fetch_failure_message() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    let config = ctx.write_config(&format!(
+        r#"
+version = 1
+
+[[repo]]
+name = "blog"
+path = "blog"
+url = "{}"
+"#,
+        remote.url()
+    ));
+
+    ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
+    run_git(&ctx.workspace().join("blog"), &["remote", "set-url", "origin", "/does/not/exist"]);
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("status")
+        .arg("--fetch")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("fetch-failed:"))
+        .stdout(predicate::str::contains("fetch-failed  ").not());
+}
+
+#[test]
 fn status_short_alias_reports_repository_status() {
     let ctx = TestContext::new();
     let config = ctx.write_config(

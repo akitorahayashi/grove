@@ -6,9 +6,8 @@ use owo_colors::OwoColorize;
 
 use crate::AppError;
 use crate::app::api;
-use crate::app::status::{StatusCondition, StatusEntry};
+use crate::app::status::{BranchTrackingStatus, DefaultBranchStatus, StatusCondition, StatusEntry};
 use crate::git::redact_url_for_display;
-use crate::repositories::BranchTracking;
 
 #[derive(Args)]
 pub(super) struct StatusCommand {
@@ -57,7 +56,7 @@ impl ColumnWidths {
             widths.name = widths.name.max(entry.name().len());
             widths.repository = widths.repository.max(entry.display_path().len());
             widths.branch = widths.branch.max(branch(entry).len());
-            widths.state = widths.state.max(entry.condition().as_str().len());
+            widths.state = widths.state.max(table_state(entry).len());
             widths.default_branch = widths.default_branch.max(default_branch(entry).len());
         }
 
@@ -114,7 +113,7 @@ fn print_row(entry: &StatusEntry, widths: ColumnWidths, styled: bool) {
     let name = format_cell(entry.name(), widths.name);
     let repository = format_cell(entry.display_path(), widths.repository);
     let branch = format_cell(&branch(entry), widths.branch);
-    let state = format_cell(entry.condition().as_str(), widths.state);
+    let state = format_cell(&table_state(entry), widths.state);
     let default_branch = format_cell(&default_branch(entry), widths.default_branch);
 
     if styled {
@@ -224,35 +223,82 @@ fn branch(entry: &StatusEntry) -> String {
 }
 
 fn default_branch(entry: &StatusEntry) -> String {
-    entry.default_branch().map(format_tracking).unwrap_or_else(|| "-".to_string())
+    entry.default_branch().map(format_default_branch).unwrap_or_else(|| "-".to_string())
 }
 
 fn default_branch_name(entry: &StatusEntry) -> String {
     entry
         .default_branch()
-        .map(|tracking| tracking.branch().to_string())
+        .map(|status| status.branch().to_string())
         .unwrap_or_else(|| "-".to_string())
 }
 
 fn tracking(entry: &StatusEntry) -> String {
-    let Some(tracking) = entry.default_branch() else {
+    let Some(status) = entry.default_branch() else {
         return "-".to_string();
     };
-    if tracking.ahead() == 0 && tracking.behind() == 0 {
-        return "up to date".to_string();
-    }
-    format_tracking(tracking)
+    format_tracking_status(status.tracking())
 }
 
-fn format_tracking(tracking: &BranchTracking) -> String {
-    let mut parts = vec![tracking.branch().to_string()];
-    if tracking.ahead() > 0 {
-        parts.push(format!("ahead {}", tracking.ahead()));
-    }
-    if tracking.behind() > 0 {
-        parts.push(format!("behind {}", tracking.behind()));
+fn format_default_branch(status: &DefaultBranchStatus) -> String {
+    let mut parts = vec![status.branch().to_string()];
+    match status.tracking() {
+        BranchTrackingStatus::Divergence { ahead, behind } => {
+            if *ahead > 0 {
+                parts.push(format!("ahead {ahead}"));
+            }
+            if *behind > 0 {
+                parts.push(format!("behind {behind}"));
+            }
+        }
+        BranchTrackingStatus::MissingLocalBranch => parts.push("local missing".to_string()),
+        BranchTrackingStatus::MissingRemoteBranch => parts.push("remote missing".to_string()),
+        BranchTrackingStatus::Unavailable => parts.push("tracking unavailable".to_string()),
     }
     parts.join(" ")
+}
+
+fn format_tracking_status(status: &BranchTrackingStatus) -> String {
+    match status {
+        BranchTrackingStatus::Divergence { ahead: 0, behind: 0 } => "up to date".to_string(),
+        BranchTrackingStatus::Divergence { ahead, behind } => {
+            let mut parts = Vec::new();
+            if *ahead > 0 {
+                parts.push(format!("ahead {ahead}"));
+            }
+            if *behind > 0 {
+                parts.push(format!("behind {behind}"));
+            }
+            parts.join(", ")
+        }
+        BranchTrackingStatus::MissingLocalBranch => "local branch missing".to_string(),
+        BranchTrackingStatus::MissingRemoteBranch => "remote branch missing".to_string(),
+        BranchTrackingStatus::Unavailable => "unavailable".to_string(),
+    }
+}
+
+fn table_state(entry: &StatusEntry) -> String {
+    match entry.condition() {
+        StatusCondition::FetchFailed(message) => {
+            format!("fetch-failed: {}", sanitize_summary(message))
+        }
+        condition => condition.as_str().to_string(),
+    }
+}
+
+fn sanitize_summary(value: &str) -> String {
+    let escaped = value
+        .chars()
+        .flat_map(|character| {
+            if character.is_control() {
+                character.escape_default().collect::<Vec<_>>()
+            } else {
+                vec![character]
+            }
+        })
+        .collect::<String>();
+    let single_line = escaped.split_whitespace().collect::<Vec<_>>().join(" ");
+    redact_url_for_display(&single_line)
 }
 
 fn format_state(padded: &str, condition: &StatusCondition) -> String {

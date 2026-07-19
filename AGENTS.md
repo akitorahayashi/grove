@@ -17,8 +17,8 @@ branches through the system `git` command.
 - `src/app/` owns use-case orchestration and dependency wiring.
 - `src/config/` owns discovery, include resolution, validation, and path
   normalization.
-- `src/repositories/` owns repository names, resolved definitions, target
-  selection, and state models.
+- `src/repositories/` owns repository names, resolved definitions, and target
+  selection.
 - `src/git/` owns `GitClient` and the `CommandGitClient` implementation backed
   by `std::process::Command`.
 

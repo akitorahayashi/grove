@@ -3,7 +3,7 @@ pub fn urls_match(actual: &str, expected: &str) -> bool {
 }
 
 pub fn redact_url_for_display(url: &str) -> String {
-    redact_secret_query_parameters(&redact_http_userinfo(&escape_control_characters(url)))
+    redact_secret_query_parameters(&redact_authority_userinfo(&escape_control_characters(url)))
 }
 
 fn escape_control_characters(value: &str) -> String {
@@ -18,15 +18,10 @@ fn escape_control_characters(value: &str) -> String {
     escaped
 }
 
-fn redact_http_userinfo(value: &str) -> String {
+fn redact_authority_userinfo(value: &str) -> String {
     let Some(scheme_end) = value.find("://") else {
         return value.to_string();
     };
-    let scheme = value[..scheme_end].to_ascii_lowercase();
-    if scheme != "http" && scheme != "https" {
-        return value.to_string();
-    }
-
     let authority_start = scheme_end + 3;
     let authority = &value[authority_start..];
     let authority_end =
@@ -96,6 +91,18 @@ mod tests {
                 "https://user:ghp_secret@example.com/org/repo.git?access_token=token&branch=main&api_key=key"
             ),
             "https://[redacted]@example.com/org/repo.git?access_token=[redacted]&branch=main&api_key=[redacted]"
+        );
+    }
+
+    #[test]
+    fn display_url_redacts_userinfo_for_non_http_hierarchical_urls() {
+        assert_eq!(
+            redact_url_for_display("ssh://user:secret@example.com/repo.git"),
+            "ssh://[redacted]@example.com/repo.git"
+        );
+        assert_eq!(
+            redact_url_for_display("ftp://user:password@example.com/repo.git"),
+            "ftp://[redacted]@example.com/repo.git"
         );
     }
 
