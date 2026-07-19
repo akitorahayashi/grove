@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::AppError;
 
-use super::GitUpdate;
+use super::{GitProgress, GitUpdate};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BranchDivergence {
@@ -28,9 +28,14 @@ impl BranchDivergence {
 pub trait GitClient {
     fn verify_available(&self) -> Result<(), AppError>;
 
-    fn clone_repository(&self, url: &str, destination: &Path) -> Result<(), AppError>;
+    fn clone_repository(
+        &self,
+        url: &str,
+        destination: &Path,
+        progress: &mut dyn GitProgressSink,
+    ) -> Result<(), AppError>;
 
-    fn fetch(&self, repository: &Path) -> Result<(), AppError>;
+    fn fetch(&self, repository: &Path, progress: &mut dyn GitProgressSink) -> Result<(), AppError>;
 
     fn is_work_tree(&self, repository: &Path) -> Result<bool, AppError>;
 
@@ -64,4 +69,15 @@ pub trait GitClient {
         branch: &str,
         current_branch: &str,
     ) -> Result<GitUpdate, AppError>;
+}
+
+pub trait GitProgressSink {
+    fn progress(&mut self, progress: GitProgress);
+}
+
+#[derive(Debug, Default)]
+pub struct NoopGitProgressSink;
+
+impl GitProgressSink for NoopGitProgressSink {
+    fn progress(&mut self, _progress: GitProgress) {}
 }

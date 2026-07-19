@@ -28,7 +28,17 @@ pub fn sync(
     config_path: Option<PathBuf>,
     targets: Vec<String>,
     dry_run: bool,
-) -> Result<sync::SyncReport, AppError> {
+) -> Result<sync::Report, AppError> {
     let ctx = default_context();
     sync::execute(&ctx, config_path.as_deref(), &targets, dry_run)
+}
+
+pub(crate) fn sync_with_observer(
+    config_path: Option<PathBuf>,
+    targets: Vec<String>,
+    dry_run: bool,
+    observer: &mut impl sync::SyncObserver,
+) -> Result<sync::Report, AppError> {
+    let ctx = default_context();
+    sync::execute_with_observer(&ctx, config_path.as_deref(), &targets, dry_run, observer)
 }

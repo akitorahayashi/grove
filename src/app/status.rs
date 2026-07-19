@@ -3,7 +3,7 @@ use std::path::Path;
 use crate::AppError;
 use crate::app::AppContext;
 use crate::config;
-use crate::git::{BranchDivergence, GitClient, urls_match};
+use crate::git::{BranchDivergence, GitClient, NoopGitProgressSink, urls_match};
 use crate::repositories::{
     BranchTracking, RepositoryCondition, RepositoryDefinition, RepositoryState, select_repositories,
 };
@@ -93,13 +93,16 @@ fn status_for_repository(
         ));
     }
 
-    if fetch && let Err(err) = git.fetch(repository.path()) {
-        return Ok(StatusRow::new(
-            repository.display_path().to_string(),
-            "-".to_string(),
-            format!("fetch-failed: {err}"),
-            "-".to_string(),
-        ));
+    if fetch {
+        let mut progress = NoopGitProgressSink;
+        if let Err(err) = git.fetch(repository.path(), &mut progress) {
+            return Ok(StatusRow::new(
+                repository.display_path().to_string(),
+                "-".to_string(),
+                format!("fetch-failed: {err}"),
+                "-".to_string(),
+            ));
+        }
     }
 
     let branch = git.current_branch(repository.path())?;
