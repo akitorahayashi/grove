@@ -45,7 +45,7 @@ check:
 
 # Run all tests
 test:
-    cargo test --all-targets --all-features
+    cargo test --all-targets --all-features --quiet
 
 # Generate code coverage report
 coverage:

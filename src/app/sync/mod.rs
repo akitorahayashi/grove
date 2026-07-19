@@ -227,7 +227,7 @@ mod tests {
     use crate::git::{BranchDivergence, GitClient, GitProgressSink, GitUpdate};
 
     #[test]
-    fn prepares_clones_and_fetches_concurrently_and_preserves_config_order() {
+    fn serializes_shared_git_state_without_disabling_independent_concurrency() {
         if std::thread::available_parallelism().unwrap().get() < 2 {
             return;
         }
