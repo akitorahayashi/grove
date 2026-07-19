@@ -94,6 +94,34 @@ url = "{}"
 }
 
 #[test]
+fn sync_uses_uv_change_colors_when_color_is_forced() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    let config = ctx.write_config(&format!(
+        r#"
+version = 1
+
+[[repo]]
+name = "blog"
+path = "blog"
+url = "{}"
+"#,
+        remote.url()
+    ));
+
+    ctx.cli()
+        .env_remove("NO_COLOR")
+        .env("CLICOLOR_FORCE", "1")
+        .arg("--config")
+        .arg(config)
+        .arg("sync")
+        .arg("--dry-run")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("\u{1b}[32m+\u{1b}["));
+}
+
+#[test]
 fn sync_updates_default_branch_and_restores_current_branch() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("frontend");

@@ -236,11 +236,6 @@ mod tests {
         assert!(contents.contains("blog"));
         assert!(contents.contains("128"));
         assert!(contents.contains("302"));
-        let formatted = terminal.contents_formatted();
-        assert!(
-            formatted.windows(5).any(|bytes| bytes == b"\x1b[32m"),
-            "formatted terminal did not contain green: {formatted:?}"
-        );
 
         display.handle(Event::RepositoryFinished {
             repository: "blog".to_string(),
