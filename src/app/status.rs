@@ -25,6 +25,7 @@ impl StatusReport {
 
 #[derive(Debug, Clone)]
 pub struct StatusRow {
+    name: String,
     repository: String,
     branch: String,
     state: String,
@@ -32,8 +33,18 @@ pub struct StatusRow {
 }
 
 impl StatusRow {
-    pub fn new(repository: String, branch: String, state: String, default_branch: String) -> Self {
-        Self { repository, branch, state, default_branch }
+    pub fn new(
+        name: String,
+        repository: String,
+        branch: String,
+        state: String,
+        default_branch: String,
+    ) -> Self {
+        Self { name, repository, branch, state, default_branch }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
     pub fn repository(&self) -> &str {
@@ -97,6 +108,7 @@ fn status_for_repository(
         let mut progress = NoopGitProgressSink;
         if let Err(err) = git.fetch(repository.path(), &mut progress) {
             return Ok(StatusRow::new(
+                repository.name().as_str().to_string(),
                 repository.display_path().to_string(),
                 "-".to_string(),
                 format!("fetch-failed: {err}"),
@@ -143,6 +155,7 @@ fn row(repository: &RepositoryDefinition, state: RepositoryState) -> StatusRow {
     let default_branch =
         state.default_branch().map(format_tracking).unwrap_or_else(|| "-".to_string());
     StatusRow::new(
+        repository.name().as_str().to_string(),
         repository.display_path().to_string(),
         branch,
         state.condition().as_str().to_string(),

@@ -30,13 +30,11 @@ src/
   error.rs
   cli/
     mod.rs
-    list.rs
     status.rs
     sync.rs
   app/
     api.rs
     context.rs
-    list.rs
     status.rs
     sync.rs
   config/
@@ -68,7 +66,7 @@ src/
 
 ### cli/
 
-`src/cli` defines the `gv sync`, `gv status`, and `gv list` command surface. It
+`src/cli` defines the `gv sync` and `gv status` command surface. It
 maps CLI interactions to application API calls and formats terminal output. It
 does not own use-case logic, configuration invariants, repository state
 inspection, or Git command behavior.

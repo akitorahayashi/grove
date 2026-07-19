@@ -16,8 +16,8 @@ fn help_lists_mvp_commands() {
         .stdout(predicate::str::contains("s"))
         .stdout(predicate::str::contains("status"))
         .stdout(predicate::str::contains("st"))
-        .stdout(predicate::str::contains("list"))
-        .stdout(predicate::str::contains("ls"));
+        .stdout(predicate::str::contains("list").not())
+        .stdout(predicate::str::contains("ls").not());
 }
 
 #[test]

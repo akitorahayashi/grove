@@ -13,8 +13,7 @@ branches through the system `git` command.
   `config/` for `grove.toml`, `repositories/` for managed repository domain
   data, `git/` for the system Git boundary, and `error.rs` for
   application-wide errors.
-- `src/cli/` owns only parsing and terminal output for `sync`, `status`, and
-  `list`.
+- `src/cli/` owns only parsing and terminal output for `sync` and `status`.
 - `src/app/` owns use-case orchestration and dependency wiring.
 - `src/config/` owns discovery, include resolution, validation, and path
   normalization.

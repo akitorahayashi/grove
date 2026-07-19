@@ -35,6 +35,7 @@ pub(super) fn run(config: Option<PathBuf>, command: StatusCommand) -> Result<(),
 
 #[derive(Debug, Clone, Copy)]
 struct ColumnWidths {
+    name: usize,
     repository: usize,
     branch: usize,
     state: usize,
@@ -44,6 +45,7 @@ struct ColumnWidths {
 impl ColumnWidths {
     fn for_rows(rows: &[StatusRow]) -> Self {
         let mut widths = Self {
+            name: "NAME".len(),
             repository: "REPOSITORY".len(),
             branch: "BRANCH".len(),
             state: "STATE".len(),
@@ -51,6 +53,7 @@ impl ColumnWidths {
         };
 
         for row in rows {
+            widths.name = widths.name.max(row.name().len());
             widths.repository = widths.repository.max(row.repository().len());
             widths.branch = widths.branch.max(row.branch().len());
             widths.state = widths.state.max(row.state().len());
@@ -61,11 +64,12 @@ impl ColumnWidths {
     }
 
     fn separator_len(self) -> usize {
-        self.repository + self.branch + self.state + self.default_branch + 6
+        self.name + self.repository + self.branch + self.state + self.default_branch + 8
     }
 }
 
 fn print_header(widths: ColumnWidths, styled: bool) {
+    let name = format_cell("NAME", widths.name);
     let repository = format_cell("REPOSITORY", widths.repository);
     let branch = format_cell("BRANCH", widths.branch);
     let state = format_cell("STATE", widths.state);
@@ -73,14 +77,15 @@ fn print_header(widths: ColumnWidths, styled: bool) {
 
     if styled {
         println!(
-            "{}  {}  {}  {}",
+            "{}  {}  {}  {}  {}",
+            name.yellow().bold(),
             repository.yellow().bold(),
             branch.yellow().bold(),
             state.yellow().bold(),
             default_branch.yellow().bold()
         );
     } else {
-        println!("{repository}  {branch}  {state}  {default_branch}");
+        println!("{name}  {repository}  {branch}  {state}  {default_branch}");
     }
 }
 
@@ -94,6 +99,7 @@ fn print_separator(widths: ColumnWidths, styled: bool) {
 }
 
 fn print_row(row: &StatusRow, widths: ColumnWidths, styled: bool) {
+    let name = format_cell(row.name(), widths.name);
     let repository = format_cell(row.repository(), widths.repository);
     let branch = format_cell(row.branch(), widths.branch);
     let state = format_cell(row.state(), widths.state);
@@ -101,14 +107,15 @@ fn print_row(row: &StatusRow, widths: ColumnWidths, styled: bool) {
 
     if styled {
         println!(
-            "{}  {}  {}  {}",
+            "{}  {}  {}  {}  {}",
+            name.bold(),
             repository.cyan(),
             branch.blue(),
             format_state(&state, row.state()),
             default_branch.dimmed()
         );
     } else {
-        println!("{repository}  {branch}  {state}  {default_branch}");
+        println!("{name}  {repository}  {branch}  {state}  {default_branch}");
     }
 }
 

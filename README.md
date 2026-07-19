@@ -8,9 +8,6 @@
 ```bash
 gv --version
 
-gv list
-gv list --json
-
 gv status
 gv status frontend
 gv status --fetch
@@ -18,7 +15,7 @@ gv status --fetch
 gv sync
 gv sync frontend
 gv sync --dry-run
-gv --config ~/workspace/grove.toml list
+gv --config ~/workspace/grove.toml status
 ```
 
 ## Configuration

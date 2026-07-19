@@ -1,7 +1,6 @@
 //! CLI adapter.
 
 mod init;
-mod list;
 mod printer;
 mod status;
 mod sync;
@@ -35,8 +34,6 @@ enum Commands {
     Sync(sync::SyncCommand),
     #[command(visible_aliases = ["st", "ts"], about = "Show managed repository status")]
     Status(status::StatusCommand),
-    #[command(visible_alias = "ls", about = "List managed repositories")]
-    List(list::ListCommand),
 }
 
 /// Entry point for the CLI.
@@ -46,7 +43,6 @@ pub fn run() {
         Commands::Init(command) => init::run(cli.config, command),
         Commands::Sync(command) => sync::run(cli.config, command),
         Commands::Status(command) => status::run(cli.config, command),
-        Commands::List(command) => list::run(cli.config, command),
     };
 
     if let Err(err) = result {

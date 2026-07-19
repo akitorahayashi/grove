@@ -22,6 +22,8 @@ url = "git@example.com:blog.git"
         .arg("status")
         .assert()
         .success()
+        .stdout(predicate::str::contains("NAME"))
+        .stdout(predicate::str::contains("blog"))
         .stdout(predicate::str::contains("personal/blog"))
         .stdout(predicate::str::contains("missing"));
 }

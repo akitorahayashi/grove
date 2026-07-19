@@ -1,2 +1,1 @@
-mod list_returns_repositories;
 mod unknown_repository_fails;
