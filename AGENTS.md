@@ -1,16 +1,15 @@
-# rs-cli-tmpl Development Overview
+# grove Development Overview
 
 ## Project Summary
-`rs-cli-tmpl` is a reference template for building Rust command line tools with
-concept-owned module boundaries. It demonstrates how to separate orchestration
-from concept ownership while keeping contracts and concrete implementations
-inside the concept module. The template includes sample command families
-(`item`, `label`, and `labeling`) that can be replaced or extended with
-project-specific behavior.
+`grove` is a Rust CLI for managing multiple Git repositories from
+`grove.toml`. The CLI command is `gv`. It clones missing repositories, reports
+repository state, and safely fast-forwards existing repositories' default
+branches through the system `git` command.
 
 ## Tech Stack
 - Language: Rust
 - CLI parsing: `clap`
+- Serialization: `serde`, `serde_json`, `toml`
 - Development dependencies:
   - `assert_cmd`
   - `assert_fs`
@@ -34,26 +33,23 @@ project-specific behavior.
 - Test: `cargo test --all-targets --all-features`
 
 ## Testing Strategy
-- Unit tests: located in `src/` next to owned modules.
-- Command logic tests: in `src/app/items/`, `src/app/labels/`, and
-  `src/app/labeling/` using concept-local test doubles from
-  `src/items/testing.rs` and `src/labels/testing.rs` under `#[cfg(test)]`.
-- Integration tests: in `tests/`, with `tests/cli.rs` for CLI boundary behavior
-  and `tests/library.rs` for public library boundary behavior. Shared fixtures
-  live in `tests/harness/test_context.rs`.
-- CI: GitHub Actions runs build, linting, and tests.
+- Unit tests live beside the modules they verify.
+- Integration tests live in `tests/`, with `tests/cli.rs` for CLI boundary
+  behavior and `tests/library.rs` for public library boundary behavior.
+- Shared integration fixtures live in `tests/harness/test_context.rs`.
+- CI runs build, linting, and tests.
 
 ## Architectural Highlights
 - Top-level owners: `cli/` for interface adaptation, `app/` for orchestration,
-  `items/` and `labels/` for sample concepts, and `error.rs` for
+  `config/` for `grove.toml`, `repositories/` for managed repository domain
+  data, `git/` for the system Git boundary, and `error.rs` for
   application-wide errors.
-- Contract and implementation co-location: `src/items/store.rs` defines
-  `ItemStore`; `src/items/storage/filesystem_store.rs` implements it. The same
-  pattern is used for labels with `src/labels/store.rs` and
-  `src/labels/storage/filesystem_store.rs`.
-- Configuration ownership: `src/items/storage/settings.rs` and
-  `src/labels/storage/settings.rs` provide concept-owned storage paths.
-- Storage layout:
-  - items: `~/.config/rs-cli-tmpl/items/<id>/item.txt`
-  - labels: `~/.config/rs-cli-tmpl/labels/definitions/<name>/label.txt`
-  - links: `~/.config/rs-cli-tmpl/labels/links/<item-id>/<label-name>`
+- `src/cli/` owns only parsing and terminal output for `sync`, `status`, and
+  `list`.
+- `src/app/` owns use-case orchestration and dependency wiring.
+- `src/config/` owns discovery, include resolution, validation, and path
+  normalization.
+- `src/repositories/` owns repository names, resolved definitions, target
+  selection, and state models.
+- `src/git/` owns `GitClient` and the `CommandGitClient` implementation backed
+  by `std::process::Command`.

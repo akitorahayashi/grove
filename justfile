@@ -1,5 +1,5 @@
 # ==============================================================================
-# justfile for rs-cli-tmpl development
+# justfile for grove development
 # ==============================================================================
 
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
@@ -11,7 +11,7 @@ default: help
 help:
     @echo "Usage: just [recipe]"
     @echo ""
-    @echo "Development tasks for rs-cli-tmpl:"
+    @echo "Development tasks for grove:"
     @mise exec -- just --list | tail -n +2 | awk '{printf "  \033[36m%-20s\033[0m %s\n", $1, substr($0, index($0, $2))}'
 
 # ==============================================================================
@@ -20,7 +20,7 @@ help:
 
 # Initialize project: install dependencies
 setup:
-    @echo "🪄 Installing tools with mise..."
+    @echo "Installing tools with mise..."
     @mise trust
     @mise install --locked
 
@@ -53,7 +53,7 @@ coverage:
     mise exec -- cargo tarpaulin \
         --engine llvm \
         --target-dir target/tarpaulin \
-        --packages rs-cli-tmpl \
+        --packages grove \
         --out Stdout \
         --out Html \
         --output-dir coverage \

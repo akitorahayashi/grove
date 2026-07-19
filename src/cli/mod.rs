@@ -1,55 +1,48 @@
 //! CLI adapter.
 
-mod item;
-mod label;
-mod labeling;
+mod list;
+mod status;
+mod sync;
 
-use crate::AppError;
+use std::path::PathBuf;
+
 use clap::{Parser, Subcommand};
 
+use crate::AppError;
+
 #[derive(Parser)]
-#[command(name = "rs-cli-tmpl")]
+#[command(name = "gv")]
 #[command(version)]
-#[command(
-    about = "Reference architecture for building Rust CLI tools",
-    long_about = None
-)]
+#[command(about = "Manage multiple Git repositories from grove.toml", long_about = None)]
 struct Cli {
+    #[arg(long, global = true, value_name = "path")]
+    config: Option<PathBuf>,
+
     #[command(subcommand)]
     command: Commands,
 }
 
 #[derive(Subcommand)]
 enum Commands {
-    #[command(about = "Manage items", visible_alias = "i")]
-    Item {
-        #[command(subcommand)]
-        command: item::ItemCommand,
-    },
-    #[command(about = "Manage labels", visible_alias = "l")]
-    Label {
-        #[command(subcommand)]
-        command: label::LabelCommand,
-    },
-    #[command(about = "Manage item-label assignments", visible_alias = "ln")]
-    Labeling {
-        #[command(subcommand)]
-        command: labeling::LabelingCommand,
-    },
+    #[command(about = "Clone missing repositories and safely update existing repositories")]
+    Sync(sync::SyncCommand),
+    #[command(about = "Show managed repository status")]
+    Status(status::StatusCommand),
+    #[command(about = "List managed repositories")]
+    List(list::ListCommand),
 }
 
 /// Entry point for the CLI.
 pub fn run() {
     let cli = Cli::parse();
-
     let result: Result<(), AppError> = match cli.command {
-        Commands::Item { command } => item::run(command),
-        Commands::Label { command } => label::run(command),
-        Commands::Labeling { command } => labeling::run(command),
+        Commands::Sync(command) => sync::run(cli.config, command),
+        Commands::Status(command) => status::run(cli.config, command),
+        Commands::List(command) => list::run(cli.config, command),
     };
 
     if let Err(err) = result {
-        eprintln!("Error: {err}");
+        eprintln!("error: {err}");
         std::process::exit(1);
     }
 }

@@ -1,3 +1,3 @@
 pub(crate) mod test_context;
 
-pub(crate) use test_context::TestContext;
+pub(crate) use test_context::{TestContext, run_git};

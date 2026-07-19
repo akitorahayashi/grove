@@ -1,14 +1,12 @@
-//! Library entry point exposing the core command handlers.
+//! Library entry point for the grove CLI.
 
-pub(crate) mod app;
+pub mod app;
 mod cli;
+pub mod config;
 mod error;
-pub mod items;
-pub mod labels;
+pub mod git;
+pub mod repositories;
 
-pub use app::api::{
-    item_add, item_delete, item_list, label_add, label_delete, label_list, labeling_attach,
-    labeling_detach, labeling_find, labeling_list,
-};
+pub use app::api::{list, status, sync};
 pub use cli::run as cli;
 pub use error::AppError;

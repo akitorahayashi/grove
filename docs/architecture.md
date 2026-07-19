@@ -2,70 +2,61 @@
 
 ## Intent
 
-`rs-cli-tmpl` is a reference template for Rust command line tools. The current
-template demonstrates a concept-owned boundary model with two sample concepts,
-`items` and `labels`, plus one cross-concept orchestration family,
-`app/labeling`. The sample concepts are illustrative. The architectural point
-is that top-level modules identify owners, while internal submodules express
-specific boundary roles.
+`grove` is a Rust CLI for managing multiple Git repositories from
+`grove.toml`. The implementation follows concept-owned module boundaries:
+top-level modules identify owners, and each owner keeps its contracts,
+validation, and concrete implementation details inside its module.
 
-This document describes the current implementation and the design intent it
-expresses.
+## Design Axis
 
-## Design axis
+The top-level source layout is organized by owning concept.
 
-The template is organized by owning concept at the top level.
+- `src/cli` owns command-line parsing and terminal output.
+- `src/app` owns dependency wiring and use-case orchestration.
+- `src/config` owns `grove.toml` discovery, include resolution, path
+  normalization, and validation.
+- `src/repositories` owns repository definitions, names, selection, and state
+  models.
+- `src/git` owns the system `git` command boundary.
+- `src/error.rs` owns the application-wide error type.
 
-- `src/cli` owns command-line parsing and terminal output
-- `src/app` owns dependency wiring and use-case orchestration
-- `src/items` owns the item concept end-to-end
-- `src/labels` owns the label concept end-to-end
-- `src/error.rs` owns the application-wide error type
+Boundary roles remain inside owning concepts rather than moving into generic
+top-level `ports`, `adapters`, `core`, or `utils` modules.
 
-Boundary roles such as contract, validation, and storage implementation are
-kept inside their owning concept modules instead of being promoted to top-level
-taxonomies.
-
-## Current structure
+## Current Structure
 
 ```text
 src/
   error.rs
   cli/
     mod.rs
-    item.rs
-    label.rs
-    labeling.rs
+    list.rs
+    status.rs
+    sync.rs
   app/
     api.rs
     context.rs
-    items/
-      add.rs
-      list.rs
-      delete.rs
-    labels/
-      add.rs
-      list.rs
-      delete.rs
-    labeling/
-      attach.rs
-      detach.rs
-      list.rs
-      find.rs
-  items/
-    item_id.rs
-    store.rs
-    storage/
-      filesystem_store.rs
-      settings.rs
-    testing.rs
-  labels/
-    label_name.rs
-    store.rs
-    storage/
-      filesystem_store.rs
-      settings.rs
-    testing.rs
+    list.rs
+    status.rs
+    sync.rs
+  config/
+    discovery.rs
+    file.rs
+    include.rs
+    resolved.rs
+    validation.rs
+  repositories/
+    definition.rs
+    name.rs
+    selection.rs
+    state.rs
+  git/
+    client.rs
+    command.rs
+    default_branch.rs
+    remote.rs
+    update.rs
+    working_tree.rs
   lib.rs
   main.rs
 ```
@@ -73,114 +64,70 @@ src/
 `src/lib.rs` is the public library surface and CLI entrypoint export.
 `src/main.rs` is the binary entrypoint that delegates to the library.
 
-## Ownership rules
+## Ownership Rules
 
 ### cli/
 
-`src/cli` defines the command surface (`item`, `label`, `labeling`) and maps
-CLI interactions to application API calls. It does not own use-case logic,
-concept invariants, or persistence rules.
+`src/cli` defines the `gv sync`, `gv status`, and `gv list` command surface. It
+maps CLI interactions to application API calls and formats terminal output. It
+does not own use-case logic, configuration invariants, repository state
+inspection, or Git command behavior.
 
 ### app/
 
-`src/app` coordinates use cases and dependency wiring.
-It does not own concept invariants or storage layout.
+`src/app` coordinates use cases and dependency wiring. It loads validated
+configuration, selects target repositories, invokes Git operations, and
+aggregates command results. It does not own TOML parsing, repository name
+validation, or process-level Git command execution.
 
-Current examples:
+### config/
 
-- `api.rs` provides library-facing orchestration
-- `context.rs` carries injected dependencies for both stores
-- `items/` contains item-only use cases
-- `labels/` contains label-only use cases
-- `labeling/` contains cross-concept use cases
+`src/config` owns the `grove.toml` boundary. It discovers the active config,
+loads TOML, resolves one level of includes, normalizes repository paths, and
+returns a `ResolvedConfig`.
 
-### items/
+Configuration validation rejects unsupported versions, missing required fields,
+nested includes, duplicate config references, duplicate repository names,
+duplicate repository paths, nested repository paths, absolute repository paths,
+and paths that leave the managed root.
 
-`src/items` owns the sample item concept, including validation, dependency
-contract, concrete storage, and concept-specific test support.
+### repositories/
 
-Current example:
+`src/repositories` owns repository-domain data. `RepositoryName` validates CLI
+target names. `RepositoryDefinition` represents a repository after config
+resolution. Selection and state structures live beside those domain types.
 
-- `item_id.rs` validates the `ItemId` invariant
-- `store.rs` defines `ItemStore`
-- `storage/filesystem_store.rs` implements `ItemStore` with filesystem I/O
-- `storage/settings.rs` owns storage configuration used by that implementation
-- `testing.rs` provides `MockItemStore` for unit tests
+### git/
 
-### labels/
+`src/git` owns the system `git` command boundary. `GitClient` is the contract
+used by application use cases. `CommandGitClient` invokes the installed `git`
+binary with `std::process::Command`.
 
-`src/labels` owns the sample label concept, including validation, dependency
-contract, concrete storage, and concept-specific test support.
-
-Current example:
-
-- `label_name.rs` validates the `LabelName` invariant
-- `store.rs` defines `LabelStore`
-- `storage/filesystem_store.rs` implements `LabelStore` with filesystem I/O
-- `storage/settings.rs` owns storage configuration used by that implementation
-- `testing.rs` provides `MockLabelStore` for unit tests
+Git behavior relies on the user's Git configuration, including SSH settings,
+credential helpers, proxy settings, Git LFS, URL rewriting, and authentication.
 
 ### error.rs
 
 `src/error.rs` owns `AppError` when error semantics are application-wide.
 
-## Dependency direction
-
-Dependency flow remains inward toward concept contracts and validation.
+## Dependency Direction
 
 ```text
 main -> lib -> cli -> app
-app::api -> items::storage + labels::storage for default wiring
-app::items -> items::store + items::item_id
-app::labels -> labels::store + labels::label_name
-app::labeling -> items::store + items::item_id + labels::store + labels::label_name
-items::storage -> items::store + items::item_id
-labels::storage -> labels::store + labels::label_name
-lib -> cli + app + items + labels + error
+app -> config + repositories + git
+config -> repositories + error
+git -> error
+repositories -> error
+lib -> cli + app + config + repositories + git + error
 ```
 
-Concept modules do not depend on `app` or CLI parsing.
+`repositories` does not depend on `config`, `git`, `app`, or `cli`.
+`config` creates repository definitions but does not execute Git commands.
+`git` inspects and updates repositories but does not load `grove.toml`.
 
-## Sample scope
+## Testing Model
 
-The sample remains intentionally small while showing multi-owner growth.
-
-- `ItemId` demonstrates a pure validated type
-- `ItemStore` demonstrates a dependency contract
-- `FilesystemItemStore` demonstrates an adapter implementation
-- `LabelName` demonstrates a second validated type under a sibling owner
-- `LabelStore` demonstrates a second concept contract
-- `app/labeling` demonstrates cross-concept orchestration
-
-The template therefore teaches how concepts own internal boundaries without
-introducing top-level `ports` or `adapters` buckets.
-
-## Growth path
-
-As a project grows, new concepts are added as new top-level owners beside
-`items` and `labels`.
-
-```text
-src/
-  cli/
-  app/
-  items/
-  labels/
-  github/
-  exchange/
-  workflow/
-```
-
-Each concept can then define its own validated types, contracts,
-implementations, and test support internally.
-
-## Testing model
-
-Tests follow the same explicit boundaries.
-
-- unit tests live next to the modules they verify
-- `src/items/testing.rs` and `src/labels/testing.rs` provide concept-local test
-  doubles for command logic
-- `tests/cli.rs` verifies the CLI boundary
-- `tests/library.rs` verifies the public library boundary
-- `tests/harness/` provides shared integration fixtures
+- Unit tests live beside the modules they verify.
+- `tests/cli.rs` verifies the CLI boundary.
+- `tests/library.rs` verifies the public library boundary.
+- `tests/harness/` provides shared integration fixtures and local Git remotes.
