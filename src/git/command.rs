@@ -1,9 +1,12 @@
 use std::fs;
-use std::path::Path;
-use std::process::{Command, Output};
+use std::io::{self, Read};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output, Stdio};
 
 use super::client::BranchDivergence;
-use super::{GitClient, GitUpdate, default_branch, working_tree};
+use super::{
+    GitClient, GitProgressParser, GitProgressSink, GitUpdate, default_branch, working_tree,
+};
 use crate::AppError;
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -21,18 +24,54 @@ impl GitClient for CommandGitClient {
         }
     }
 
-    fn clone_repository(&self, url: &str, destination: &Path) -> Result<(), AppError> {
+    fn clone_repository(
+        &self,
+        url: &str,
+        destination: &Path,
+        progress: &mut dyn GitProgressSink,
+    ) -> Result<(), AppError> {
         if let Some(parent) = destination.parent() {
             fs::create_dir_all(parent)?;
         }
 
         let mut command = Command::new("git");
-        command.arg("clone").arg(url).arg(destination);
-        run_required(command, format!("git clone {url} {}", destination.display())).map(|_| ())
+        command.arg("clone").arg("--progress").arg(url).arg(destination);
+        run_with_progress(
+            command,
+            format!("git clone --progress {url} {}", destination.display()),
+            progress,
+        )
     }
 
-    fn fetch(&self, repository: &Path) -> Result<(), AppError> {
-        self.git_required(repository, &["fetch", "origin", "--prune"]).map(|_| ())
+    fn fetch(&self, repository: &Path, progress: &mut dyn GitProgressSink) -> Result<(), AppError> {
+        self.git_progress_required(
+            repository,
+            &["fetch", "--progress", "origin", "--prune"],
+            progress,
+        )
+    }
+
+    fn common_directory(&self, repository: &Path) -> Result<PathBuf, AppError> {
+        let args = ["rev-parse", "--git-common-dir"];
+        let output = self.git_required(repository, &args)?;
+        let value = stdout(&output);
+        let value = value.trim();
+        if value.is_empty() {
+            return Err(AppError::git_command_failed(
+                format_probe(repository, &args),
+                "Git returned an empty common directory",
+            ));
+        }
+
+        let path = PathBuf::from(value);
+        let path = if path.is_absolute() { path } else { repository.join(path) };
+        fs::canonicalize(&path).map_err(|err| {
+            io::Error::new(
+                err.kind(),
+                format!("failed to resolve Git common directory '{}': {err}", path.display()),
+            )
+            .into()
+        })
     }
 
     fn is_work_tree(&self, repository: &Path) -> Result<bool, AppError> {
@@ -161,6 +200,18 @@ impl CommandGitClient {
         run_required(command, display)
     }
 
+    fn git_progress_required(
+        &self,
+        repository: &Path,
+        args: &[&str],
+        progress: &mut dyn GitProgressSink,
+    ) -> Result<(), AppError> {
+        let mut command = Command::new("git");
+        command.current_dir(repository).args(args);
+        let display = format!("git -C {} {}", repository.display(), args.join(" "));
+        run_with_progress(command, display, progress)
+    }
+
     fn git_probe(&self, repository: &Path, args: &[&str]) -> Result<Output, AppError> {
         let mut command = Command::new("git");
         command.current_dir(repository).args(args);
@@ -181,6 +232,56 @@ fn run_required(mut command: Command, display: String) -> Result<Output, AppErro
     }
 }
 
+fn run_with_progress(
+    mut command: Command,
+    display: String,
+    progress: &mut dyn GitProgressSink,
+) -> Result<(), AppError> {
+    command.stdout(Stdio::null()).stderr(Stdio::piped());
+    let mut child = command
+        .spawn()
+        .map_err(|err| AppError::git_command_failed(display.clone(), err.to_string()))?;
+    let mut stderr = child.stderr.take().expect("stderr was configured as piped");
+    let mut stderr_text = String::new();
+    let mut buffer = [0; 4096];
+    let mut pending = Vec::new();
+
+    loop {
+        let read = stderr
+            .read(&mut buffer)
+            .map_err(|err| AppError::git_command_failed(display.clone(), err.to_string()))?;
+        if read == 0 {
+            break;
+        }
+        stderr_text.push_str(&String::from_utf8_lossy(&buffer[..read]));
+        for byte in &buffer[..read] {
+            if *byte == b'\r' || *byte == b'\n' {
+                emit_progress(&pending, progress);
+                pending.clear();
+            } else {
+                pending.push(*byte);
+            }
+        }
+    }
+    emit_progress(&pending, progress);
+
+    let status = child
+        .wait()
+        .map_err(|err| AppError::git_command_failed(display.clone(), err.to_string()))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(AppError::git_command_failed(display, progress_message(&stderr_text)))
+    }
+}
+
+fn emit_progress(line: &[u8], progress: &mut dyn GitProgressSink) {
+    let line = String::from_utf8_lossy(line);
+    if let Some(parsed) = GitProgressParser::parse(&line) {
+        progress.progress(parsed);
+    }
+}
+
 fn stdout(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
@@ -194,10 +295,71 @@ fn command_message(output: &Output) -> String {
     }
 }
 
+fn progress_message(stderr: &str) -> String {
+    let message = stderr
+        .lines()
+        .filter(|line| GitProgressParser::parse(line).is_none())
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if message.is_empty() { stderr.trim().to_string() } else { message }
+}
+
 fn format_probe(repository: &Path, args: &[&str]) -> String {
     format!("git -C {} {}", repository.display(), join_args(args))
 }
 
 fn join_args(args: &[&str]) -> String {
     args.join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::process::Command;
+
+    use tempfile::TempDir;
+
+    use crate::git::{CommandGitClient, GitClient};
+
+    #[test]
+    fn linked_worktrees_resolve_to_the_same_common_directory() {
+        let root = TempDir::new().unwrap();
+        let main = root.path().join("main");
+        let linked = root.path().join("linked");
+
+        run_git(root.path(), &["init", "-b", "main", main.to_str().unwrap()]);
+        std::fs::write(main.join("README.md"), "initial\n").unwrap();
+        run_git(&main, &["add", "README.md"]);
+        run_git(
+            &main,
+            &[
+                "-c",
+                "user.name=Grove Test",
+                "-c",
+                "user.email=grove@example.com",
+                "commit",
+                "-m",
+                "initial",
+            ],
+        );
+        run_git(&main, &["worktree", "add", "-b", "linked", linked.to_str().unwrap()]);
+
+        let client = CommandGitClient;
+        assert_eq!(
+            client.common_directory(&main).unwrap(),
+            client.common_directory(&linked).unwrap()
+        );
+    }
+
+    fn run_git(directory: &Path, args: &[&str]) {
+        let output = Command::new("git").current_dir(directory).args(args).output().unwrap();
+        assert!(
+            output.status.success(),
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }

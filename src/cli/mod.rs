@@ -2,6 +2,7 @@
 
 mod init;
 mod list;
+mod printer;
 mod status;
 mod sync;
 

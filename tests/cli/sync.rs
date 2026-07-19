@@ -25,8 +25,9 @@ url = "{}"
         .arg("--dry-run")
         .assert()
         .success()
-        .stdout(predicate::str::contains("PLANNED"))
-        .stdout(predicate::str::contains("clone"));
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("Would clone 1 repository"))
+        .stderr(predicate::str::contains("+ blog"));
 
     assert!(!ctx.workspace().join("blog").exists());
 }
@@ -54,8 +55,12 @@ url = "{}"
         .arg("blog")
         .assert()
         .success()
-        .stdout(predicate::str::contains("CLONED"))
-        .stdout(predicate::str::contains("blog"));
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("Checked 1 repository"))
+        .stderr(predicate::str::contains("Prepared 1 repository"))
+        .stderr(predicate::str::contains("+ blog"))
+        .stderr(predicate::str::contains("\u{1b}[").not())
+        .stderr(predicate::str::contains("⠙").not());
 
     assert!(ctx.workspace().join("blog").join(".git").exists());
 }
@@ -83,8 +88,37 @@ url = "{}"
         .arg("--dry-run")
         .assert()
         .success()
-        .stdout(predicate::str::contains("PLANNED"))
-        .stdout(predicate::str::contains("clone"));
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("Would clone 1 repository"))
+        .stderr(predicate::str::contains("+ blog"));
+}
+
+#[test]
+fn sync_uses_uv_change_colors_when_color_is_forced() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    let config = ctx.write_config(&format!(
+        r#"
+version = 1
+
+[[repo]]
+name = "blog"
+path = "blog"
+url = "{}"
+"#,
+        remote.url()
+    ));
+
+    ctx.cli()
+        .env_remove("NO_COLOR")
+        .env("CLICOLOR_FORCE", "1")
+        .arg("--config")
+        .arg(config)
+        .arg("sync")
+        .arg("--dry-run")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("\u{1b}[32m+\u{1b}["));
 }
 
 #[test]
@@ -114,8 +148,9 @@ url = "{}"
         .arg("frontend")
         .assert()
         .success()
-        .stdout(predicate::str::contains("UPDATED"))
-        .stdout(predicate::str::contains("main"));
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("Updated 1 repository"))
+        .stderr(predicate::str::contains("~ frontend main"));
 
     let output = std::process::Command::new("git")
         .current_dir(ctx.workspace().join("frontend"))
@@ -124,4 +159,110 @@ url = "{}"
         .expect("failed to inspect current branch");
     assert!(output.status.success());
     assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "feature/login");
+}
+
+#[test]
+fn sync_omits_current_repository_rows_when_nothing_changed() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    let config = ctx.write_config(&format!(
+        r#"
+version = 1
+
+[[repo]]
+name = "blog"
+path = "blog"
+url = "{}"
+"#,
+        remote.url()
+    ));
+
+    ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("sync")
+        .arg("blog")
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("Checked 1 repository"))
+        .stderr(predicate::str::contains("+ blog").not())
+        .stderr(predicate::str::contains("~ blog").not());
+}
+
+#[test]
+fn sync_reports_skipped_repositories_and_exits_with_failure() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    let config = ctx.write_config(&format!(
+        r#"
+version = 1
+
+[[repo]]
+name = "blog"
+path = "blog"
+url = "{}"
+"#,
+        remote.url()
+    ));
+
+    ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
+    std::fs::write(ctx.workspace().join("blog").join("draft.txt"), "local\n")
+        .expect("failed to dirty work tree");
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("sync")
+        .arg("blog")
+        .assert()
+        .failure()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("Skipped 1 repository"))
+        .stderr(predicate::str::contains("! blog dirty working tree"));
+}
+
+#[test]
+fn sync_reports_blocked_repositories_and_exits_with_failure() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    let replacement = ctx.create_remote("replacement");
+    let initial_config = ctx.write_config(&format!(
+        r#"
+version = 1
+
+[[repo]]
+name = "blog"
+path = "blog"
+url = "{}"
+"#,
+        remote.url()
+    ));
+
+    ctx.cli().arg("--config").arg(&initial_config).arg("sync").assert().success();
+
+    let mismatched_config = ctx.write_config(&format!(
+        r#"
+version = 1
+
+[[repo]]
+name = "blog"
+path = "blog"
+url = "{}"
+"#,
+        replacement.url()
+    ));
+
+    ctx.cli()
+        .arg("--config")
+        .arg(mismatched_config)
+        .arg("sync")
+        .arg("blog")
+        .assert()
+        .failure()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("Blocked 1 repository"))
+        .stderr(predicate::str::contains("x blog remote URL does not match grove.toml"));
 }
