@@ -1,5 +1,6 @@
 //! CLI adapter.
 
+mod init;
 mod list;
 mod status;
 mod sync;
@@ -24,6 +25,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    #[command(alias = "i", about = "Create grove.toml in the current directory")]
+    Init(init::InitCommand),
     #[command(about = "Clone missing repositories and safely update existing repositories")]
     Sync(sync::SyncCommand),
     #[command(about = "Show managed repository status")]
@@ -36,6 +39,7 @@ enum Commands {
 pub fn run() {
     let cli = Cli::parse();
     let result: Result<(), AppError> = match cli.command {
+        Commands::Init(command) => init::run(cli.config, command),
         Commands::Sync(command) => sync::run(cli.config, command),
         Commands::Status(command) => status::run(cli.config, command),
         Commands::List(command) => list::run(cli.config, command),
