@@ -1,28 +1,23 @@
-use crate::harness::TestContext;
 use predicates::prelude::*;
-use serial_test::serial;
+
+use crate::harness::TestContext;
 
 #[test]
-#[serial]
-fn version_flag_works() {
+fn help_lists_mvp_commands() {
     let ctx = TestContext::new();
 
     ctx.cli()
-        .arg("--version")
+        .arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains(env!("CARGO_PKG_VERSION")));
+        .stdout(predicate::str::contains("sync"))
+        .stdout(predicate::str::contains("status"))
+        .stdout(predicate::str::contains("list"));
 }
 
 #[test]
-#[serial]
-fn help_lists_visible_aliases() {
+fn version_uses_grove_package() {
     let ctx = TestContext::new();
 
-    // Keep in sync with aliases defined in the CLI builder.
-    ctx.cli().arg("--help").assert().success().stdout(
-        predicate::str::contains("[aliases: i]")
-            .and(predicate::str::contains("[aliases: l]"))
-            .and(predicate::str::contains("[aliases: ln]")),
-    );
+    ctx.cli().arg("--version").assert().success().stdout(predicate::str::contains("gv 0.1.0"));
 }

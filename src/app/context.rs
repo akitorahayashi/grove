@@ -1,25 +1,22 @@
-use crate::items::ItemStore;
-use crate::labels::LabelStore;
+use crate::git::{CommandGitClient, GitClient};
 
-/// Application context holding dependencies for command execution.
-pub struct AppContext<I: ItemStore, L: LabelStore> {
-    item_store: I,
-    label_store: L,
+/// Application context holding external command boundaries.
+pub struct AppContext<G: GitClient> {
+    git: G,
 }
 
-impl<I: ItemStore, L: LabelStore> AppContext<I, L> {
-    /// Create a new application context with the given store.
-    pub fn new(item_store: I, label_store: L) -> Self {
-        Self { item_store, label_store }
+impl<G: GitClient> AppContext<G> {
+    pub fn new(git: G) -> Self {
+        Self { git }
     }
 
-    /// Get a reference to the item store.
-    pub fn item_store(&self) -> &I {
-        &self.item_store
+    pub fn git(&self) -> &G {
+        &self.git
     }
+}
 
-    /// Get a reference to the label store.
-    pub fn label_store(&self) -> &L {
-        &self.label_store
+impl Default for AppContext<CommandGitClient> {
+    fn default() -> Self {
+        Self::new(CommandGitClient)
     }
 }

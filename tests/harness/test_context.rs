@@ -1,174 +1,128 @@
-//! Shared testing utilities for rs-cli-tmpl integration tests.
-
 use assert_cmd::Command;
-use std::env;
-use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command as ProcessCommand;
 use tempfile::TempDir;
 
-/// Testing harness providing an isolated HOME/workspace pair for CLI and SDK exercises.
-#[allow(dead_code)]
 pub struct TestContext {
     root: TempDir,
-    work_dir: PathBuf,
-    original_home: Option<OsString>,
+    workspace: PathBuf,
 }
 
-#[allow(dead_code)]
 impl TestContext {
-    /// Create a new isolated environment and point `HOME` to it so the CLI uses local storage.
     pub fn new() -> Self {
-        let root = TempDir::new().expect("Failed to create temp directory for tests");
-        let work_dir = root.path().join("work");
-        fs::create_dir_all(&work_dir).expect("Failed to create test work directory");
-
-        let original_home = env::var_os("HOME");
-        // SAFETY: Tests are serialized via #[serial]. No other threads or child processes
-        // concurrently read or modify the process environment during the test. Restoration
-        // is performed deterministically in Drop. env::set_var is unsafe in Rust 2024.
-        unsafe {
-            env::set_var("HOME", root.path());
-        }
-
-        Self { root, work_dir, original_home }
+        let root = TempDir::new().expect("failed to create temp directory");
+        let workspace = root.path().join("workspace");
+        fs::create_dir_all(&workspace).expect("failed to create workspace");
+        Self { root, workspace }
     }
 
-    /// Absolute path to the emulated `$HOME` directory.
-    pub fn home(&self) -> &Path {
+    pub fn workspace(&self) -> &Path {
+        &self.workspace
+    }
+
+    pub fn root(&self) -> &Path {
         self.root.path()
     }
 
-    /// Path to the workspace directory used for CLI invocations.
-    pub fn work_dir(&self) -> &Path {
-        &self.work_dir
+    pub fn config_path(&self) -> PathBuf {
+        self.workspace.join("grove.toml")
     }
 
-    /// Convenience helper to create additional sibling workspaces (e.g., for linking scenarios).
-    pub fn create_workspace(&self, name: &str) -> PathBuf {
-        let path = self.home().join(name);
-        fs::create_dir_all(&path).expect("Failed to create additional workspace");
+    pub fn write_config(&self, contents: &str) -> PathBuf {
+        let path = self.config_path();
+        fs::write(&path, contents).expect("failed to write grove.toml");
         path
     }
 
-    /// Populate the default workspace with an item file containing the provided contents.
-    pub fn write_item_file(&self, contents: &str) {
-        let item_path = self.work_dir().join("item.txt");
-        fs::write(&item_path, contents).expect("Failed to write item file for test");
+    pub fn write_config_at(&self, relative_path: &str, contents: &str) -> PathBuf {
+        let path = self.workspace.join(relative_path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("failed to create config directory");
+        }
+        fs::write(&path, contents).expect("failed to write config");
+        path
     }
 
-    /// Create an item file in the given directory with the provided contents.
-    pub fn write_item_file_in<P: AsRef<Path>>(&self, dir: P, contents: &str) {
-        let path = dir.as_ref().join("item.txt");
-        fs::write(path, contents).expect("Failed to write item file");
-    }
-
-    /// Build a command for invoking the compiled `rs-cli-tmpl` binary within the default workspace.
     pub fn cli(&self) -> Command {
-        self.cli_in(self.work_dir())
+        let mut command = Command::cargo_bin("gv").expect("failed to locate gv binary");
+        command.current_dir(&self.workspace);
+        command
     }
 
-    /// Build a command for invoking the compiled `rs-cli-tmpl` binary within a custom directory.
-    pub fn cli_in<P: AsRef<Path>>(&self, dir: P) -> Command {
-        let mut cmd =
-            Command::cargo_bin("rs-cli-tmpl").expect("Failed to locate rs-cli-tmpl binary");
-        cmd.current_dir(dir.as_ref()).env("HOME", self.home());
-        cmd
-    }
+    pub fn create_remote(&self, name: &str) -> RemoteRepository {
+        let seed = self.root().join("seeds").join(name);
+        let remote = self.root().join("remotes").join(format!("{name}.git"));
+        fs::create_dir_all(seed.parent().unwrap()).expect("failed to create seed parent");
+        fs::create_dir_all(remote.parent().unwrap()).expect("failed to create remote parent");
 
-    /// Return the path where the CLI stores a saved item file for the provided identifier.
-    pub fn saved_item_path(&self, id: &str) -> PathBuf {
-        self.home().join(".config").join("rs-cli-tmpl").join("items").join(id).join("item.txt")
-    }
-
-    /// Return the path where the CLI stores a saved label file for the provided label name.
-    pub fn saved_label_path(&self, name: &str) -> PathBuf {
-        self.home()
-            .join(".config")
-            .join("rs-cli-tmpl")
-            .join("labels")
-            .join("definitions")
-            .join(name)
-            .join("label.txt")
-    }
-
-    /// Return the path used to represent one item-label link.
-    pub fn label_link_path(&self, item_id: &str, label_name: &str) -> PathBuf {
-        self.home()
-            .join(".config")
-            .join("rs-cli-tmpl")
-            .join("labels")
-            .join("links")
-            .join(item_id)
-            .join(label_name)
-    }
-
-    /// Assert that a saved item contains the provided value snippet.
-    pub fn assert_saved_item_contains(&self, id: &str, expected_snippet: &str) {
-        let item_path = self.saved_item_path(id);
-        assert!(item_path.exists(), "Expected saved item at {}", item_path.display());
-        let content = fs::read_to_string(&item_path).expect("Failed to read saved item");
-        assert!(
-            content.contains(expected_snippet),
-            "Saved item for id `{id}` did not contain `{expected}`; content: {content}",
-            expected = expected_snippet
+        run_git(
+            self.root(),
+            &["init", "--bare", "--initial-branch=main", remote.to_str().unwrap()],
         );
-    }
+        fs::create_dir_all(&seed).expect("failed to create seed repository");
+        run_git(&seed, &["init", "-b", "main"]);
+        fs::write(seed.join("README.md"), "initial\n").expect("failed to write initial file");
+        run_git(&seed, &["add", "README.md"]);
+        run_git(
+            &seed,
+            &[
+                "-c",
+                "user.name=Grove Test",
+                "-c",
+                "user.email=grove@example.com",
+                "commit",
+                "-m",
+                "initial",
+            ],
+        );
+        run_git(&seed, &["remote", "add", "origin", remote.to_str().unwrap()]);
+        run_git(&seed, &["push", "-u", "origin", "main"]);
 
-    /// Assert that a saved label exists.
-    pub fn assert_saved_label_exists(&self, name: &str) {
-        let label_path = self.saved_label_path(name);
-        assert!(label_path.exists(), "Expected saved label at {}", label_path.display());
-    }
-
-    /// Assert that an item-label link exists.
-    pub fn assert_label_link_exists(&self, item_id: &str, label_name: &str) {
-        let link_path = self.label_link_path(item_id, label_name);
-        assert!(link_path.exists(), "Expected label link at {}", link_path.display());
-    }
-
-    /// Assert that an item-label link is removed.
-    pub fn assert_label_link_missing(&self, item_id: &str, label_name: &str) {
-        let link_path = self.label_link_path(item_id, label_name);
-        assert!(!link_path.exists(), "Expected no label link at {}", link_path.display());
-    }
-
-    /// Execute a closure after temporarily switching into the provided directory.
-    ///
-    /// The original directory is always restored, even if the closure panics.
-    pub fn with_dir<F, R, P>(&self, dir: P, action: F) -> R
-    where
-        F: FnOnce() -> R,
-        P: AsRef<Path>,
-    {
-        struct DirRestore {
-            original: PathBuf,
-        }
-        impl Drop for DirRestore {
-            fn drop(&mut self) {
-                let _ = env::set_current_dir(&self.original);
-            }
-        }
-
-        let original = env::current_dir().expect("Failed to capture current dir");
-        env::set_current_dir(dir.as_ref()).expect("Failed to switch current dir");
-        let _guard = DirRestore { original };
-        action()
+        RemoteRepository { seed, remote }
     }
 }
 
-impl Drop for TestContext {
-    fn drop(&mut self) {
-        // SAFETY: Tests are serialized via #[serial]. No other threads or child processes
-        // concurrently read or modify the process environment during the test.
-        // env::set_var/remove_var are unsafe in Rust 2024.
-        match &self.original_home {
-            Some(value) => unsafe {
-                env::set_var("HOME", value);
-            },
-            None => unsafe {
-                env::remove_var("HOME");
-            },
-        }
+pub struct RemoteRepository {
+    seed: PathBuf,
+    remote: PathBuf,
+}
+
+impl RemoteRepository {
+    pub fn url(&self) -> String {
+        self.remote.display().to_string()
     }
+
+    pub fn add_commit(&self, file_name: &str, contents: &str) {
+        fs::write(self.seed.join(file_name), contents).expect("failed to write seed file");
+        run_git(&self.seed, &["add", file_name]);
+        run_git(
+            &self.seed,
+            &[
+                "-c",
+                "user.name=Grove Test",
+                "-c",
+                "user.email=grove@example.com",
+                "commit",
+                "-m",
+                file_name,
+            ],
+        );
+        run_git(&self.seed, &["push", "origin", "main"]);
+    }
+}
+
+pub fn run_git(directory: &Path, args: &[&str]) {
+    let output = ProcessCommand::new("git")
+        .current_dir(directory)
+        .args(args)
+        .output()
+        .expect("failed to run git");
+    assert!(
+        output.status.success(),
+        "git {} failed\nstdout:\n{}\nstderr:\n{}",
+        args.join(" "),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }

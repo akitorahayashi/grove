@@ -1,34 +1,28 @@
 use std::io;
 
-/// Library-wide error type capturing domain-neutral and underlying I/O failures.
+/// Library-wide error type for grove.
 #[derive(thiserror::Error, Debug)]
 pub enum AppError {
     #[error(transparent)]
     Io(#[from] io::Error),
 
-    /// Configuration or environment issue that prevents command execution.
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+
     #[error("{0}")]
     ConfigError(String),
 
-    /// Raised when a requested item cannot be located in storage.
-    #[error("Item '{0}' was not found")]
-    ItemNotFound(String),
+    #[error("invalid repository name: {0}")]
+    InvalidRepositoryName(String),
 
-    /// Raised when a requested label cannot be located in storage.
-    #[error("Label '{0}' was not found")]
-    LabelNotFound(String),
+    #[error("repository '{0}' was not found in grove.toml")]
+    RepositoryNotFound(String),
 
-    /// Raised when an item identifier fails validation.
-    #[error("invalid item identifier: {0}")]
-    InvalidItemId(String),
+    #[error("git is not available: {0}")]
+    GitUnavailable(String),
 
-    /// Raised when a label name fails validation.
-    #[error("invalid label name: {0}")]
-    InvalidLabelName(String),
-
-    /// Raised when detaching a label that is not attached to an item.
-    #[error("Label '{label_name}' is not attached to item '{item_id}'")]
-    LabelingNotFound { item_id: String, label_name: String },
+    #[error("git command failed: {command}: {message}")]
+    GitCommandFailed { command: String, message: String },
 }
 
 impl AppError {
@@ -36,16 +30,20 @@ impl AppError {
         AppError::ConfigError(message.into())
     }
 
-    /// Provide an `io::ErrorKind`-like view for callers expecting legacy behavior.
+    pub fn git_command_failed<C: Into<String>, M: Into<String>>(command: C, message: M) -> Self {
+        AppError::GitCommandFailed { command: command.into(), message: message.into() }
+    }
+
+    /// Provide an `io::ErrorKind`-like view for callers that need coarse error handling.
     pub fn kind(&self) -> io::ErrorKind {
         match self {
-            AppError::Io(err) => err.kind(),
-            AppError::ConfigError(_)
-            | AppError::InvalidItemId(_)
-            | AppError::InvalidLabelName(_) => io::ErrorKind::InvalidInput,
-            AppError::ItemNotFound(_)
-            | AppError::LabelNotFound(_)
-            | AppError::LabelingNotFound { .. } => io::ErrorKind::NotFound,
+            Self::Io(err) => err.kind(),
+            Self::Json(_)
+            | Self::ConfigError(_)
+            | Self::InvalidRepositoryName(_)
+            | Self::GitUnavailable(_)
+            | Self::GitCommandFailed { .. } => io::ErrorKind::InvalidInput,
+            Self::RepositoryNotFound(_) => io::ErrorKind::NotFound,
         }
     }
 }

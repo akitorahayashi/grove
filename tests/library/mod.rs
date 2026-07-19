@@ -1,9 +1,2 @@
-mod add_persists_item;
-mod add_with_invalid_id_fails;
-mod delete_removes_item;
-mod item_delete_detaches_label_links;
-mod label_add_persists_label;
-mod label_delete_removes_label;
-mod label_with_invalid_name_fails;
-mod labeling_attach_list_find_detach_roundtrip;
-mod list_returns_items;
+mod list_returns_repositories;
+mod unknown_repository_fails;
