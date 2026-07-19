@@ -10,7 +10,10 @@ use owo_colors::OwoColorize;
 
 use crate::AppError;
 use crate::app::api;
-use crate::app::sync::{BlockedReasonDetails, Outcome, Phase, PhaseSummary, Plan, Report};
+use crate::app::sync::{
+    BlockedReasonDetails, Outcome, Phase, PhaseSummary, Plan, Report, SyncOptions, ZoxideOutcome,
+    ZoxideReport,
+};
 use crate::git::redact_url_for_display;
 
 use self::progress::Display;
@@ -23,14 +26,18 @@ pub(super) struct SyncCommand {
 
     #[arg(long)]
     dry_run: bool,
+
+    #[arg(short = 'z', long)]
+    register_zoxide: bool,
 }
 
 pub(super) fn run(config: Option<PathBuf>, command: SyncCommand) -> Result<(), AppError> {
     let printer = Printer::Default;
+    let options = SyncOptions::new(command.dry_run, command.register_zoxide);
     let report = if command.dry_run {
-        api::sync(config, command.repositories, true)?
+        api::sync_with_options(config, command.repositories, options)?
     } else {
-        run_with_progress(config, command.repositories, printer)?
+        run_with_progress(config, command.repositories, options, printer)?
     };
 
     print_report(&report, command.dry_run, printer);
@@ -45,13 +52,14 @@ pub(super) fn run(config: Option<PathBuf>, command: SyncCommand) -> Result<(), A
 fn run_with_progress(
     config: Option<PathBuf>,
     repositories: Vec<String>,
+    options: SyncOptions,
     printer: Printer,
 ) -> Result<Report, AppError> {
     let (sender, receiver) = mpsc::channel();
 
     std::thread::scope(|scope| {
         let execution =
-            scope.spawn(move || api::sync_with_events(config, repositories, false, &sender));
+            scope.spawn(move || api::sync_with_events(config, repositories, options, &sender));
         let mut progress = Display::new(printer);
 
         for event in receiver {
@@ -73,6 +81,7 @@ fn print_report(report: &Report, dry_run: bool, printer: Printer) {
     print_count("Skipped", report.skipped(), printer);
     print_count("Blocked", report.blocked(), printer);
     print_entries(report, printer);
+    print_zoxide_report(report.zoxide(), dry_run, printer);
 }
 
 fn print_phase_completion(phase: Phase, summary: PhaseSummary, printer: Printer) {
@@ -178,6 +187,79 @@ fn print_blocked_details(details: Option<&BlockedReasonDetails>, printer: Printe
                 format!("expected: {}", redact_url_for_display(expected)).dimmed()
             ),
         );
+    }
+}
+
+fn print_zoxide_report(report: Option<&ZoxideReport>, dry_run: bool, printer: Printer) {
+    let Some(report) = report else {
+        return;
+    };
+
+    write_line(printer, format_args!("Zoxide"));
+    write_line(printer, format_args!(""));
+
+    if let Some(message) = report.unavailable_message() {
+        write_line(printer, format_args!(" {} {}", "x".red(), message.dimmed()));
+        return;
+    }
+
+    if report.entries().is_empty() {
+        let message = if dry_run {
+            "No repositories would be registered"
+        } else {
+            "No repositories to register"
+        };
+        write_line(printer, format_args!("{message}"));
+        return;
+    }
+
+    for entry in report.entries() {
+        match entry.outcome() {
+            ZoxideOutcome::WouldRegister => {
+                write_line(
+                    printer,
+                    format_args!(
+                        " {} {} {}",
+                        "?".cyan(),
+                        entry.repository().bold(),
+                        "would register".dimmed()
+                    ),
+                );
+            }
+            ZoxideOutcome::Added => {
+                write_line(
+                    printer,
+                    format_args!(
+                        " {} {} {}",
+                        "+".green(),
+                        entry.repository().bold(),
+                        "added".dimmed()
+                    ),
+                );
+            }
+            ZoxideOutcome::AlreadyRegistered => {
+                write_line(
+                    printer,
+                    format_args!(
+                        " {} {} {}",
+                        "=".cyan(),
+                        entry.repository().bold(),
+                        "already registered".dimmed()
+                    ),
+                );
+            }
+            ZoxideOutcome::Failed(message) => {
+                write_line(
+                    printer,
+                    format_args!(
+                        " {} {} {}",
+                        "x".red(),
+                        entry.repository().bold(),
+                        message.dimmed()
+                    ),
+                );
+            }
+        }
     }
 }
 

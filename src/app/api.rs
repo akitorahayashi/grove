@@ -28,12 +28,21 @@ pub fn sync(
     sync::execute(&ctx, config_path.as_deref(), &targets, dry_run)
 }
 
+pub(crate) fn sync_with_options(
+    config_path: Option<PathBuf>,
+    targets: Vec<String>,
+    options: sync::SyncOptions,
+) -> Result<sync::Report, AppError> {
+    let ctx = default_context();
+    sync::execute_with_options(&ctx, config_path.as_deref(), &targets, options)
+}
+
 pub(crate) fn sync_with_events(
     config_path: Option<PathBuf>,
     targets: Vec<String>,
-    dry_run: bool,
+    options: sync::SyncOptions,
     events: &impl sync::EventSink,
 ) -> Result<sync::Report, AppError> {
     let ctx = default_context();
-    sync::execute_with_events(&ctx, config_path.as_deref(), &targets, dry_run, events)
+    sync::execute_with_events(&ctx, config_path.as_deref(), &targets, options, events)
 }

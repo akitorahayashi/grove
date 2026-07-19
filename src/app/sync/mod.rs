@@ -13,30 +13,61 @@ mod prepare;
 mod report;
 mod update;
 mod workers;
+mod zoxide;
 
 pub use events::Phase;
 pub(crate) use events::{Event, EventSink};
 pub(crate) use report::BlockedReasonDetails;
 pub use report::{
     BlockedReason, Entry, Outcome, PhaseSummaries, PhaseSummary, Plan, Report, SkippedReason,
+    ZoxideEntry, ZoxideOutcome, ZoxideReport,
 };
 
 use events::DiscardEvents;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SyncOptions {
+    dry_run: bool,
+    register_zoxide: bool,
+}
+
+impl SyncOptions {
+    pub fn new(dry_run: bool, register_zoxide: bool) -> Self {
+        Self { dry_run, register_zoxide }
+    }
+
+    pub fn dry_run(self) -> bool {
+        self.dry_run
+    }
+
+    pub fn register_zoxide(self) -> bool {
+        self.register_zoxide
+    }
+}
+
 pub fn execute(
-    ctx: &AppContext<impl GitClient>,
+    ctx: &AppContext<impl GitClient, impl crate::zoxide::ZoxideClient>,
     config_path: Option<&Path>,
     targets: &[String],
     dry_run: bool,
 ) -> Result<Report, AppError> {
-    execute_with_events(ctx, config_path, targets, dry_run, &DiscardEvents)
+    execute_with_options(ctx, config_path, targets, SyncOptions::new(dry_run, false))
+}
+
+pub fn execute_with_options(
+    ctx: &AppContext<impl GitClient, impl crate::zoxide::ZoxideClient>,
+    config_path: Option<&Path>,
+    targets: &[String],
+    options: SyncOptions,
+) -> Result<Report, AppError> {
+    execute_with_events(ctx, config_path, targets, options, &DiscardEvents)
 }
 
 pub(crate) fn execute_with_events(
-    ctx: &AppContext<impl GitClient>,
+    ctx: &AppContext<impl GitClient, impl crate::zoxide::ZoxideClient>,
     config_path: Option<&Path>,
     targets: &[String],
-    dry_run: bool,
+    options: SyncOptions,
     events: &impl EventSink,
 ) -> Result<Report, AppError> {
     ctx.git().verify_available()?;
@@ -47,7 +78,8 @@ pub(crate) fn execute_with_events(
     let total = repositories.len();
     let mut entries = std::iter::repeat_with(|| None).take(total).collect::<Vec<_>>();
 
-    let (decisions, checked) = check_phase(ctx.git(), &repositories, parallelism, dry_run, events)?;
+    let (decisions, checked) =
+        check_phase(ctx.git(), &repositories, parallelism, options.dry_run(), events)?;
 
     let mut preparations = Vec::new();
     for (index, (repository, decision)) in repositories.iter().copied().zip(decisions).enumerate() {
@@ -75,9 +107,18 @@ pub(crate) fn execute_with_events(
     let entries = entries
         .into_iter()
         .map(|entry| entry.expect("every selected repository should produce an outcome"))
-        .collect();
+        .collect::<Vec<_>>();
+    let zoxide = if options.register_zoxide() {
+        if options.dry_run() {
+            Some(zoxide::dry_run(&repositories, &entries))
+        } else {
+            Some(zoxide::register(ctx.zoxide(), &repositories, &entries))
+        }
+    } else {
+        None
+    };
     let phases = PhaseSummaries::new(checked, prepared, updated);
-    Ok(Report::new(entries, started.elapsed(), phases))
+    Ok(Report::new(entries, started.elapsed(), phases, zoxide))
 }
 
 fn check_phase(

@@ -14,6 +14,7 @@ gv status --fetch
 
 gv sync
 gv sync frontend
+gv sync -z
 gv sync --dry-run
 gv --config ~/workspace/grove.toml status
 ```
@@ -76,6 +77,10 @@ The following operations are never performed automatically:
 - `git clean`
 - forced checkout
 - forced push
+
+`gv sync --register-zoxide` and its short form `gv sync -z` register synced
+repositories with zoxide. Skipped and blocked repositories are not registered,
+and dry runs only report the repositories that would be registered.
 
 ## Project Structure
 

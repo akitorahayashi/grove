@@ -6,6 +6,7 @@ pub mod config;
 mod error;
 pub mod git;
 pub mod repositories;
+pub mod zoxide;
 
 pub use app::api::{status, sync};
 pub use cli::run as cli;
