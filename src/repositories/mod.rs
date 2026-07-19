@@ -8,4 +8,4 @@ mod state;
 pub use definition::RepositoryDefinition;
 pub use name::RepositoryName;
 pub use selection::select_repositories;
-pub use state::{BranchTracking, RepositoryCondition, RepositoryState};
+pub use state::BranchTracking;
