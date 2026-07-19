@@ -69,11 +69,10 @@ pub(super) fn repository(
         )));
     };
 
-    if let Some(reason) = default_branch_block_reason(git, repository, &default_branch)? {
-        return Ok(Decision::Entry(Entry::new(repository, Outcome::Blocked { reason })));
-    }
-
     if dry_run {
+        if let Some(reason) = default_branch_block_reason(git, repository, &default_branch)? {
+            return Ok(Decision::Entry(Entry::new(repository, Outcome::Blocked { reason })));
+        }
         return Ok(Decision::Entry(Entry::new(
             repository,
             Outcome::Planned(Plan::Fetch { branch: default_branch }),

@@ -216,7 +216,7 @@ mod tests {
     use crate::git::{BranchDivergence, GitClient, GitProgressSink, GitUpdate};
 
     #[test]
-    fn prepares_repositories_concurrently_and_preserves_config_order() {
+    fn prepares_clones_and_fetches_concurrently_and_preserves_config_order() {
         if std::thread::available_parallelism().unwrap().get() < 2 {
             return;
         }
@@ -245,6 +245,8 @@ url = "https://example.com/second.git"
 "#,
         )
         .unwrap();
+        std::fs::create_dir(root.path().join("first")).unwrap();
+        std::fs::create_dir(root.path().join("second")).unwrap();
         let ctx = AppContext::new(ConcurrentGit::default());
 
         let report = execute(&ctx, Some(&config), &[], false).unwrap();
@@ -273,6 +275,18 @@ url = "https://example.com/second.git"
                 }
             }
         }
+
+        fn prepare(&self) {
+            let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+            self.record_peak(active);
+
+            let deadline = Instant::now() + Duration::from_millis(500);
+            while self.peak.load(Ordering::SeqCst) < 2 && Instant::now() < deadline {
+                std::thread::yield_now();
+            }
+
+            self.active.fetch_sub(1, Ordering::SeqCst);
+        }
     }
 
     impl GitClient for ConcurrentGit {
@@ -286,15 +300,7 @@ url = "https://example.com/second.git"
             _destination: &Path,
             _progress: &mut dyn GitProgressSink,
         ) -> Result<(), AppError> {
-            let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
-            self.record_peak(active);
-
-            let deadline = Instant::now() + Duration::from_millis(500);
-            while self.peak.load(Ordering::SeqCst) < 2 && Instant::now() < deadline {
-                std::thread::yield_now();
-            }
-
-            self.active.fetch_sub(1, Ordering::SeqCst);
+            self.prepare();
             Ok(())
         }
 
@@ -303,23 +309,25 @@ url = "https://example.com/second.git"
             _repository: &Path,
             _progress: &mut dyn GitProgressSink,
         ) -> Result<(), AppError> {
-            unreachable!()
+            self.prepare();
+            Ok(())
         }
 
         fn is_work_tree(&self, _repository: &Path) -> Result<bool, AppError> {
-            unreachable!()
+            Ok(true)
         }
 
         fn current_branch(&self, _repository: &Path) -> Result<Option<String>, AppError> {
-            unreachable!()
+            Ok(Some("main".to_string()))
         }
 
         fn working_tree_clean(&self, _repository: &Path) -> Result<bool, AppError> {
-            unreachable!()
+            Ok(true)
         }
 
-        fn remote_url(&self, _repository: &Path) -> Result<Option<String>, AppError> {
-            unreachable!()
+        fn remote_url(&self, repository: &Path) -> Result<Option<String>, AppError> {
+            let name = repository.file_name().unwrap().to_string_lossy();
+            Ok(Some(format!("https://example.com/{name}.git")))
         }
 
         fn default_branch(
@@ -327,11 +335,11 @@ url = "https://example.com/second.git"
             _repository: &Path,
             _configured: Option<&str>,
         ) -> Result<Option<String>, AppError> {
-            unreachable!()
+            Ok(Some("main".to_string()))
         }
 
         fn local_branch_exists(&self, _repository: &Path, _branch: &str) -> Result<bool, AppError> {
-            unreachable!()
+            Ok(true)
         }
 
         fn remote_branch_exists(
@@ -339,7 +347,7 @@ url = "https://example.com/second.git"
             _repository: &Path,
             _branch: &str,
         ) -> Result<bool, AppError> {
-            unreachable!()
+            Ok(true)
         }
 
         fn branch_divergence(
@@ -347,7 +355,7 @@ url = "https://example.com/second.git"
             _repository: &Path,
             _branch: &str,
         ) -> Result<Option<BranchDivergence>, AppError> {
-            unreachable!()
+            Ok(Some(BranchDivergence::new(0, 0)))
         }
 
         fn short_revision(&self, _repository: &Path, _reference: &str) -> Result<String, AppError> {
@@ -360,7 +368,7 @@ url = "https://example.com/second.git"
             _branch: &str,
             _current_branch: &str,
         ) -> Result<GitUpdate, AppError> {
-            unreachable!()
+            Ok(GitUpdate::new("abc1234".to_string(), "abc1234".to_string()))
         }
     }
 }
