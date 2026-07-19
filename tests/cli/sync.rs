@@ -61,6 +61,33 @@ url = "{}"
 }
 
 #[test]
+fn sync_short_alias_plans_missing_clone() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    let config = ctx.write_config(&format!(
+        r#"
+version = 1
+
+[[repo]]
+name = "blog"
+path = "blog"
+url = "{}"
+"#,
+        remote.url()
+    ));
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("s")
+        .arg("--dry-run")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("PLANNED"))
+        .stdout(predicate::str::contains("clone"));
+}
+
+#[test]
 fn sync_updates_default_branch_and_restores_current_branch() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("frontend");

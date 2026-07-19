@@ -11,9 +11,13 @@ fn help_lists_mvp_commands() {
         .assert()
         .success()
         .stdout(predicate::str::contains("init"))
+        .stdout(predicate::str::contains("i"))
         .stdout(predicate::str::contains("sync"))
+        .stdout(predicate::str::contains("s"))
         .stdout(predicate::str::contains("status"))
-        .stdout(predicate::str::contains("list"));
+        .stdout(predicate::str::contains("st"))
+        .stdout(predicate::str::contains("list"))
+        .stdout(predicate::str::contains("ls"));
 }
 
 #[test]
