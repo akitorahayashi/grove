@@ -33,7 +33,7 @@ enum Commands {
         about = "Clone missing repositories and safely update existing repositories"
     )]
     Sync(sync::SyncCommand),
-    #[command(visible_alias = "st", about = "Show managed repository status")]
+    #[command(visible_aliases = ["st", "ts"], about = "Show managed repository status")]
     Status(status::StatusCommand),
     #[command(visible_alias = "ls", about = "List managed repositories")]
     List(list::ListCommand),
