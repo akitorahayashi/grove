@@ -42,9 +42,13 @@ pub(super) fn repository(
         )));
     };
     if !urls_match(&actual_url, repository.url()) {
-        return Ok(Decision::Entry(Entry::new(
+        return Ok(Decision::Entry(Entry::blocked_with_details(
             repository,
-            Outcome::Blocked { reason: BlockedReason::RemoteUrlMismatch },
+            BlockedReason::RemoteUrlMismatch,
+            super::BlockedReasonDetails::RemoteUrlMismatch {
+                actual: actual_url,
+                expected: repository.url().to_string(),
+            },
         )));
     }
 
