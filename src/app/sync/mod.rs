@@ -16,6 +16,7 @@ mod workers;
 
 pub use events::Phase;
 pub(crate) use events::{Event, EventSink};
+pub(crate) use report::BlockedReasonDetails;
 pub use report::{
     BlockedReason, Entry, Outcome, PhaseSummaries, PhaseSummary, Plan, Report, SkippedReason,
 };

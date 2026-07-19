@@ -83,11 +83,24 @@ pub enum Outcome {
 pub struct Entry {
     repository: String,
     outcome: Outcome,
+    blocked_details: Option<BlockedReasonDetails>,
 }
 
 impl Entry {
     pub(super) fn new(repository: &RepositoryDefinition, outcome: Outcome) -> Self {
-        Self { repository: repository.display_path().to_string(), outcome }
+        Self { repository: repository.display_path().to_string(), outcome, blocked_details: None }
+    }
+
+    pub(super) fn blocked_with_details(
+        repository: &RepositoryDefinition,
+        reason: BlockedReason,
+        blocked_details: BlockedReasonDetails,
+    ) -> Self {
+        Self {
+            repository: repository.display_path().to_string(),
+            outcome: Outcome::Blocked { reason },
+            blocked_details: Some(blocked_details),
+        }
     }
 
     pub fn repository(&self) -> &str {
@@ -97,6 +110,15 @@ impl Entry {
     pub fn outcome(&self) -> &Outcome {
         &self.outcome
     }
+
+    pub(crate) fn blocked_details(&self) -> Option<&BlockedReasonDetails> {
+        self.blocked_details.as_ref()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BlockedReasonDetails {
+    RemoteUrlMismatch { actual: String, expected: String },
 }
 
 #[derive(Debug, Clone, Copy, Default)]

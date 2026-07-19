@@ -264,5 +264,66 @@ url = "{}"
         .failure()
         .stdout(predicate::str::is_empty())
         .stderr(predicate::str::contains("Blocked 1 repository"))
-        .stderr(predicate::str::contains("x blog remote URL does not match grove.toml"));
+        .stderr(predicate::str::contains("x blog remote URL does not match grove.toml"))
+        .stderr(predicate::str::contains(format!("actual:   {}", remote.url())))
+        .stderr(predicate::str::contains(format!("expected: {}", replacement.url())));
+}
+
+#[test]
+fn sync_redacts_credentials_in_remote_url_mismatch_details() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    let initial_config = ctx.write_config(&format!(
+        r#"
+version = 1
+
+[[repo]]
+name = "blog"
+path = "blog"
+url = "{}"
+"#,
+        remote.url()
+    ));
+
+    ctx.cli().arg("--config").arg(&initial_config).arg("sync").assert().success();
+
+    run_git(
+        &ctx.workspace().join("blog"),
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            "https://user:ghp_actual@example.com/org/repo.git?access_token=actual_token&branch=main",
+        ],
+    );
+    let mismatched_config = ctx.write_config(
+        r#"
+version = 1
+
+[[repo]]
+name = "blog"
+path = "blog"
+url = "https://user:ghp_expected@example.com/org/repo.git?password=expected_secret&branch=main"
+"#,
+    );
+
+    ctx.cli()
+        .arg("--config")
+        .arg(mismatched_config)
+        .arg("sync")
+        .arg("blog")
+        .assert()
+        .failure()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("x blog remote URL does not match grove.toml"))
+        .stderr(predicate::str::contains(
+            "actual:   https://[redacted]@example.com/org/repo.git?access_token=[redacted]&branch=main",
+        ))
+        .stderr(predicate::str::contains(
+            "expected: https://[redacted]@example.com/org/repo.git?password=[redacted]&branch=main",
+        ))
+        .stderr(predicate::str::contains("ghp_actual").not())
+        .stderr(predicate::str::contains("actual_token").not())
+        .stderr(predicate::str::contains("ghp_expected").not())
+        .stderr(predicate::str::contains("expected_secret").not());
 }
