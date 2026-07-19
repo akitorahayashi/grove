@@ -1,0 +1,22 @@
+name: Run Static Checks
+
+on:
+  workflow_call:
+
+jobs:
+  run-static-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust Environment
+        uses: ./.github/actions/setup
+        with:
+          components: rustfmt,clippy
+          install-mise: 'true'
+          mise-tools: just
+
+      - name: Run Static Checks
+        run: mise exec -- just check
+        shell: bash

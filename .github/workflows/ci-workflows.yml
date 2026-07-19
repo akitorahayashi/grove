@@ -1,0 +1,29 @@
+name: CI Workflows
+
+on:
+  push:
+    branches: [ "main" ]
+    paths-ignore:
+      - '**.md'
+  pull_request:
+    branches: [ "main" ]
+    paths-ignore:
+      - '**.md'
+  workflow_dispatch:
+
+jobs:
+  static-checks:
+    name: Static Checks
+    uses: ./.github/workflows/run-static-checks.yml
+
+  build:
+    name: Build
+    uses: ./.github/workflows/build.yml
+
+  test:
+    name: Test
+    uses: ./.github/workflows/run-tests.yml
+
+  coverage:
+    name: Coverage
+    uses: ./.github/workflows/collect-coverage.yml

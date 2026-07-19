@@ -1,0 +1,53 @@
+# Binary Release Workflow
+#
+# Delegates tagged release builds to the reusable build workflow.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  prepare-release:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.prepare.outputs.release_id }}
+
+    steps:
+      - id: prepare
+        uses: akitorahayashi/gh-release@v1
+        with:
+          mode: prepare
+          token: ${{ github.token }}
+          tag: ${{ github.ref_name }}
+          create: true
+          generate_notes: true
+
+  build-and-upload:
+    needs:
+      - prepare-release
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build.yml
+    with:
+      release_id: ${{ needs.prepare-release.outputs.release_id }}
+
+  publish-release:
+    needs:
+      - prepare-release
+      - build-and-upload
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: akitorahayashi/gh-release@v1
+        with:
+          mode: publish
+          token: ${{ github.token }}
+          release_id: ${{ needs.prepare-release.outputs.release_id }}
+          publish: true

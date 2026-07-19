@@ -1,0 +1,35 @@
+name: Collect Coverage
+
+on:
+  workflow_call:
+
+jobs:
+  coverage:
+    name: Run test coverage
+    runs-on: ubuntu-latest
+    env:
+      RUST_BACKTRACE: 1
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup environment
+        uses: ./.github/actions/setup
+        with:
+          rust-version: 1.90.0
+          install-mise: 'true'
+          mise-tools: just cargo:cargo-tarpaulin
+
+      - name: Reset tarpaulin runtime outputs
+        run: |
+          rm -rf target/tarpaulin
+          rm -rf coverage
+        shell: bash
+
+      - name: Generate coverage
+        # --all-targets is intentionally absent; tarpaulin runs its own test harness
+        run: mise exec -- just coverage
+        env:
+          RUST_TEST_THREADS: 1
+

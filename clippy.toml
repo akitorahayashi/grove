@@ -1,0 +1,14 @@
+# Minimum Supported Rust Version
+msrv = "1.90.0"
+
+# Maximum allowed cognitive complexity for functions
+cognitive-complexity-threshold = 25
+
+# Maximum number of function arguments before triggering a warning
+too-many-arguments-threshold = 7
+
+# Maximum type complexity before triggering a warning
+type-complexity-threshold = 250
+
+# Maximum number of single character bindings in a scope
+single-char-binding-names-threshold = 4
