@@ -25,13 +25,16 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    #[command(alias = "i", about = "Create grove.toml in the current directory")]
+    #[command(visible_alias = "i", about = "Create grove.toml in the current directory")]
     Init(init::InitCommand),
-    #[command(about = "Clone missing repositories and safely update existing repositories")]
+    #[command(
+        visible_alias = "s",
+        about = "Clone missing repositories and safely update existing repositories"
+    )]
     Sync(sync::SyncCommand),
-    #[command(about = "Show managed repository status")]
+    #[command(visible_alias = "st", about = "Show managed repository status")]
     Status(status::StatusCommand),
-    #[command(about = "List managed repositories")]
+    #[command(visible_alias = "ls", about = "List managed repositories")]
     List(list::ListCommand),
 }
 

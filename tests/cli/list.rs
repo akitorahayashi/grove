@@ -31,7 +31,7 @@ url = "git@example.com:frontend.git"
     ctx.cli()
         .arg("--config")
         .arg(config)
-        .arg("list")
+        .arg("ls")
         .assert()
         .success()
         .stdout(predicate::str::contains("dotfiles"))

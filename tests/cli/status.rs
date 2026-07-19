@@ -55,3 +55,27 @@ url = "{}"
         .stdout(predicate::str::contains("frontend"))
         .stdout(predicate::str::contains("behind 1"));
 }
+
+#[test]
+fn status_short_alias_reports_repository_status() {
+    let ctx = TestContext::new();
+    let config = ctx.write_config(
+        r#"
+version = 1
+
+[[repo]]
+name = "blog"
+path = "personal/blog"
+url = "git@example.com:blog.git"
+"#,
+    );
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("st")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("personal/blog"))
+        .stdout(predicate::str::contains("missing"));
+}
