@@ -23,6 +23,12 @@ pub enum AppError {
 
     #[error("git command failed: {command}: {message}")]
     GitCommandFailed { command: String, message: String },
+
+    #[error("zoxide is not available: {0}")]
+    ZoxideUnavailable(String),
+
+    #[error("zoxide command failed: {command}: {message}")]
+    ZoxideCommandFailed { command: String, message: String },
 }
 
 impl AppError {
@@ -34,6 +40,10 @@ impl AppError {
         AppError::GitCommandFailed { command: command.into(), message: message.into() }
     }
 
+    pub fn zoxide_command_failed<C: Into<String>, M: Into<String>>(command: C, message: M) -> Self {
+        AppError::ZoxideCommandFailed { command: command.into(), message: message.into() }
+    }
+
     /// Provide an `io::ErrorKind`-like view for callers that need coarse error handling.
     pub fn kind(&self) -> io::ErrorKind {
         match self {
@@ -42,7 +52,9 @@ impl AppError {
             | Self::ConfigError(_)
             | Self::InvalidRepositoryName(_)
             | Self::GitUnavailable(_)
-            | Self::GitCommandFailed { .. } => io::ErrorKind::InvalidInput,
+            | Self::GitCommandFailed { .. }
+            | Self::ZoxideUnavailable(_)
+            | Self::ZoxideCommandFailed { .. } => io::ErrorKind::InvalidInput,
             Self::RepositoryNotFound(_) => io::ErrorKind::NotFound,
         }
     }

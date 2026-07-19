@@ -175,11 +175,17 @@ pub struct Report {
     entries: Vec<Entry>,
     elapsed: Duration,
     phases: PhaseSummaries,
+    zoxide: Option<ZoxideReport>,
 }
 
 impl Report {
-    pub(super) fn new(entries: Vec<Entry>, elapsed: Duration, phases: PhaseSummaries) -> Self {
-        Self { entries, elapsed, phases }
+    pub(super) fn new(
+        entries: Vec<Entry>,
+        elapsed: Duration,
+        phases: PhaseSummaries,
+        zoxide: Option<ZoxideReport>,
+    ) -> Self {
+        Self { entries, elapsed, phases, zoxide }
     }
 
     pub fn entries(&self) -> &[Entry] {
@@ -192,6 +198,10 @@ impl Report {
 
     pub fn phases(&self) -> PhaseSummaries {
         self.phases
+    }
+
+    pub fn zoxide(&self) -> Option<&ZoxideReport> {
+        self.zoxide.as_ref()
     }
 
     pub fn total(&self) -> usize {
@@ -232,5 +242,63 @@ impl Report {
         self.entries
             .iter()
             .any(|entry| matches!(entry.outcome, Outcome::Skipped { .. } | Outcome::Blocked { .. }))
+            || self.zoxide.as_ref().is_some_and(ZoxideReport::has_failures)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ZoxideOutcome {
+    WouldRegister,
+    Added,
+    AlreadyRegistered,
+    Failed(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ZoxideEntry {
+    repository: String,
+    outcome: ZoxideOutcome,
+}
+
+impl ZoxideEntry {
+    pub(super) fn new(repository: &RepositoryDefinition, outcome: ZoxideOutcome) -> Self {
+        Self { repository: repository.display_path().to_string(), outcome }
+    }
+
+    pub fn repository(&self) -> &str {
+        &self.repository
+    }
+
+    pub fn outcome(&self) -> &ZoxideOutcome {
+        &self.outcome
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ZoxideReport {
+    entries: Vec<ZoxideEntry>,
+    unavailable: Option<String>,
+}
+
+impl ZoxideReport {
+    pub(super) fn new(entries: Vec<ZoxideEntry>) -> Self {
+        Self { entries, unavailable: None }
+    }
+
+    pub(super) fn unavailable(message: String) -> Self {
+        Self { entries: Vec::new(), unavailable: Some(message) }
+    }
+
+    pub fn entries(&self) -> &[ZoxideEntry] {
+        &self.entries
+    }
+
+    pub fn unavailable_message(&self) -> Option<&str> {
+        self.unavailable.as_deref()
+    }
+
+    pub fn has_failures(&self) -> bool {
+        self.unavailable.is_some()
+            || self.entries.iter().any(|entry| matches!(entry.outcome, ZoxideOutcome::Failed(_)))
     }
 }

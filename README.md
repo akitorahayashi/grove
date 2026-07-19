@@ -1,7 +1,6 @@
 # grove
 
-`grove` manages multiple Git repositories from `grove.toml`. The CLI command is
-`gv`.
+`grove` manages multiple Git repositories from `grove.toml`. The CLI command is `gv`.
 
 ## Usage
 
@@ -14,6 +13,7 @@ gv status --fetch
 
 gv sync
 gv sync frontend
+gv sync -z
 gv sync --dry-run
 gv --config ~/workspace/grove.toml status
 ```
@@ -77,34 +77,6 @@ The following operations are never performed automatically:
 - forced checkout
 - forced push
 
-## Project Structure
-
-```text
-src/
-  cli/
-  app/
-  config/
-  repositories/
-  git/
-  error.rs
-  lib.rs
-  main.rs
-```
-
-- `src/cli/` owns command-line parsing and terminal output.
-- `src/app/` owns use-case orchestration and dependency wiring.
-- `src/config/` owns `grove.toml` discovery, include resolution, path
-  normalization, and validation.
-- `src/repositories/` owns repository names, definitions, and target selection.
-- `src/git/` owns the system `git` command boundary.
-- `src/error.rs` owns application-wide errors.
-
-## Development Commands
-
-- `just setup`: install pinned development tools from `mise.toml`.
-- `cargo build`: build a debug binary.
-- `cargo build --release`: build an optimized binary.
-- `just fix`: format Rust and justfile sources.
-- `just check`: verify formatting and linting.
-- `cargo test --all-targets --all-features`: run tests.
-- `just coverage`: run coverage with pinned tarpaulin.
+`gv sync --register-zoxide` and its short form `gv sync -z` register synced
+repositories with zoxide. Skipped and blocked repositories are not registered,
+and dry runs only report the repositories that would be registered.
