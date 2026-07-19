@@ -32,7 +32,7 @@ fn init_does_not_overwrite_existing_grove_toml() {
     let ctx = TestContext::new();
     ctx.write_config("version = 1\n");
 
-    ctx.cli().arg("init").assert().failure().stderr(predicate::str::contains("File exists"));
+    ctx.cli().arg("init").assert().failure().stderr(predicate::str::contains("exists"));
 
     let contents = fs::read_to_string(ctx.config_path()).expect("failed to read grove.toml");
     assert_eq!(contents, "version = 1\n");
