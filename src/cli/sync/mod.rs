@@ -1,5 +1,8 @@
+mod progress;
+
 use std::fmt::{Arguments, Write};
 use std::path::PathBuf;
+use std::sync::mpsc;
 use std::time::Duration;
 
 use clap::Args;
@@ -7,10 +10,10 @@ use owo_colors::OwoColorize;
 
 use crate::AppError;
 use crate::app::api;
-use crate::app::sync::{Outcome, PhaseSummary, Plan, Report};
+use crate::app::sync::{Outcome, Phase, PhaseSummary, Plan, Report};
 
+use self::progress::Display;
 use super::printer::Printer;
-use super::reporters::SyncReporter;
 
 #[derive(Args)]
 pub(super) struct SyncCommand {
@@ -23,10 +26,11 @@ pub(super) struct SyncCommand {
 
 pub(super) fn run(config: Option<PathBuf>, command: SyncCommand) -> Result<(), AppError> {
     let printer = Printer::Default;
-    let mut reporter = SyncReporter::new(printer);
-    let report =
-        api::sync_with_observer(config, command.repositories, command.dry_run, &mut reporter)?;
-    reporter.finish();
+    let report = if command.dry_run {
+        api::sync(config, command.repositories, true)?
+    } else {
+        run_with_progress(config, command.repositories, printer)?
+    };
 
     print_report(&report, command.dry_run, printer);
 
@@ -37,15 +41,32 @@ pub(super) fn run(config: Option<PathBuf>, command: SyncCommand) -> Result<(), A
     Ok(())
 }
 
+fn run_with_progress(
+    config: Option<PathBuf>,
+    repositories: Vec<String>,
+    printer: Printer,
+) -> Result<Report, AppError> {
+    let (sender, receiver) = mpsc::channel();
+
+    std::thread::scope(|scope| {
+        let execution =
+            scope.spawn(move || api::sync_with_events(config, repositories, false, &sender));
+        let mut progress = Display::new(printer);
+
+        for event in receiver {
+            if let Some(completion) = progress.handle(event) {
+                print_phase_completion(completion.phase(), completion.summary(), printer);
+            }
+        }
+
+        progress.finish();
+        execution.join().expect("sync execution thread should not panic")
+    })
+}
+
 fn print_report(report: &Report, dry_run: bool, printer: Printer) {
     if dry_run {
         print_dry_run_summary(report, printer);
-    } else {
-        let phases = report.phases();
-        print_phase("Checked", phases.checked(), printer);
-        print_phase_if_nonzero("Fetched", phases.fetched(), printer);
-        print_phase_if_nonzero("Cloned", phases.cloned(), printer);
-        print_count_with_elapsed("Updated", report.updated(), phases.updated().elapsed(), printer);
     }
 
     print_count("Skipped", report.skipped(), printer);
@@ -53,10 +74,18 @@ fn print_report(report: &Report, dry_run: bool, printer: Printer) {
     print_entries(report, printer);
 }
 
+fn print_phase_completion(phase: Phase, summary: PhaseSummary, printer: Printer) {
+    match phase {
+        Phase::Checking => print_phase("Checked", summary, printer),
+        Phase::Preparing => print_count_with_elapsed("Prepared", summary, true, printer),
+        Phase::Updating => print_count_with_elapsed("Updated", summary, false, printer),
+    }
+}
+
 fn print_dry_run_summary(report: &Report, printer: Printer) {
     print_count("Would clone", report.planned_clones(), printer);
-    print_count("Would fetch", report.planned_checks(), printer);
-    if report.planned_clones() == 0 && report.planned_checks() == 0 && !report.has_failures() {
+    print_count("Would fetch", report.planned_fetches(), printer);
+    if report.planned_clones() == 0 && report.planned_fetches() == 0 && !report.has_failures() {
         write_line(printer, format_args!("Would make no changes"));
     }
 }
@@ -82,7 +111,7 @@ fn print_entries(report: &Report, printer: Printer) {
                     ),
                 );
             }
-            Outcome::Planned(Plan::CheckExisting { .. }) | Outcome::Current { .. } => {}
+            Outcome::Planned(Plan::Fetch { .. }) | Outcome::Current { .. } => {}
             Outcome::Cloned { url } => {
                 write_line(
                     printer,
@@ -141,31 +170,27 @@ fn print_phase(label: &str, summary: PhaseSummary, printer: Printer) {
             ),
         );
     } else {
-        print_count_with_elapsed(label, summary.count(), summary.elapsed(), printer);
+        print_count_with_elapsed(label, summary, true, printer);
     }
 }
 
-fn print_phase_if_nonzero(label: &str, summary: PhaseSummary, printer: Printer) {
-    if summary.count() > 0 {
-        print_count_with_elapsed(label, summary.count(), summary.elapsed(), printer);
+fn print_count_with_elapsed(label: &str, summary: PhaseSummary, show_zero: bool, printer: Printer) {
+    if summary.count() == 0 && !show_zero {
+        return;
     }
-}
 
-fn print_count_with_elapsed(label: &str, count: usize, elapsed: Duration, printer: Printer) {
-    if count > 0 {
-        write_line(
-            printer,
-            format_args!(
-                "{}",
-                format!(
-                    "{label} {} {}",
-                    repositories(count).bold(),
-                    format!("in {}", format_duration(elapsed)).dimmed()
-                )
-                .dimmed()
-            ),
-        );
-    }
+    write_line(
+        printer,
+        format_args!(
+            "{}",
+            format!(
+                "{label} {} {}",
+                repositories(summary.count()).bold(),
+                format!("in {}", format_duration(summary.elapsed())).dimmed()
+            )
+            .dimmed()
+        ),
+    );
 }
 
 fn print_count(label: &str, count: usize, printer: Printer) {
@@ -203,6 +228,6 @@ fn change_rank(outcome: &Outcome) -> u8 {
         Outcome::Updated { .. } => 1,
         Outcome::Skipped { .. } => 2,
         Outcome::Blocked { .. } => 3,
-        Outcome::Planned(Plan::CheckExisting { .. }) | Outcome::Current { .. } => 4,
+        Outcome::Planned(Plan::Fetch { .. }) | Outcome::Current { .. } => 4,
     }
 }

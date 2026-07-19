@@ -33,12 +33,12 @@ pub fn sync(
     sync::execute(&ctx, config_path.as_deref(), &targets, dry_run)
 }
 
-pub(crate) fn sync_with_observer(
+pub(crate) fn sync_with_events(
     config_path: Option<PathBuf>,
     targets: Vec<String>,
     dry_run: bool,
-    observer: &mut impl sync::SyncObserver,
+    events: &impl sync::EventSink,
 ) -> Result<sync::Report, AppError> {
     let ctx = default_context();
-    sync::execute_with_observer(&ctx, config_path.as_deref(), &targets, dry_run, observer)
+    sync::execute_with_events(&ctx, config_path.as_deref(), &targets, dry_run, events)
 }

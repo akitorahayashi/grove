@@ -25,7 +25,7 @@ impl BranchDivergence {
 }
 
 /// Contract for Git operations owned by grove.
-pub trait GitClient {
+pub trait GitClient: Sync {
     fn verify_available(&self) -> Result<(), AppError>;
 
     fn clone_repository(

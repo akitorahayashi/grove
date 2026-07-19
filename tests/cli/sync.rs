@@ -57,8 +57,10 @@ url = "{}"
         .success()
         .stdout(predicate::str::is_empty())
         .stderr(predicate::str::contains("Checked 1 repository"))
-        .stderr(predicate::str::contains("Cloned 1 repository"))
-        .stderr(predicate::str::contains("+ blog"));
+        .stderr(predicate::str::contains("Prepared 1 repository"))
+        .stderr(predicate::str::contains("+ blog"))
+        .stderr(predicate::str::contains("\u{1b}[").not())
+        .stderr(predicate::str::contains("⠙").not());
 
     assert!(ctx.workspace().join("blog").join(".git").exists());
 }
