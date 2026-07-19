@@ -7,6 +7,6 @@ mod error;
 pub mod git;
 pub mod repositories;
 
-pub use app::api::{list, status, sync};
+pub use app::api::{status, sync};
 pub use cli::run as cli;
 pub use error::AppError;

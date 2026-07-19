@@ -8,9 +8,6 @@
 ```bash
 gv --version
 
-gv list
-gv list --json
-
 gv status
 gv status frontend
 gv status --fetch
@@ -18,7 +15,7 @@ gv status --fetch
 gv sync
 gv sync frontend
 gv sync --dry-run
-gv --config ~/workspace/grove.toml list
+gv --config ~/workspace/grove.toml status
 ```
 
 ## Configuration
@@ -98,8 +95,7 @@ src/
 - `src/app/` owns use-case orchestration and dependency wiring.
 - `src/config/` owns `grove.toml` discovery, include resolution, path
   normalization, and validation.
-- `src/repositories/` owns repository names, definitions, selection, and state
-  models.
+- `src/repositories/` owns repository names, definitions, and target selection.
 - `src/git/` owns the system `git` command boundary.
 - `src/error.rs` owns application-wide errors.
 

@@ -3,16 +3,11 @@
 use std::path::PathBuf;
 
 use crate::AppError;
-use crate::app::{AppContext, list, status, sync};
+use crate::app::{AppContext, status, sync};
 use crate::git::CommandGitClient;
 
 fn default_context() -> AppContext<CommandGitClient> {
     AppContext::default()
-}
-
-pub fn list(config_path: Option<PathBuf>) -> Result<list::ListReport, AppError> {
-    let ctx = default_context();
-    list::execute(&ctx, config_path.as_deref())
 }
 
 pub fn status(
