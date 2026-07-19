@@ -436,7 +436,7 @@ fn make_executable(path: &std::path::Path) {
 }
 
 #[test]
-fn sync_uses_uv_change_colors_when_color_is_forced() {
+fn sync_uses_change_colors_when_color_is_forced() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
     let config = ctx.write_config(&format!(

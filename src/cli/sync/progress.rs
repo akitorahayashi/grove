@@ -216,7 +216,7 @@ mod tests {
     use crate::git::GitProgress;
 
     #[test]
-    fn renders_uv_style_root_and_repository_progress_then_clears() {
+    fn renders_root_and_repository_progress_then_clears() {
         let terminal = InMemoryTerm::new(10, 100);
         let target = ProgressDrawTarget::term_like(Box::new(terminal.clone()));
         let mut display = Display::with_target(target);
