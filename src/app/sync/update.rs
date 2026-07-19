@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use crate::AppError;
 use crate::git::GitClient;
 use crate::repositories::RepositoryDefinition;
@@ -8,6 +10,7 @@ use super::{BlockedReason, Entry, Outcome};
 pub(super) struct Task<'a> {
     index: usize,
     repository: &'a RepositoryDefinition,
+    common_directory: PathBuf,
     default_branch: String,
     current_branch: String,
 }
@@ -16,10 +19,11 @@ impl<'a> Task<'a> {
     pub(super) fn new(
         index: usize,
         repository: &'a RepositoryDefinition,
+        common_directory: PathBuf,
         default_branch: String,
         current_branch: String,
     ) -> Self {
-        Self { index, repository, default_branch, current_branch }
+        Self { index, repository, common_directory, default_branch, current_branch }
     }
 
     pub(super) fn index(&self) -> usize {
@@ -28,6 +32,10 @@ impl<'a> Task<'a> {
 
     pub(super) fn repository(&self) -> &RepositoryDefinition {
         self.repository
+    }
+
+    pub(super) fn resource(&self) -> &Path {
+        &self.common_directory
     }
 }
 

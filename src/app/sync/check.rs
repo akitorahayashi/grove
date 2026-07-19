@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use crate::AppError;
 use crate::git::{GitClient, urls_match};
 use crate::repositories::RepositoryDefinition;
@@ -7,7 +9,7 @@ use super::{BlockedReason, Entry, Outcome, Plan, SkippedReason};
 pub(super) enum Decision {
     Entry(Entry),
     Clone,
-    Fetch { default_branch: String, current_branch: String },
+    Fetch { common_directory: PathBuf, default_branch: String, current_branch: String },
 }
 
 pub(super) fn repository(
@@ -79,7 +81,8 @@ pub(super) fn repository(
         )));
     }
 
-    Ok(Decision::Fetch { default_branch, current_branch })
+    let common_directory = git.common_directory(repository.path())?;
+    Ok(Decision::Fetch { common_directory, default_branch, current_branch })
 }
 
 pub(super) fn default_branch_block_reason(

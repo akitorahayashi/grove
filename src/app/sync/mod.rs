@@ -55,10 +55,11 @@ pub(crate) fn execute_with_events(
             check::Decision::Clone => {
                 preparations.push(prepare::Task::Clone { index, repository });
             }
-            check::Decision::Fetch { default_branch, current_branch } => {
+            check::Decision::Fetch { common_directory, default_branch, current_branch } => {
                 preparations.push(prepare::Task::Fetch {
                     index,
                     repository,
+                    common_directory,
                     default_branch,
                     current_branch,
                 });
@@ -124,12 +125,17 @@ fn prepare_phase<'a>(
 
     events.emit(Event::PhaseStarted { phase: Phase::Preparing, total: tasks.len() });
     let started = Instant::now();
-    let completions = workers::map(tasks, parallelism, |task| {
-        emit_repository_started(events, task.repository(), Phase::Preparing);
-        let completion = prepare::repository(git, task, events);
-        emit_repository_finished(events, task.repository(), Phase::Preparing);
-        completion
-    });
+    let completions = workers::map_keyed(
+        tasks,
+        parallelism,
+        |task| task.resource().to_path_buf(),
+        |task| {
+            emit_repository_started(events, task.repository(), Phase::Preparing);
+            let completion = prepare::repository(git, task, events);
+            emit_repository_finished(events, task.repository(), Phase::Preparing);
+            completion
+        },
+    );
     let elapsed = started.elapsed();
     let prepared = completions.iter().filter(|completion| completion.prepared()).count();
     let mut updates = Vec::new();
@@ -159,12 +165,17 @@ fn update_phase(
 
     events.emit(Event::PhaseStarted { phase: Phase::Updating, total: tasks.len() });
     let started = Instant::now();
-    let outcomes = workers::map(tasks, parallelism, |task| {
-        emit_repository_started(events, task.repository(), Phase::Updating);
-        let entry = update::repository(git, task);
-        emit_repository_finished(events, task.repository(), Phase::Updating);
-        (task.index(), entry)
-    });
+    let outcomes = workers::map_keyed(
+        tasks,
+        parallelism,
+        |task| task.resource().to_path_buf(),
+        |task| {
+            emit_repository_started(events, task.repository(), Phase::Updating);
+            let entry = update::repository(git, task);
+            emit_repository_finished(events, task.repository(), Phase::Updating);
+            (task.index(), entry)
+        },
+    );
     let elapsed = started.elapsed();
     let updated = outcomes
         .iter()
@@ -204,7 +215,7 @@ fn emit_repository_finished(
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{Duration, Instant};
 
@@ -252,6 +263,8 @@ url = "https://example.com/second.git"
         let report = execute(&ctx, Some(&config), &[], false).unwrap();
 
         assert!(ctx.git().peak.load(Ordering::SeqCst) >= 2);
+        assert_eq!(ctx.git().fetch_peak.load(Ordering::SeqCst), 1);
+        assert_eq!(ctx.git().update_peak.load(Ordering::SeqCst), 1);
         assert_eq!(
             report.entries().iter().map(|entry| entry.repository()).collect::<Vec<_>>(),
             ["third", "first", "second"]
@@ -263,22 +276,26 @@ url = "https://example.com/second.git"
     struct ConcurrentGit {
         active: AtomicUsize,
         peak: AtomicUsize,
+        fetch_active: AtomicUsize,
+        fetch_peak: AtomicUsize,
+        update_active: AtomicUsize,
+        update_peak: AtomicUsize,
     }
 
     impl ConcurrentGit {
-        fn record_peak(&self, active: usize) {
-            let mut peak = self.peak.load(Ordering::SeqCst);
-            while active > peak {
-                match self.peak.compare_exchange(peak, active, Ordering::SeqCst, Ordering::SeqCst) {
+        fn record_peak(peak: &AtomicUsize, active: usize) {
+            let mut current = peak.load(Ordering::SeqCst);
+            while active > current {
+                match peak.compare_exchange(current, active, Ordering::SeqCst, Ordering::SeqCst) {
                     Ok(_) => break,
-                    Err(actual) => peak = actual,
+                    Err(actual) => current = actual,
                 }
             }
         }
 
         fn prepare(&self) {
             let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
-            self.record_peak(active);
+            Self::record_peak(&self.peak, active);
 
             let deadline = Instant::now() + Duration::from_millis(500);
             while self.peak.load(Ordering::SeqCst) < 2 && Instant::now() < deadline {
@@ -286,6 +303,18 @@ url = "https://example.com/second.git"
             }
 
             self.active.fetch_sub(1, Ordering::SeqCst);
+        }
+
+        fn update(&self) {
+            let active = self.update_active.fetch_add(1, Ordering::SeqCst) + 1;
+            Self::record_peak(&self.update_peak, active);
+
+            let deadline = Instant::now() + Duration::from_millis(100);
+            while self.update_peak.load(Ordering::SeqCst) < 2 && Instant::now() < deadline {
+                std::thread::yield_now();
+            }
+
+            self.update_active.fetch_sub(1, Ordering::SeqCst);
         }
     }
 
@@ -309,8 +338,15 @@ url = "https://example.com/second.git"
             _repository: &Path,
             _progress: &mut dyn GitProgressSink,
         ) -> Result<(), AppError> {
+            let active = self.fetch_active.fetch_add(1, Ordering::SeqCst) + 1;
+            Self::record_peak(&self.fetch_peak, active);
             self.prepare();
+            self.fetch_active.fetch_sub(1, Ordering::SeqCst);
             Ok(())
+        }
+
+        fn common_directory(&self, _repository: &Path) -> Result<PathBuf, AppError> {
+            Ok(PathBuf::from("/shared/common.git"))
         }
 
         fn is_work_tree(&self, _repository: &Path) -> Result<bool, AppError> {
@@ -368,6 +404,7 @@ url = "https://example.com/second.git"
             _branch: &str,
             _current_branch: &str,
         ) -> Result<GitUpdate, AppError> {
+            self.update();
             Ok(GitUpdate::new("abc1234".to_string(), "abc1234".to_string()))
         }
     }

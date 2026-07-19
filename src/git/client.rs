@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::AppError;
 
@@ -36,6 +36,8 @@ pub trait GitClient: Sync {
     ) -> Result<(), AppError>;
 
     fn fetch(&self, repository: &Path, progress: &mut dyn GitProgressSink) -> Result<(), AppError>;
+
+    fn common_directory(&self, repository: &Path) -> Result<PathBuf, AppError>;
 
     fn is_work_tree(&self, repository: &Path) -> Result<bool, AppError>;
 

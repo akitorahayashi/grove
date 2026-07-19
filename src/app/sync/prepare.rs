@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use crate::git::{GitClient, GitProgress, GitProgressSink};
 use crate::repositories::RepositoryDefinition;
 
@@ -13,6 +15,7 @@ pub(super) enum Task<'a> {
     Fetch {
         index: usize,
         repository: &'a RepositoryDefinition,
+        common_directory: PathBuf,
         default_branch: String,
         current_branch: String,
     },
@@ -22,6 +25,13 @@ impl Task<'_> {
     pub(super) fn repository(&self) -> &RepositoryDefinition {
         match self {
             Self::Clone { repository, .. } | Self::Fetch { repository, .. } => repository,
+        }
+    }
+
+    pub(super) fn resource(&self) -> &Path {
+        match self {
+            Self::Clone { repository, .. } => repository.path(),
+            Self::Fetch { common_directory, .. } => common_directory,
         }
     }
 }
@@ -69,11 +79,12 @@ pub(super) fn repository<'a>(
                 },
             }
         }
-        Task::Fetch { index, repository, default_branch, current_branch } => {
+        Task::Fetch { index, repository, common_directory, default_branch, current_branch } => {
             match git.fetch(repository.path(), &mut progress) {
                 Ok(()) => Completion::Update(update::Task::new(
                     *index,
                     repository,
+                    common_directory.clone(),
                     default_branch.clone(),
                     current_branch.clone(),
                 )),

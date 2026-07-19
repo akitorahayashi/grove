@@ -1,6 +1,6 @@
 use std::fs;
-use std::io::Read;
-use std::path::Path;
+use std::io::{self, Read};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 use super::client::BranchDivergence;
@@ -49,6 +49,29 @@ impl GitClient for CommandGitClient {
             &["fetch", "--progress", "origin", "--prune"],
             progress,
         )
+    }
+
+    fn common_directory(&self, repository: &Path) -> Result<PathBuf, AppError> {
+        let args = ["rev-parse", "--git-common-dir"];
+        let output = self.git_required(repository, &args)?;
+        let value = stdout(&output);
+        let value = value.trim();
+        if value.is_empty() {
+            return Err(AppError::git_command_failed(
+                format_probe(repository, &args),
+                "Git returned an empty common directory",
+            ));
+        }
+
+        let path = PathBuf::from(value);
+        let path = if path.is_absolute() { path } else { repository.join(path) };
+        fs::canonicalize(&path).map_err(|err| {
+            io::Error::new(
+                err.kind(),
+                format!("failed to resolve Git common directory '{}': {err}", path.display()),
+            )
+            .into()
+        })
     }
 
     fn is_work_tree(&self, repository: &Path) -> Result<bool, AppError> {
@@ -289,4 +312,54 @@ fn format_probe(repository: &Path, args: &[&str]) -> String {
 
 fn join_args(args: &[&str]) -> String {
     args.join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::process::Command;
+
+    use tempfile::TempDir;
+
+    use crate::git::{CommandGitClient, GitClient};
+
+    #[test]
+    fn linked_worktrees_resolve_to_the_same_common_directory() {
+        let root = TempDir::new().unwrap();
+        let main = root.path().join("main");
+        let linked = root.path().join("linked");
+
+        run_git(root.path(), &["init", "-b", "main", main.to_str().unwrap()]);
+        std::fs::write(main.join("README.md"), "initial\n").unwrap();
+        run_git(&main, &["add", "README.md"]);
+        run_git(
+            &main,
+            &[
+                "-c",
+                "user.name=Grove Test",
+                "-c",
+                "user.email=grove@example.com",
+                "commit",
+                "-m",
+                "initial",
+            ],
+        );
+        run_git(&main, &["worktree", "add", "-b", "linked", linked.to_str().unwrap()]);
+
+        let client = CommandGitClient;
+        assert_eq!(
+            client.common_directory(&main).unwrap(),
+            client.common_directory(&linked).unwrap()
+        );
+    }
+
+    fn run_git(directory: &Path, args: &[&str]) {
+        let output = Command::new("git").current_dir(directory).args(args).output().unwrap();
+        assert!(
+            output.status.success(),
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }
