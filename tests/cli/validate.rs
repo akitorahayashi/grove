@@ -60,7 +60,7 @@ url = "git@example.com:blog.git"
     ctx.cli()
         .arg("--config")
         .arg(&config)
-        .arg("v")
+        .arg("vl")
         .assert()
         .success()
         .stdout(predicate::str::contains("Validated 1 repository"))

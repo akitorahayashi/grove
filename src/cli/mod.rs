@@ -35,7 +35,7 @@ enum Commands {
     Sync(sync::SyncCommand),
     #[command(visible_aliases = ["st", "ts"], about = "Show managed repository status")]
     Status(status::StatusCommand),
-    #[command(visible_alias = "v", about = "Validate grove.toml without inspecting repositories")]
+    #[command(visible_alias = "vl", about = "Validate grove.toml without inspecting repositories")]
     Validate(validate::ValidateCommand),
 }
 
