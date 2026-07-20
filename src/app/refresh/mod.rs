@@ -3,25 +3,28 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use crate::AppError;
-use crate::app::{AppContext, workers};
+use crate::app::AppContext;
+use crate::app::events::{DiscardEvents, EventSink};
+use crate::app::phases::{self, PhaseTask};
 use crate::config;
 use crate::git::GitClient;
 use crate::repositories::{RepositoryDefinition, select_repositories};
 
 mod check;
-mod events;
 mod fetch;
 mod report;
 mod update;
 
-pub use events::Phase;
-pub(crate) use events::{Event, EventSink};
+pub use crate::app::events::PhaseSummary;
 pub(crate) use report::BlockedReasonDetails;
-pub use report::{
-    BlockedReason, Entry, Outcome, PhaseSummaries, PhaseSummary, Plan, Report, SkippedReason,
-};
+pub use report::{BlockedReason, Entry, Outcome, PhaseSummaries, Plan, Report, SkippedReason};
 
-use events::DiscardEvents;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Phase {
+    Checking,
+    Fetching,
+    Refreshing,
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RefreshOptions {
@@ -61,7 +64,7 @@ pub(crate) fn execute_with_events(
     config_path: Option<&Path>,
     targets: &[String],
     options: RefreshOptions,
-    events: &impl EventSink,
+    events: &impl EventSink<Phase>,
 ) -> Result<Report, AppError> {
     ctx.git().verify_available()?;
     let config = config::load(config_path)?;
@@ -102,32 +105,11 @@ fn check_phase(
     repositories: &[&RepositoryDefinition],
     parallelism: usize,
     dry_run: bool,
-    events: &impl EventSink,
+    events: &impl EventSink<Phase>,
 ) -> Result<(Vec<check::Decision>, PhaseSummary), AppError> {
-    events.emit(Event::PhaseStarted { phase: Phase::Checking, total: repositories.len() })?;
-    let started = Instant::now();
-    let results = workers::map(repositories, parallelism, |repository| {
-        emit_repository_started(events, repository, Phase::Checking)?;
-        let result = check::repository(git, repository, dry_run);
-        emit_repository_finished(events, repository, Phase::Checking)?;
-        result
-    })?;
-    let elapsed = started.elapsed();
-
-    let mut decisions = Vec::with_capacity(results.len());
-    for result in results {
-        match result {
-            Ok(decision) => decisions.push(decision),
-            Err(error) => {
-                events.emit(Event::PhaseFailed { phase: Phase::Checking })?;
-                return Err(error);
-            }
-        }
-    }
-
-    let summary = PhaseSummary::new(decisions.len(), elapsed);
-    events.emit(Event::PhaseCompleted { phase: Phase::Checking, summary })?;
-    Ok((decisions, summary))
+    phases::run_check_phase(events, Phase::Checking, repositories, parallelism, |repository| {
+        check::repository(git, repository, dry_run)
+    })
 }
 
 fn fetch_phase<'a>(
@@ -135,39 +117,24 @@ fn fetch_phase<'a>(
     tasks: &[fetch::Task<'a>],
     entries: &mut [Option<Entry>],
     parallelism: usize,
-    events: &impl EventSink,
+    events: &impl EventSink<Phase>,
 ) -> Result<(Vec<update::Task<'a>>, PhaseSummary), AppError> {
-    if tasks.is_empty() {
-        return Ok((Vec::new(), PhaseSummary::default()));
-    }
-
-    events.emit(Event::PhaseStarted { phase: Phase::Fetching, total: tasks.len() })?;
-    let started = Instant::now();
-    let completions = workers::map_keyed(
+    let (completions, summary) = phases::run_worker_phase(
+        events,
+        Phase::Fetching,
         tasks,
         parallelism,
-        |task| task.resource().to_path_buf(),
-        |task| {
-            emit_repository_started(events, task.repository(), Phase::Fetching)?;
-            let completion = fetch::repository(git, task, events);
-            emit_repository_finished(events, task.repository(), Phase::Fetching)?;
-            completion
-        },
+        |task| fetch::repository(git, task, events),
+        |completion| completion.fetched(),
     )?;
-    let completions = completions.into_iter().collect::<Result<Vec<_>, AppError>>()?;
-    let elapsed = started.elapsed();
-    let fetched = completions.iter().filter(|completion| completion.fetched()).count();
-    let mut refreshes = Vec::new();
 
+    let mut refreshes = Vec::new();
     for completion in completions {
         match completion {
             fetch::Completion::Entry { index, entry } => entries[index] = Some(entry),
             fetch::Completion::Refresh(task) => refreshes.push(task),
         }
     }
-
-    let summary = PhaseSummary::new(fetched, elapsed);
-    events.emit(Event::PhaseCompleted { phase: Phase::Fetching, summary })?;
     Ok((refreshes, summary))
 }
 
@@ -176,50 +143,28 @@ fn refresh_phase(
     tasks: &[update::Task<'_>],
     entries: &mut [Option<Entry>],
     parallelism: usize,
-    events: &impl EventSink,
+    events: &impl EventSink<Phase>,
 ) -> Result<PhaseSummary, AppError> {
-    if tasks.is_empty() {
-        return Ok(PhaseSummary::default());
-    }
-
     let tasks = refreshable_tasks(tasks, entries);
-    if tasks.is_empty() {
-        return Ok(PhaseSummary::default());
-    }
-
-    events.emit(Event::PhaseStarted { phase: Phase::Refreshing, total: tasks.len() })?;
-    let started = Instant::now();
-    let outcomes = workers::map_keyed(
+    let (outcomes, summary) = phases::run_worker_phase(
+        events,
+        Phase::Refreshing,
         &tasks,
         parallelism,
-        |task| task.resource().to_path_buf(),
-        |task| {
-            emit_repository_started(events, task.repository(), Phase::Refreshing)?;
-            let entry = update::repository(git, task);
-            emit_repository_finished(events, task.repository(), Phase::Refreshing)?;
-            Ok((task.index(), entry))
-        },
-    )?;
-    let outcomes = outcomes.into_iter().collect::<Result<Vec<_>, AppError>>()?;
-    let elapsed = started.elapsed();
-    let changed = outcomes
-        .iter()
-        .filter(|(_, entry)| {
+        |task| Ok((task.index(), update::repository(git, task))),
+        |(_, entry)| {
             matches!(
                 entry.outcome(),
                 Outcome::Refreshed { .. }
                     | Outcome::Switched { .. }
                     | Outcome::SwitchedAndBlocked { .. }
             )
-        })
-        .count();
+        },
+    )?;
 
     for (index, entry) in outcomes {
         entries[index] = Some(entry);
     }
-
-    let summary = PhaseSummary::new(changed, elapsed);
-    events.emit(Event::PhaseCompleted { phase: Phase::Refreshing, summary })?;
     Ok(summary)
 }
 
@@ -250,24 +195,4 @@ fn refreshable_tasks<'a, 'b>(
         }
     }
     refreshable
-}
-
-fn emit_repository_started(
-    events: &impl EventSink,
-    repository: &RepositoryDefinition,
-    phase: Phase,
-) -> Result<(), AppError> {
-    events
-        .emit(Event::RepositoryStarted { repository: repository.display_path().to_string(), phase })
-}
-
-fn emit_repository_finished(
-    events: &impl EventSink,
-    repository: &RepositoryDefinition,
-    phase: Phase,
-) -> Result<(), AppError> {
-    events.emit(Event::RepositoryFinished {
-        repository: repository.display_path().to_string(),
-        phase,
-    })
 }

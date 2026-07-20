@@ -1,4 +1,5 @@
-use crate::app::refresh::{Event, Phase, PhaseSummary};
+use crate::app::events::Event;
+use crate::app::refresh::{Phase, PhaseSummary};
 use crate::cli::repository_progress::{ProgressPhase, RepositoryProgress};
 
 #[derive(Debug, Clone, Copy)]
@@ -27,7 +28,7 @@ impl Display {
         Self { progress: RepositoryProgress::new() }
     }
 
-    pub(super) fn handle(&mut self, event: Event) -> Option<Completion> {
+    pub(super) fn handle(&mut self, event: Event<Phase>) -> Option<Completion> {
         match event {
             Event::PhaseStarted { phase, total } => self.progress.start_phase(phase, total),
             Event::RepositoryStarted { repository, phase } => {
@@ -55,7 +56,11 @@ impl Display {
 
 impl ProgressPhase for Phase {
     fn message(self) -> &'static str {
-        Phase::message(self)
+        match self {
+            Phase::Checking => "Checking repositories...",
+            Phase::Fetching => "Fetching repositories...",
+            Phase::Refreshing => "Refreshing repositories...",
+        }
     }
 
     fn shows_git_progress(self) -> bool {

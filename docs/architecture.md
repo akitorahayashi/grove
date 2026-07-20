@@ -32,10 +32,11 @@ src/
   app/
     api.rs
     context.rs
+    events.rs
     init.rs
+    phases.rs
     refresh/
       check.rs
-      events.rs
       fetch.rs
       mod.rs
       report.rs
@@ -44,7 +45,6 @@ src/
     validate.rs
     sync/
       check.rs
-      events.rs
       mod.rs
       prepare.rs
       report.rs
@@ -94,7 +94,11 @@ fetch, and default-branch refresh phases. Results retain selection order.
 Worker execution is bounded by the selected work, available parallelism, and a
 ceiling of eight. Shared Git common directories are serialized, and refresh
 blocks selected linked worktrees that would finish on the same default branch.
-Worker panic and channel disconnects become application errors.
+Worker panic and channel disconnects become application errors. Progress events
+and the phase skeleton are shared: `events` owns the phase-generic event, sink,
+and progress adapter, and `phases` owns the check and worker phase envelopes.
+Each use case supplies its own phase marker, per-repository action, and change
+predicate.
 
 `config` discovers the root file, resolves one include level, decodes TOML, and
 validates the complete catalog without invoking Git or zoxide. It rejects schema

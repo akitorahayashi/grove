@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::AppError;
+use crate::app::phases::PhaseTask;
 use crate::git::{GitClient, GitUpdateBlock, GitUpdateOutcome, Restoration};
 use crate::repositories::RepositoryDefinition;
 
@@ -27,12 +28,14 @@ impl<'a> Task<'a> {
     pub(super) fn index(&self) -> usize {
         self.index
     }
+}
 
-    pub(super) fn repository(&self) -> &RepositoryDefinition {
+impl PhaseTask for Task<'_> {
+    fn repository(&self) -> &RepositoryDefinition {
         self.repository
     }
 
-    pub(super) fn resource(&self) -> &Path {
+    fn resource(&self) -> &Path {
         &self.common_directory
     }
 }

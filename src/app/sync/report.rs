@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use crate::app::events::PhaseSummary;
 use crate::repositories::RepositoryDefinition;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,26 +117,6 @@ impl Entry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum BlockedReasonDetails {
     RemoteUrlMismatch { actual: String, expected: String },
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct PhaseSummary {
-    count: usize,
-    elapsed: Duration,
-}
-
-impl PhaseSummary {
-    pub(super) fn new(count: usize, elapsed: Duration) -> Self {
-        Self { count, elapsed }
-    }
-
-    pub fn count(self) -> usize {
-        self.count
-    }
-
-    pub fn elapsed(self) -> Duration {
-        self.elapsed
-    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]

@@ -1,11 +1,12 @@
 use std::path::{Path, PathBuf};
 
-use crate::git::{GitClient, GitProgress, GitProgressSink};
+use crate::app::events::{EventProgress, EventSink};
+use crate::app::phases::PhaseTask;
+use crate::git::GitClient;
 use crate::repositories::RepositoryDefinition;
 
-use super::events::{Event, EventSink};
 use super::update;
-use super::{BlockedReason, Entry, Outcome};
+use super::{BlockedReason, Entry, Outcome, Phase};
 
 pub(super) struct Task<'a> {
     index: usize,
@@ -23,12 +24,14 @@ impl<'a> Task<'a> {
     ) -> Self {
         Self { index, repository, common_directory, default_branch }
     }
+}
 
-    pub(super) fn repository(&self) -> &RepositoryDefinition {
+impl PhaseTask for Task<'_> {
+    fn repository(&self) -> &RepositoryDefinition {
         self.repository
     }
 
-    pub(super) fn resource(&self) -> &Path {
+    fn resource(&self) -> &Path {
         &self.common_directory
     }
 }
@@ -47,7 +50,7 @@ impl Completion<'_> {
 pub(super) fn repository<'a>(
     git: &impl GitClient,
     task: &Task<'a>,
-    events: &impl EventSink,
+    events: &impl EventSink<Phase>,
 ) -> Result<Completion<'a>, crate::AppError> {
     let mut progress = EventProgress::new(task.repository, events);
 
@@ -67,24 +70,4 @@ pub(super) fn repository<'a>(
             ),
         },
     })
-}
-
-struct EventProgress<'a, E: EventSink> {
-    repository: &'a RepositoryDefinition,
-    events: &'a E,
-}
-
-impl<'a, E: EventSink> EventProgress<'a, E> {
-    fn new(repository: &'a RepositoryDefinition, events: &'a E) -> Self {
-        Self { repository, events }
-    }
-}
-
-impl<E: EventSink> GitProgressSink for EventProgress<'_, E> {
-    fn progress(&mut self, progress: GitProgress) -> Result<(), crate::AppError> {
-        self.events.emit(Event::GitProgress {
-            repository: self.repository.display_path().to_string(),
-            progress,
-        })
-    }
 }
