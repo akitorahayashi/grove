@@ -243,6 +243,26 @@ url = "git@example.com:repo.git"
             "path leaves the grove root",
         ),
         (
+            "empty path",
+            r#"
+version = 1
+[repos.repo]
+path = ""
+url = "git@example.com:repo.git"
+"#,
+            "field 'repos.repo.path' must not be empty",
+        ),
+        (
+            "blank path",
+            r#"
+version = 1
+[repos.repo]
+path = "   "
+url = "git@example.com:repo.git"
+"#,
+            "field 'repos.repo.path' must not be empty",
+        ),
+        (
             "unknown field",
             r#"
 version = 1

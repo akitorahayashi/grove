@@ -20,7 +20,12 @@ pub(super) fn resolve(tree: LoadedConfigTree) -> Result<ResolvedConfig, AppError
         for entry in &file.raw.repositories {
             let name = entry.name.as_str();
             let raw = &entry.repository;
-            let path = raw.path.as_deref().unwrap_or(name);
+            let path = match raw.path.as_deref() {
+                Some(path) => {
+                    required_field(Some(path), &file.path, &format!("repos.{name}.path"))?
+                }
+                None => name,
+            };
             let url = required_field(raw.url.as_deref(), &file.path, &format!("repos.{name}.url"))?;
             let repository_name = RepositoryName::new(name)?;
             let (resolved_path, display_path) = resolve_repository_path(
