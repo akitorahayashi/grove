@@ -10,6 +10,7 @@ gv --version
 gv status
 gv status frontend
 gv status --fetch
+gv validate
 
 gv sync
 gv sync frontend
@@ -52,6 +53,9 @@ include = [
 
 Child configuration files define repositories and cannot include other
 configuration files.
+
+`gv validate` loads `grove.toml`, resolves includes, and validates configuration
+without inspecting repository working trees or requiring network access.
 
 ## Sync Behavior
 

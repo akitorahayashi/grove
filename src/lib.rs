@@ -8,6 +8,6 @@ pub mod git;
 pub mod repositories;
 pub mod zoxide;
 
-pub use app::api::{status, sync};
+pub use app::api::{status, sync, validate};
 pub use cli::run as cli;
 pub use error::AppError;

@@ -4,6 +4,7 @@ mod init;
 mod printer;
 mod status;
 mod sync;
+mod validate;
 
 use std::path::PathBuf;
 
@@ -34,6 +35,8 @@ enum Commands {
     Sync(sync::SyncCommand),
     #[command(visible_aliases = ["st", "ts"], about = "Show managed repository status")]
     Status(status::StatusCommand),
+    #[command(visible_alias = "vl", about = "Validate grove.toml without inspecting repositories")]
+    Validate(validate::ValidateCommand),
 }
 
 /// Entry point for the CLI.
@@ -43,6 +46,7 @@ pub fn run() {
         Commands::Init(command) => init::run(cli.config, command),
         Commands::Sync(command) => sync::run(cli.config, command),
         Commands::Status(command) => status::run(cli.config, command),
+        Commands::Validate(command) => validate::run(cli.config, command),
     };
 
     if let Err(err) = result {
