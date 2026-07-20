@@ -90,6 +90,30 @@ url = "git@example.com:blog.git"
 }
 
 #[test]
+fn validate_redacts_credentials_from_malformed_toml_errors() {
+    let ctx = TestContext::new();
+    let config = ctx.write_config(
+        r#"
+version = 1
+
+[[repo]]
+url = "https://user:credential@example.com/repo.git
+"#,
+    );
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("validate")
+        .assert()
+        .failure()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("invalid TOML"))
+        .stderr(predicate::str::contains("https://[redacted]@example.com/repo.git"))
+        .stderr(predicate::str::contains("credential").not());
+}
+
+#[test]
 fn validate_does_not_require_git() {
     let ctx = TestContext::new();
     let config = ctx.write_config(

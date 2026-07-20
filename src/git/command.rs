@@ -270,13 +270,14 @@ impl GitClient for CommandGitClient {
         }
 
         let before = self.short_revision(repository, branch)?;
+        let merge_target = format!("origin/{branch}");
+        let after = self.short_revision(repository, &merge_target)?;
         let switched = current_branch != branch;
 
         if switched {
             self.git_required(repository, &["switch", "--", branch])?;
         }
 
-        let merge_target = format!("origin/{branch}");
         if let Err(primary) =
             self.git_required(repository, &["merge", "--ff-only", "--", &merge_target])
         {
@@ -285,18 +286,6 @@ impl GitClient for CommandGitClient {
                 restoration: self.restore(repository, switched, &current_branch),
             });
         }
-
-        let after = match self.short_revision(repository, branch) {
-            Ok(after) => after,
-            Err(primary) => {
-                return Ok(GitUpdateOutcome::Failed {
-                    primary: format!(
-                        "fast-forward completed but its revision could not be read: {primary}"
-                    ),
-                    restoration: self.restore(repository, switched, &current_branch),
-                });
-            }
-        };
 
         Ok(GitUpdateOutcome::Completed {
             update: GitUpdate::new(before, after),
@@ -432,36 +421,59 @@ fn run_with_progress(
     let mut child = command
         .spawn()
         .map_err(|err| AppError::git_command_failed(display.clone(), err.to_string()))?;
-    let mut stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| AppError::internal("Git progress stderr pipe was unavailable"))?;
+    let mut stderr = match child.stderr.take() {
+        Some(stderr) => stderr,
+        None => {
+            let error = AppError::internal("Git progress stderr pipe was unavailable");
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+    };
     let mut stderr_text = String::new();
     let mut buffer = [0; 4096];
     let mut pending = Vec::new();
+    let mut processing_error = None;
 
     loop {
-        let read = stderr
-            .read(&mut buffer)
-            .map_err(|err| AppError::git_command_failed(display.clone(), err.to_string()))?;
+        let read = match stderr.read(&mut buffer) {
+            Ok(read) => read,
+            Err(err) => {
+                if processing_error.is_none() {
+                    processing_error =
+                        Some(AppError::git_command_failed(display.clone(), err.to_string()));
+                }
+                break;
+            }
+        };
         if read == 0 {
             break;
         }
         stderr_text.push_str(&String::from_utf8_lossy(&buffer[..read]));
         for byte in &buffer[..read] {
             if *byte == b'\r' || *byte == b'\n' {
-                emit_progress(&pending, progress)?;
+                if processing_error.is_none() {
+                    processing_error = emit_progress(&pending, progress).err();
+                }
                 pending.clear();
             } else {
                 pending.push(*byte);
             }
         }
     }
-    emit_progress(&pending, progress)?;
+    if processing_error.is_none() {
+        processing_error = emit_progress(&pending, progress).err();
+    }
 
-    let status = child
-        .wait()
-        .map_err(|err| AppError::git_command_failed(display.clone(), err.to_string()))?;
+    drop(stderr);
+    let status = child.wait().map_err(|err| {
+        processing_error
+            .take()
+            .unwrap_or_else(|| AppError::git_command_failed(display.clone(), err.to_string()))
+    })?;
+    if let Some(error) = processing_error {
+        return Err(error);
+    }
     if status.success() {
         Ok(())
     } else {
@@ -519,9 +531,10 @@ mod tests {
 
     use tempfile::TempDir;
 
+    use crate::AppError;
     use crate::git::{
-        CommandGitClient, GitClient, GitUpdateBlock, GitUpdateOutcome, NoopGitProgressSink,
-        Restoration,
+        CommandGitClient, GitClient, GitProgress, GitProgressSink, GitUpdateBlock,
+        GitUpdateOutcome, NoopGitProgressSink, Restoration,
     };
     use crate::repositories::{BranchName, RemoteUrl};
 
@@ -756,6 +769,54 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn completed_fast_forward_does_not_require_a_post_merge_revision_probe() {
+        let root = TempDir::new().unwrap();
+        let repository = create_updatable_repository(root.path());
+        let wrapper = git_wrapper(
+            root.path(),
+            "if [ \"$1\" = rev-parse ] && [ \"${3:-}\" = main ] && [ \"$(git rev-parse main)\" = \"$(git rev-parse origin/main)\" ]; then\n  echo post-merge-probe-failed >&2\n  exit 42\nfi",
+        );
+
+        let outcome = CommandGitClient::with_executable(wrapper)
+            .update_default_branch(&repository, "main")
+            .unwrap();
+
+        assert!(matches!(
+            outcome,
+            GitUpdateOutcome::Completed { ref update, restoration: Restoration::Restored }
+                if update.changed()
+        ));
+        assert_eq!(git_stdout(&repository, &["branch", "--show-current"]), "feature");
+        assert_eq!(
+            git_stdout(&repository, &["rev-parse", "main"]),
+            git_stdout(&repository, &["rev-parse", "origin/main"])
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn progress_sink_failure_waits_for_git_child() {
+        let root = TempDir::new().unwrap();
+        let repository = root.path().join("repository");
+        std::fs::create_dir(&repository).unwrap();
+        let completed = root.path().join("completed");
+        let wrapper = git_wrapper(
+            root.path(),
+            &format!(
+                "if [ \"$1\" = fetch ]; then\n  printf 'Receiving objects: 50%% (1/2)\\r' >&2\n  sleep 0.2\n  touch \"{}\"\n  exit 0\nfi",
+                completed.display()
+            ),
+        );
+        let mut progress = FailingProgressSink;
+
+        let result = CommandGitClient::with_executable(wrapper).fetch(&repository, &mut progress);
+
+        assert!(result.is_err_and(|error| error.to_string().contains("progress sink failed")));
+        assert!(completed.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn clone_passes_option_like_url_after_operand_terminator() {
         use std::os::unix::fs::PermissionsExt;
 
@@ -859,5 +920,13 @@ mod tests {
             args.join(" "),
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    struct FailingProgressSink;
+
+    impl GitProgressSink for FailingProgressSink {
+        fn progress(&mut self, _progress: GitProgress) -> Result<(), AppError> {
+            Err(AppError::internal("progress sink failed"))
+        }
     }
 }
