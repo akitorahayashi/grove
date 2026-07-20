@@ -1,8 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use crate::AppError;
+use crate::repositories::{BranchName, RemoteUrl};
 
-use super::{GitProgress, GitUpdate};
+use super::{GitProgress, GitUpdateOutcome};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BranchDivergence {
@@ -30,8 +31,9 @@ pub trait GitClient: Sync {
 
     fn clone_repository(
         &self,
-        url: &str,
+        url: &RemoteUrl,
         destination: &Path,
+        grove_root: &Path,
         progress: &mut dyn GitProgressSink,
     ) -> Result<(), AppError>;
 
@@ -45,12 +47,12 @@ pub trait GitClient: Sync {
 
     fn working_tree_clean(&self, repository: &Path) -> Result<bool, AppError>;
 
-    fn remote_url(&self, repository: &Path) -> Result<Option<String>, AppError>;
+    fn remote_url(&self, repository: &Path) -> Result<Option<RemoteUrl>, AppError>;
 
     fn default_branch(
         &self,
         repository: &Path,
-        configured: Option<&str>,
+        configured: Option<&BranchName>,
     ) -> Result<Option<String>, AppError>;
 
     fn local_branch_exists(&self, repository: &Path, branch: &str) -> Result<bool, AppError>;
@@ -61,7 +63,7 @@ pub trait GitClient: Sync {
         &self,
         repository: &Path,
         branch: &str,
-    ) -> Result<Option<BranchDivergence>, AppError>;
+    ) -> Result<BranchDivergence, AppError>;
 
     fn short_revision(&self, repository: &Path, reference: &str) -> Result<String, AppError>;
 
@@ -69,17 +71,18 @@ pub trait GitClient: Sync {
         &self,
         repository: &Path,
         branch: &str,
-        current_branch: &str,
-    ) -> Result<GitUpdate, AppError>;
+    ) -> Result<GitUpdateOutcome, AppError>;
 }
 
 pub trait GitProgressSink {
-    fn progress(&mut self, progress: GitProgress);
+    fn progress(&mut self, progress: GitProgress) -> Result<(), AppError>;
 }
 
 #[derive(Debug, Default)]
 pub struct NoopGitProgressSink;
 
 impl GitProgressSink for NoopGitProgressSink {
-    fn progress(&mut self, _progress: GitProgress) {}
+    fn progress(&mut self, _progress: GitProgress) -> Result<(), AppError> {
+        Ok(())
+    }
 }

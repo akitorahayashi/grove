@@ -37,15 +37,17 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+    use crate::repositories::RemoteUrl;
 
     fn repo(name: &str) -> RepositoryDefinition {
         RepositoryDefinition::new(
             RepositoryName::new(name).unwrap(),
             PathBuf::from(format!("/workspace/{name}")),
             name.to_string(),
-            format!("git@example.com:{name}.git"),
+            RemoteUrl::new(&format!("git@example.com:{name}.git")).unwrap(),
             None,
             PathBuf::from("/workspace/grove.toml"),
+            PathBuf::from("/workspace"),
         )
     }
 

@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use crate::AppError;
-use crate::app::{AppContext, status, sync, validate};
+use crate::app::{AppContext, init, status, sync, validate};
 use crate::git::CommandGitClient;
 
 fn default_context() -> AppContext<CommandGitClient> {
@@ -30,6 +30,10 @@ pub fn sync(
 
 pub fn validate(config_path: Option<PathBuf>) -> Result<validate::Report, AppError> {
     validate::execute(config_path.as_deref())
+}
+
+pub(crate) fn init(directory: PathBuf) -> Result<init::Report, AppError> {
+    init::execute(&directory)
 }
 
 pub(crate) fn sync_with_options(

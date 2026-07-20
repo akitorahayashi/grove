@@ -6,11 +6,12 @@
 
 ```bash
 gv --version
+gv init
+gv validate
 
 gv status
 gv status frontend
 gv status --fetch
-gv validate
 
 gv sync
 gv sync frontend
@@ -30,6 +31,7 @@ version = 1
 name = "frontend"
 path = "apps/frontend"
 url = "git@github.com:company/frontend.git"
+default_branch = "main"
 
 [[repo]]
 name = "backend"
@@ -38,7 +40,15 @@ url = "git@github.com:company/backend.git"
 ```
 
 The `path` value is resolved relative to the `grove.toml` file that defines the
-repository. Absolute repository paths are rejected.
+repository. Absolute paths and paths that leave the canonical grove root are
+rejected. Symlinks are valid when their canonical targets remain inside the
+root. Symlink aliases share one operational identity for duplicate and nested
+path validation.
+
+`default_branch` is optional. An explicitly configured branch takes precedence
+over `origin/HEAD`; `origin/HEAD` is used only when the field is absent. Branch
+names are validated as Git refs without invoking Git, so `gv validate` remains
+independent of installed external tools.
 
 Root configuration files can include one level of child configuration files.
 
@@ -61,7 +71,8 @@ without inspecting repository working trees or requiring network access.
 
 `gv sync` clones missing repositories and safely updates existing repositories'
 default branches. Existing repositories are updated through system `git`
-commands.
+commands. Independent repository tasks run concurrently with at most eight live
+tasks. Linked worktrees that share a Git common directory remain serialized.
 
 The update flow is:
 
@@ -71,6 +82,12 @@ git switch <default-branch>
 git merge --ff-only origin/<default-branch>
 git switch <original-branch>
 ```
+
+The current branch and clean working-tree preconditions are checked again at
+the mutation boundary. Every failure after a successful switch attempts to
+restore the original branch. A completed fast-forward followed by restoration
+failure is reported as an update with a restoration error and exits
+unsuccessfully.
 
 The following operations are never performed automatically:
 
@@ -83,4 +100,28 @@ The following operations are never performed automatically:
 
 `gv sync --register-zoxide` and its short form `gv sync -z` register synced
 repositories with zoxide. Skipped and blocked repositories are not registered,
-and dry runs only report the repositories that would be registered.
+and dry runs only report the repositories that would be registered. Registration
+uses one initial zoxide database snapshot and at most one final snapshot.
+
+## Requirements
+
+Linux and macOS are the supported platforms. Windows is unsupported.
+
+- Git 2.23.0 or newer is required.
+- zoxide is optional. Registration requires `zoxide query --list --all` and
+  `zoxide add`.
+
+Release builds contain the Linux x86_64, Linux aarch64, macOS x86_64, and macOS
+aarch64 binaries. Checksums, signatures, and attestations are not published.
+
+## Library API
+
+The supported Rust API is the crate-root facade: `cli`, `status`, `sync`, and
+`validate`, plus their report, outcome, and error types. `cli` returns an
+`ExitCode` and does not terminate its host process.
+
+```rust
+let report = grove::validate(Some("/workspace/grove.toml".into()))?;
+println!("{} repositories", report.repository_count());
+# Ok::<(), grove::AppError>(())
+```

@@ -1,5 +1,8 @@
 name: CI Workflows
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [ "main" ]

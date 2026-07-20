@@ -17,7 +17,6 @@ pub(super) enum Task<'a> {
         repository: &'a RepositoryDefinition,
         common_directory: PathBuf,
         default_branch: String,
-        current_branch: String,
     },
 }
 
@@ -54,13 +53,18 @@ pub(super) fn repository<'a>(
     git: &impl GitClient,
     task: &Task<'a>,
     events: &impl EventSink,
-) -> Completion<'a> {
+) -> Result<Completion<'a>, crate::AppError> {
     let repository = task.repository();
     let mut progress = EventProgress::new(repository, events);
 
     match task {
-        Task::Clone { index, repository } => {
-            match git.clone_repository(repository.url(), repository.path(), &mut progress) {
+        Task::Clone { index, repository } => Ok(
+            match git.clone_repository(
+                repository.url(),
+                repository.path(),
+                repository.root(),
+                &mut progress,
+            ) {
                 Ok(()) => Completion::Entry {
                     index: *index,
                     entry: Entry::new(
@@ -69,6 +73,7 @@ pub(super) fn repository<'a>(
                     ),
                     prepared: true,
                 },
+                Err(err) if matches!(err, crate::AppError::Internal(_)) => return Err(err),
                 Err(err) => Completion::Entry {
                     index: *index,
                     entry: Entry::new(
@@ -77,17 +82,17 @@ pub(super) fn repository<'a>(
                     ),
                     prepared: false,
                 },
-            }
-        }
-        Task::Fetch { index, repository, common_directory, default_branch, current_branch } => {
-            match git.fetch(repository.path(), &mut progress) {
+            },
+        ),
+        Task::Fetch { index, repository, common_directory, default_branch } => {
+            Ok(match git.fetch(repository.path(), &mut progress) {
                 Ok(()) => Completion::Update(update::Task::new(
                     *index,
                     repository,
                     common_directory.clone(),
                     default_branch.clone(),
-                    current_branch.clone(),
                 )),
+                Err(err) if matches!(err, crate::AppError::Internal(_)) => return Err(err),
                 Err(err) => Completion::Entry {
                     index: *index,
                     entry: Entry::new(
@@ -96,7 +101,7 @@ pub(super) fn repository<'a>(
                     ),
                     prepared: false,
                 },
-            }
+            })
         }
     }
 }
@@ -113,10 +118,10 @@ impl<'a, E: EventSink> EventProgress<'a, E> {
 }
 
 impl<E: EventSink> GitProgressSink for EventProgress<'_, E> {
-    fn progress(&mut self, progress: GitProgress) {
+    fn progress(&mut self, progress: GitProgress) -> Result<(), crate::AppError> {
         self.events.emit(Event::GitProgress {
             repository: self.repository.display_path().to_string(),
             progress,
-        });
+        })
     }
 }

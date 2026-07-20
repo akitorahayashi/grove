@@ -3,7 +3,7 @@ use std::path::Path;
 use crate::AppError;
 use crate::app::AppContext;
 use crate::config;
-use crate::git::{BranchDivergence, GitClient, NoopGitProgressSink, urls_match};
+use crate::git::{GitClient, NoopGitProgressSink, urls_match};
 use crate::repositories::RepositoryDefinition;
 use crate::repositories::select_repositories;
 
@@ -13,7 +13,7 @@ pub struct StatusReport {
 }
 
 impl StatusReport {
-    pub fn new(entries: Vec<StatusEntry>) -> Self {
+    pub(crate) fn new(entries: Vec<StatusEntry>) -> Self {
         Self { entries }
     }
 
@@ -100,7 +100,7 @@ pub struct DefaultBranchStatus {
 }
 
 impl DefaultBranchStatus {
-    pub fn new(branch: String, tracking: BranchTrackingStatus) -> Self {
+    pub(crate) fn new(branch: String, tracking: BranchTrackingStatus) -> Self {
         Self { branch, tracking }
     }
 
@@ -118,7 +118,6 @@ pub enum BranchTrackingStatus {
     Divergence { ahead: u32, behind: u32 },
     MissingLocalBranch,
     MissingRemoteBranch,
-    Unavailable,
 }
 
 #[derive(Debug, Clone)]
@@ -158,7 +157,7 @@ pub struct RemoteUrlMismatch {
 }
 
 impl RemoteUrlMismatch {
-    pub fn new(actual: String, expected: String) -> Self {
+    pub(crate) fn new(actual: String, expected: String) -> Self {
         Self { actual, expected }
     }
 
@@ -227,7 +226,7 @@ fn status_for_repository(
         if urls_match(&actual, repository.url()) {
             None
         } else {
-            Some(RemoteUrlMismatch::new(actual, repository.url().to_string()))
+            Some(RemoteUrlMismatch::new(actual.to_string(), repository.url().to_string()))
         }
     });
     let default_branch = git.default_branch(repository.path(), repository.default_branch())?;
@@ -264,12 +263,7 @@ fn default_branch_status(
             BranchTrackingStatus::MissingRemoteBranch,
         )));
     }
-    let Some(divergence) = git.branch_divergence(repository.path(), branch)? else {
-        return Ok(Some(DefaultBranchStatus::new(
-            branch.to_string(),
-            BranchTrackingStatus::Unavailable,
-        )));
-    };
+    let divergence = git.branch_divergence(repository.path(), branch)?;
     Ok(Some(DefaultBranchStatus::new(
         branch.to_string(),
         BranchTrackingStatus::Divergence { ahead: divergence.ahead(), behind: divergence.behind() },
@@ -284,9 +278,4 @@ fn entry(
     remote_mismatch: Option<RemoteUrlMismatch>,
 ) -> StatusEntry {
     StatusEntry::from_repository(repository, branch, condition, default_branch, remote_mismatch)
-}
-
-#[allow(dead_code)]
-fn _format_divergence(divergence: BranchDivergence) -> String {
-    format!("ahead {} behind {}", divergence.ahead(), divergence.behind())
 }

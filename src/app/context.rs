@@ -14,10 +14,6 @@ impl<G: GitClient> AppContext<G, CommandZoxideClient> {
 }
 
 impl<G: GitClient, Z: ZoxideClient> AppContext<G, Z> {
-    pub fn with_zoxide(git: G, zoxide: Z) -> Self {
-        Self { git, zoxide }
-    }
-
     pub fn git(&self) -> &G {
         &self.git
     }
@@ -29,6 +25,6 @@ impl<G: GitClient, Z: ZoxideClient> AppContext<G, Z> {
 
 impl Default for AppContext<CommandGitClient, CommandZoxideClient> {
     fn default() -> Self {
-        Self::new(CommandGitClient)
+        Self::new(CommandGitClient::default())
     }
 }

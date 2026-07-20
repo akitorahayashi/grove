@@ -31,7 +31,6 @@ pub enum BlockedReason {
     MissingRemoteDefaultBranch,
     MissingLocalBranch { branch: String },
     MissingRemoteBranch { branch: String },
-    CannotCompareDefaultBranch,
     Diverged { branch: String },
     AheadOfOrigin { branch: String },
     UpdateFailed(String),
@@ -57,9 +56,6 @@ impl BlockedReason {
             Self::MissingRemoteBranch { branch } => {
                 format!("remote default branch 'origin/{branch}' is missing")
             }
-            Self::CannotCompareDefaultBranch => {
-                "default branch cannot be compared with origin".to_string()
-            }
             Self::Diverged { branch } => format!("{branch} has diverged"),
             Self::AheadOfOrigin { branch } => {
                 format!("{branch} is ahead of origin/{branch}")
@@ -74,6 +70,7 @@ pub enum Outcome {
     Planned(Plan),
     Cloned { url: String },
     Updated { branch: String, before: String, after: String },
+    UpdatedButRestorationFailed { branch: String, before: String, after: String, message: String },
     Current { branch: String },
     Skipped { reason: SkippedReason },
     Blocked { reason: BlockedReason },
@@ -227,7 +224,15 @@ impl Report {
     }
 
     pub fn updated(&self) -> usize {
-        self.entries.iter().filter(|entry| matches!(entry.outcome, Outcome::Updated { .. })).count()
+        self.entries
+            .iter()
+            .filter(|entry| {
+                matches!(
+                    entry.outcome,
+                    Outcome::Updated { .. } | Outcome::UpdatedButRestorationFailed { .. }
+                )
+            })
+            .count()
     }
 
     pub fn skipped(&self) -> usize {
@@ -239,10 +244,14 @@ impl Report {
     }
 
     pub fn has_failures(&self) -> bool {
-        self.entries
-            .iter()
-            .any(|entry| matches!(entry.outcome, Outcome::Skipped { .. } | Outcome::Blocked { .. }))
-            || self.zoxide.as_ref().is_some_and(ZoxideReport::has_failures)
+        self.entries.iter().any(|entry| {
+            matches!(
+                entry.outcome,
+                Outcome::Skipped { .. }
+                    | Outcome::Blocked { .. }
+                    | Outcome::UpdatedButRestorationFailed { .. }
+            )
+        }) || self.zoxide.as_ref().is_some_and(ZoxideReport::has_failures)
     }
 }
 

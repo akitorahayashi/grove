@@ -269,3 +269,52 @@ url = "git@example.com:blog.git"
         .stdout(predicate::str::contains("personal/blog"))
         .stdout(predicate::str::contains("missing"));
 }
+
+#[cfg(unix)]
+#[test]
+fn status_rejects_git_older_than_required_version_before_inspection() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let ctx = TestContext::new();
+    let config = ctx.write_config(
+        r#"
+version = 1
+
+[[repo]]
+name = "blog"
+path = "blog"
+url = "git@example.com:blog.git"
+"#,
+    );
+    let bin = ctx.root().join("old-git-bin");
+    std::fs::create_dir(&bin).unwrap();
+    let git = bin.join("git");
+    std::fs::write(&git, "#!/bin/sh\necho 'git version 2.22.0'\n").unwrap();
+    let mut permissions = std::fs::metadata(&git).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&git, permissions).unwrap();
+
+    ctx.cli()
+        .env("PATH", bin)
+        .arg("--config")
+        .arg(config)
+        .arg("status")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Git 2.23.0 or newer is required"));
+}
+
+#[test]
+fn status_reports_missing_git_before_inspection() {
+    let ctx = TestContext::new();
+    let config = ctx.write_config("version = 1\n");
+
+    ctx.cli()
+        .env("PATH", "")
+        .arg("--config")
+        .arg(config)
+        .arg("status")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("git is not available"));
+}

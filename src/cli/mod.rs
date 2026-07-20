@@ -1,16 +1,20 @@
 //! CLI adapter.
 
 mod init;
-mod printer;
+mod output;
 mod status;
 mod sync;
 mod validate;
 
+use std::ffi::OsString;
+use std::io;
 use std::path::PathBuf;
+use std::process::ExitCode;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, error::ErrorKind};
 
 use crate::AppError;
+use output::{Output, terminal_multiline_text, terminal_text};
 
 #[derive(Parser)]
 #[command(name = "gv")]
@@ -39,18 +43,54 @@ enum Commands {
     Validate(validate::ValidateCommand),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Completion {
+    Success,
+    Failure,
+}
+
 /// Entry point for the CLI.
-pub fn run() {
-    let cli = Cli::parse();
-    let result: Result<(), AppError> = match cli.command {
-        Commands::Init(command) => init::run(cli.config, command),
-        Commands::Sync(command) => sync::run(cli.config, command),
-        Commands::Status(command) => status::run(cli.config, command),
-        Commands::Validate(command) => validate::run(cli.config, command),
+pub fn run() -> ExitCode {
+    let mut stdout = io::stdout().lock();
+    let mut stderr = io::stderr().lock();
+    let mut output = Output::terminal(&mut stdout, &mut stderr);
+    run_with_args(std::env::args_os(), &mut output)
+}
+
+fn run_with_args(args: impl IntoIterator<Item = OsString>, output: &mut Output<'_>) -> ExitCode {
+    let cli = match Cli::try_parse_from(args) {
+        Ok(cli) => cli,
+        Err(error) => return render_clap_error(error, output),
     };
 
-    if let Err(err) = result {
-        eprintln!("error: {err}");
-        std::process::exit(1);
+    let result = match cli.command {
+        Commands::Init(command) => init::run(cli.config, command, output),
+        Commands::Sync(command) => sync::run(cli.config, command, output),
+        Commands::Status(command) => status::run(cli.config, command, output),
+        Commands::Validate(command) => validate::run(cli.config, command, output),
+    };
+
+    match result {
+        Ok(Completion::Success) => ExitCode::SUCCESS,
+        Ok(Completion::Failure) => ExitCode::FAILURE,
+        Err(AppError::Io(error)) if error.kind() == io::ErrorKind::BrokenPipe => ExitCode::SUCCESS,
+        Err(error) => {
+            let message = terminal_text(&error.to_string());
+            if output.stderr(format_args!("error: {message}\n")).is_err() {
+                return ExitCode::FAILURE;
+            }
+            ExitCode::FAILURE
+        }
     }
+}
+
+fn render_clap_error(error: clap::Error, output: &mut Output<'_>) -> ExitCode {
+    let success = matches!(error.kind(), ErrorKind::DisplayHelp | ErrorKind::DisplayVersion);
+    let rendered = terminal_multiline_text(&error.to_string());
+    let written = if success {
+        output.stdout(format_args!("{rendered}"))
+    } else {
+        output.stderr(format_args!("{rendered}"))
+    };
+    if written.is_err() || !success { ExitCode::FAILURE } else { ExitCode::SUCCESS }
 }

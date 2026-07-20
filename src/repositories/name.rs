@@ -1,11 +1,9 @@
 use std::path::{Component, Path};
 
-use serde::Serialize;
-
 use crate::AppError;
 
 /// A validated repository name used for CLI target selection.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RepositoryName(String);
 
 impl RepositoryName {

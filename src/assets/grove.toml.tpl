@@ -14,9 +14,11 @@ version = 1
 # name = "REPLACE_WITH_REPOSITORY_NAME"
 # path = "REPLACE_WITH_LOCAL_DIRECTORY"
 # url = "git@github.com:REPLACE_WITH_OWNER/REPLACE_WITH_REPOSITORY.git"
+# default_branch = "main" # Optional explicit override for origin/HEAD.
 
 # Clone a repository with HTTPS.
 # [[repo]]
 # name = "REPLACE_WITH_REPOSITORY_NAME"
 # path = "REPLACE_WITH_LOCAL_DIRECTORY"
 # url = "https://github.com/REPLACE_WITH_OWNER/REPLACE_WITH_REPOSITORY.git"
+# default_branch = "main" # Optional explicit override for origin/HEAD.
