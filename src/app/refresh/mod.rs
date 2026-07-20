@@ -1,47 +1,40 @@
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use crate::AppError;
-use crate::app::AppContext;
-use crate::app::workers;
+use crate::app::{AppContext, workers};
 use crate::config;
 use crate::git::GitClient;
 use crate::repositories::{RepositoryDefinition, select_repositories};
 
 mod check;
 mod events;
-mod prepare;
+mod fetch;
 mod report;
 mod update;
-mod zoxide;
 
 pub use events::Phase;
 pub(crate) use events::{Event, EventSink};
 pub(crate) use report::BlockedReasonDetails;
 pub use report::{
     BlockedReason, Entry, Outcome, PhaseSummaries, PhaseSummary, Plan, Report, SkippedReason,
-    ZoxideEntry, ZoxideOutcome, ZoxideReport,
 };
 
 use events::DiscardEvents;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct SyncOptions {
+pub struct RefreshOptions {
     dry_run: bool,
-    register_zoxide: bool,
 }
 
-impl SyncOptions {
-    pub fn new(dry_run: bool, register_zoxide: bool) -> Self {
-        Self { dry_run, register_zoxide }
+impl RefreshOptions {
+    pub fn new(dry_run: bool) -> Self {
+        Self { dry_run }
     }
 
     pub fn dry_run(self) -> bool {
         self.dry_run
-    }
-
-    pub fn register_zoxide(self) -> bool {
-        self.register_zoxide
     }
 }
 
@@ -51,14 +44,14 @@ pub fn execute(
     targets: &[String],
     dry_run: bool,
 ) -> Result<Report, AppError> {
-    execute_with_options(ctx, config_path, targets, SyncOptions::new(dry_run, false))
+    execute_with_options(ctx, config_path, targets, RefreshOptions::new(dry_run))
 }
 
 pub fn execute_with_options(
     ctx: &AppContext<impl GitClient, impl crate::zoxide::ZoxideClient>,
     config_path: Option<&Path>,
     targets: &[String],
-    options: SyncOptions,
+    options: RefreshOptions,
 ) -> Result<Report, AppError> {
     execute_with_events(ctx, config_path, targets, options, &DiscardEvents)
 }
@@ -67,7 +60,7 @@ pub(crate) fn execute_with_events(
     ctx: &AppContext<impl GitClient, impl crate::zoxide::ZoxideClient>,
     config_path: Option<&Path>,
     targets: &[String],
-    options: SyncOptions,
+    options: RefreshOptions,
     events: &impl EventSink,
 ) -> Result<Report, AppError> {
     ctx.git().verify_available()?;
@@ -81,27 +74,18 @@ pub(crate) fn execute_with_events(
     let (decisions, checked) =
         check_phase(ctx.git(), &repositories, parallelism, options.dry_run(), events)?;
 
-    let mut preparations = Vec::new();
+    let mut fetches = Vec::new();
     for (index, (repository, decision)) in repositories.iter().copied().zip(decisions).enumerate() {
         match decision {
             check::Decision::Entry(entry) => entries[index] = Some(entry),
-            check::Decision::Clone => {
-                preparations.push(prepare::Task::Clone { index, repository });
-            }
             check::Decision::Fetch { common_directory, default_branch } => {
-                preparations.push(prepare::Task::Fetch {
-                    index,
-                    repository,
-                    common_directory,
-                    default_branch,
-                });
+                fetches.push(fetch::Task::new(index, repository, common_directory, default_branch));
             }
         }
     }
 
-    let (updates, prepared) =
-        prepare_phase(ctx.git(), &preparations, &mut entries, parallelism, events)?;
-    let updated = update_phase(ctx.git(), &updates, &mut entries, parallelism, events)?;
+    let (refreshes, fetched) = fetch_phase(ctx.git(), &fetches, &mut entries, parallelism, events)?;
+    let refreshed = refresh_phase(ctx.git(), &refreshes, &mut entries, parallelism, events)?;
 
     let entries = entries
         .into_iter()
@@ -109,17 +93,8 @@ pub(crate) fn execute_with_events(
             entry.ok_or_else(|| AppError::internal("selected repository produced no outcome"))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let zoxide = if options.register_zoxide() {
-        if options.dry_run() {
-            Some(zoxide::dry_run(&repositories, &entries))
-        } else {
-            Some(zoxide::register(ctx.zoxide(), &repositories, &entries))
-        }
-    } else {
-        None
-    };
-    let phases = PhaseSummaries::new(checked, prepared, updated);
-    Ok(Report::new(entries, started.elapsed(), phases, zoxide))
+    let phases = PhaseSummaries::new(checked, fetched, refreshed);
+    Ok(Report::new(entries, started.elapsed(), phases))
 }
 
 fn check_phase(
@@ -143,9 +118,9 @@ fn check_phase(
     for result in results {
         match result {
             Ok(decision) => decisions.push(decision),
-            Err(err) => {
+            Err(error) => {
                 events.emit(Event::PhaseFailed { phase: Phase::Checking })?;
-                return Err(err);
+                return Err(error);
             }
         }
     }
@@ -155,9 +130,9 @@ fn check_phase(
     Ok((decisions, summary))
 }
 
-fn prepare_phase<'a>(
+fn fetch_phase<'a>(
     git: &impl GitClient,
-    tasks: &[prepare::Task<'a>],
+    tasks: &[fetch::Task<'a>],
     entries: &mut [Option<Entry>],
     parallelism: usize,
     events: &impl EventSink,
@@ -166,37 +141,37 @@ fn prepare_phase<'a>(
         return Ok((Vec::new(), PhaseSummary::default()));
     }
 
-    events.emit(Event::PhaseStarted { phase: Phase::Preparing, total: tasks.len() })?;
+    events.emit(Event::PhaseStarted { phase: Phase::Fetching, total: tasks.len() })?;
     let started = Instant::now();
     let completions = workers::map_keyed(
         tasks,
         parallelism,
         |task| task.resource().to_path_buf(),
         |task| {
-            emit_repository_started(events, task.repository(), Phase::Preparing)?;
-            let completion = prepare::repository(git, task, events);
-            emit_repository_finished(events, task.repository(), Phase::Preparing)?;
+            emit_repository_started(events, task.repository(), Phase::Fetching)?;
+            let completion = fetch::repository(git, task, events);
+            emit_repository_finished(events, task.repository(), Phase::Fetching)?;
             completion
         },
     )?;
     let completions = completions.into_iter().collect::<Result<Vec<_>, AppError>>()?;
     let elapsed = started.elapsed();
-    let prepared = completions.iter().filter(|completion| completion.prepared()).count();
-    let mut updates = Vec::new();
+    let fetched = completions.iter().filter(|completion| completion.fetched()).count();
+    let mut refreshes = Vec::new();
 
     for completion in completions {
         match completion {
-            prepare::Completion::Entry { index, entry, .. } => entries[index] = Some(entry),
-            prepare::Completion::Update(task) => updates.push(task),
+            fetch::Completion::Entry { index, entry } => entries[index] = Some(entry),
+            fetch::Completion::Refresh(task) => refreshes.push(task),
         }
     }
 
-    let summary = PhaseSummary::new(prepared, elapsed);
-    events.emit(Event::PhaseCompleted { phase: Phase::Preparing, summary })?;
-    Ok((updates, summary))
+    let summary = PhaseSummary::new(fetched, elapsed);
+    events.emit(Event::PhaseCompleted { phase: Phase::Fetching, summary })?;
+    Ok((refreshes, summary))
 }
 
-fn update_phase(
+fn refresh_phase(
     git: &impl GitClient,
     tasks: &[update::Task<'_>],
     entries: &mut [Option<Entry>],
@@ -207,27 +182,34 @@ fn update_phase(
         return Ok(PhaseSummary::default());
     }
 
-    events.emit(Event::PhaseStarted { phase: Phase::Updating, total: tasks.len() })?;
+    let tasks = refreshable_tasks(tasks, entries);
+    if tasks.is_empty() {
+        return Ok(PhaseSummary::default());
+    }
+
+    events.emit(Event::PhaseStarted { phase: Phase::Refreshing, total: tasks.len() })?;
     let started = Instant::now();
     let outcomes = workers::map_keyed(
-        tasks,
+        &tasks,
         parallelism,
         |task| task.resource().to_path_buf(),
         |task| {
-            emit_repository_started(events, task.repository(), Phase::Updating)?;
+            emit_repository_started(events, task.repository(), Phase::Refreshing)?;
             let entry = update::repository(git, task);
-            emit_repository_finished(events, task.repository(), Phase::Updating)?;
+            emit_repository_finished(events, task.repository(), Phase::Refreshing)?;
             Ok((task.index(), entry))
         },
     )?;
     let outcomes = outcomes.into_iter().collect::<Result<Vec<_>, AppError>>()?;
     let elapsed = started.elapsed();
-    let updated = outcomes
+    let changed = outcomes
         .iter()
         .filter(|(_, entry)| {
             matches!(
                 entry.outcome(),
-                Outcome::Updated { .. } | Outcome::UpdatedButRestorationFailed { .. }
+                Outcome::Refreshed { .. }
+                    | Outcome::Switched { .. }
+                    | Outcome::SwitchedAndBlocked { .. }
             )
         })
         .count();
@@ -236,9 +218,38 @@ fn update_phase(
         entries[index] = Some(entry);
     }
 
-    let summary = PhaseSummary::new(updated, elapsed);
-    events.emit(Event::PhaseCompleted { phase: Phase::Updating, summary })?;
+    let summary = PhaseSummary::new(changed, elapsed);
+    events.emit(Event::PhaseCompleted { phase: Phase::Refreshing, summary })?;
     Ok(summary)
+}
+
+fn refreshable_tasks<'a, 'b>(
+    tasks: &'b [update::Task<'a>],
+    entries: &mut [Option<Entry>],
+) -> Vec<&'b update::Task<'a>> {
+    let mut counts = HashMap::<(PathBuf, String), usize>::new();
+    for task in tasks {
+        let key = (task.resource().to_path_buf(), task.default_branch().to_string());
+        *counts.entry(key).or_default() += 1;
+    }
+
+    let mut refreshable = Vec::new();
+    for task in tasks {
+        let key = (task.resource().to_path_buf(), task.default_branch().to_string());
+        if counts[&key] > 1 {
+            entries[task.index()] = Some(Entry::new(
+                task.repository(),
+                Outcome::Blocked {
+                    reason: BlockedReason::LinkedWorktreeDefaultBranchConflict {
+                        branch: task.default_branch().to_string(),
+                    },
+                },
+            ));
+        } else {
+            refreshable.push(task);
+        }
+    }
+    refreshable
 }
 
 fn emit_repository_started(

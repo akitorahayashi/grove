@@ -8,7 +8,13 @@ mod git;
 mod repositories;
 mod zoxide;
 
-pub use app::api::{status, sync, validate};
+pub use app::api::{refresh, status, sync, validate};
+pub use app::refresh::{
+    BlockedReason as RefreshBlockedReason, Entry as RefreshEntry, Outcome as RefreshOutcome,
+    PhaseSummaries as RefreshPhaseSummaries, PhaseSummary as RefreshPhaseSummary,
+    Plan as RefreshPlan, RefreshOptions, Report as RefreshReport,
+    SkippedReason as RefreshSkippedReason,
+};
 pub use app::status::{
     BranchTrackingStatus, DefaultBranchStatus, RemoteUrlMismatch, StatusCondition, StatusEntry,
     StatusReport,

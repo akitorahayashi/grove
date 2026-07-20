@@ -17,6 +17,10 @@ gv sync
 gv sync frontend
 gv sync -z
 gv sync --dry-run
+
+gv refresh
+gv refresh frontend
+gv refresh --dry-run
 gv --config ~/workspace/grove.toml status
 ```
 
@@ -103,6 +107,35 @@ repositories with zoxide. Skipped and blocked repositories are not registered,
 and dry runs only report the repositories that would be registered. Registration
 uses one initial zoxide database snapshot and at most one final snapshot.
 
+## Refresh Behavior
+
+`gv refresh`, with the alias `gv rf`, updates repositories that already exist
+locally and leaves each successful working tree on its default branch. Missing
+repositories are blocked with guidance to run `gv sync`; they are not cloned.
+Independent repository tasks run concurrently with at most eight live tasks,
+while linked worktrees sharing a Git common directory remain serialized. Multiple
+selected linked worktrees that would finish on the same default branch are
+blocked before switching, because Git permits a branch to be checked out by only
+one linked worktree at a time.
+
+The refresh flow is:
+
+```text
+git fetch origin --prune
+git switch <default-branch>
+git merge --ff-only origin/<default-branch>
+```
+
+The switch is omitted when the default branch is already checked out. Ahead or
+diverged default branches are blocked before switching. Equal and behind
+branches are accepted, and the previous branch is neither restored nor deleted.
+A failure after a successful switch also leaves the default branch checked out
+and is reported as a blocked refresh that already switched branches.
+
+`gv refresh --dry-run` performs local validation without fetching or mutating
+Git state. Divergence in a dry run reflects the locally available
+remote-tracking refs, which may be older than the remote repository.
+
 ## Requirements
 
 Linux and macOS are the supported platforms. Windows is unsupported.
@@ -116,9 +149,9 @@ aarch64 binaries. Checksums, signatures, and attestations are not published.
 
 ## Library API
 
-The supported Rust API is the crate-root facade: `cli`, `status`, `sync`, and
-`validate`, plus their report, outcome, and error types. `cli` returns an
-`ExitCode` and does not terminate its host process.
+The supported Rust API is the crate-root facade: `cli`, `refresh`, `status`,
+`sync`, and `validate`, plus their report, outcome, and error types. `cli`
+returns an `ExitCode` and does not terminate its host process.
 
 ```rust
 let report = grove::validate(Some("/workspace/grove.toml".into()))?;

@@ -5,7 +5,8 @@
 `grove` is a Rust CLI for managing multiple Git repositories from
 `grove.toml`. The CLI command is `gv`. It clones missing repositories, reports
 repository state, and safely fast-forwards existing repositories' default
-branches through the system `git` command.
+branches through the system `git` command. Refresh operations leave successful
+working trees on their default branches.
 
 ## Architectural Highlights
 
@@ -15,8 +16,8 @@ branches through the system `git` command.
   application-wide errors.
 - `src/cli/` owns parsing, terminal-safe output, progress, and command
   completion for every subcommand.
-- `src/app/` owns init, status, sync, and validation orchestration and dependency
-  wiring.
+- `src/app/` owns init, refresh, status, sync, and validation orchestration and
+  dependency wiring.
 - `src/config/` owns discovery, include resolution, validation, and path
   normalization.
 - `src/repositories/` owns validated names, branch names, redacted URLs,

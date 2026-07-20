@@ -1,4 +1,4 @@
-use crate::app::sync::{Event, Phase, PhaseSummary};
+use crate::app::refresh::{Event, Phase, PhaseSummary};
 use crate::cli::repository_progress::{ProgressPhase, RepositoryProgress};
 
 #[derive(Debug, Clone, Copy)]
@@ -59,6 +59,6 @@ impl ProgressPhase for Phase {
     }
 
     fn shows_git_progress(self) -> bool {
-        self == Phase::Preparing
+        self == Phase::Fetching
     }
 }

@@ -8,7 +8,7 @@ use crate::AppError;
 
 const MAX_WORKERS: usize = 8;
 
-pub(super) fn map<T, R>(
+pub(crate) fn map<T, R>(
     items: &[T],
     parallelism: usize,
     action: impl Fn(&T) -> R + Sync,
@@ -20,7 +20,7 @@ where
     map_indexed(items, parallelism, |_, item| action(item))
 }
 
-pub(super) fn map_keyed<T, R, K>(
+pub(crate) fn map_keyed<T, R, K>(
     items: &[T],
     parallelism: usize,
     key: impl Fn(&T) -> K,
@@ -84,7 +84,7 @@ where
                         break;
                     };
                     let result = catch_unwind(AssertUnwindSafe(|| action(index, item)))
-                        .map_err(|_| AppError::internal("sync worker panicked"));
+                        .map_err(|_| AppError::internal("repository worker panicked"));
                     if sender.send((index, result)).is_err() {
                         break;
                     }
@@ -98,13 +98,15 @@ where
     for _ in 0..items.len() {
         let (index, result) = receiver
             .recv()
-            .map_err(|_| AppError::internal("sync worker result channel disconnected"))?;
+            .map_err(|_| AppError::internal("repository worker result channel disconnected"))?;
         ordered[index] = Some(result?);
     }
 
     ordered
         .into_iter()
-        .map(|result| result.ok_or_else(|| AppError::internal("sync worker omitted a result")))
+        .map(|result| {
+            result.ok_or_else(|| AppError::internal("repository worker omitted a result"))
+        })
         .collect()
 }
 

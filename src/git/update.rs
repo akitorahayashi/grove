@@ -25,6 +25,13 @@ pub enum GitUpdateOutcome {
     Failed { primary: String, restoration: Restoration },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GitRefreshOutcome {
+    Completed { update: GitUpdate, previous_branch: Option<String> },
+    Blocked(GitUpdateBlock),
+    Failed { message: String, previous_branch: Option<String> },
+}
+
 impl GitUpdate {
     pub fn new(before: String, after: String) -> Self {
         Self { before, after }

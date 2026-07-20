@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use crate::AppError;
 use crate::repositories::{BranchName, RemoteUrl};
 
-use super::{GitProgress, GitUpdateOutcome};
+use super::{GitProgress, GitRefreshOutcome, GitUpdateOutcome};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BranchDivergence {
@@ -72,6 +72,12 @@ pub trait GitClient: Sync {
         repository: &Path,
         branch: &str,
     ) -> Result<GitUpdateOutcome, AppError>;
+
+    fn refresh_default_branch(
+        &self,
+        repository: &Path,
+        branch: &str,
+    ) -> Result<GitRefreshOutcome, AppError>;
 }
 
 pub trait GitProgressSink {

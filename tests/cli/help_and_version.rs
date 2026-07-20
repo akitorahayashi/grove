@@ -13,6 +13,8 @@ fn help_lists_mvp_commands() {
         .success()
         .stdout(predicate::str::contains("init"))
         .stdout(predicate::str::contains("i"))
+        .stdout(predicate::str::contains("refresh"))
+        .stdout(predicate::str::is_match(r"(?m)^\s+refresh\s+.*\[aliases: rf\]").unwrap())
         .stdout(predicate::str::contains("sync"))
         .stdout(predicate::str::contains("s"))
         .stdout(predicate::str::contains("status"))
@@ -28,6 +30,20 @@ fn version_uses_grove_package() {
     let ctx = TestContext::new();
 
     ctx.cli().arg("--version").assert().success().stdout(predicate::str::contains("gv 0.1.0"));
+}
+
+#[test]
+fn refresh_help_exposes_only_positional_targets_and_dry_run() {
+    let ctx = TestContext::new();
+
+    ctx.cli()
+        .args(["refresh", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[repo]..."))
+        .stdout(predicate::str::contains("--dry-run"))
+        .stdout(predicate::str::contains("--force").not())
+        .stdout(predicate::str::contains("zoxide").not());
 }
 
 #[test]
