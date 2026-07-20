@@ -31,23 +31,25 @@ gv --config ~/workspace/grove.toml status
 ```toml
 version = 1
 
-[[repo]]
-name = "frontend"
-path = "apps/frontend"
+[repos.frontend]
 url = "git@github.com:company/frontend.git"
 default_branch = "main"
 
-[[repo]]
-name = "backend"
+[repos.backend]
 path = "services/backend"
 url = "git@github.com:company/backend.git"
+
+[repos."company.service"]
+url = "git@github.com:company/service.git"
 ```
 
-The `path` value is resolved relative to the `grove.toml` file that defines the
-repository. Absolute paths and paths that leave the canonical grove root are
-rejected. Symlinks are valid when their canonical targets remain inside the
-root. Symlink aliases share one operational identity for duplicate and nested
-path validation.
+Repository names are the direct table keys under `repos`. The `path` value is
+optional and defaults to the repository name. Explicit paths are resolved
+relative to the `grove.toml` file that defines the repository. Absolute paths
+and paths that leave the canonical grove root are rejected. Symlinks are valid
+when their canonical targets remain inside the root. Symlink aliases share one
+operational identity for duplicate and nested path validation. Repository names
+with `.` use quoted table keys.
 
 `default_branch` is optional. An explicitly configured branch takes precedence
 over `origin/HEAD`; `origin/HEAD` is used only when the field is absent. Branch

@@ -52,7 +52,7 @@ fn early_closed_stdout_exits_without_panic() {
     let mut config = String::from("version = 1\n");
     for index in 0..2_000 {
         config.push_str(&format!(
-            "[[repo]]\nname = \"repo-{index}\"\npath = \"repo-{index}\"\nurl = \"git@example.com:repo-{index}.git\"\n"
+            "[repos.repo-{index}]\npath = \"repo-{index}\"\nurl = \"git@example.com:repo-{index}.git\"\n"
         ));
     }
     let config = ctx.write_config(&config);

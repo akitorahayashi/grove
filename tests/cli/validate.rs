@@ -13,8 +13,7 @@ include = [
   "work/grove.toml",
 ]
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "git@example.com:blog.git"
 "#,
@@ -24,8 +23,7 @@ url = "git@example.com:blog.git"
         r#"
 version = 1
 
-[[repo]]
-name = "frontend"
+[repos.frontend]
 path = "frontend"
 url = "git@example.com:frontend.git"
 "#,
@@ -50,8 +48,7 @@ fn validate_short_alias_reports_config_summary() {
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "git@example.com:blog.git"
 "#,
@@ -72,8 +69,7 @@ fn validate_fails_for_invalid_config() {
     let ctx = TestContext::new();
     let config = ctx.write_config(
         r#"
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "git@example.com:blog.git"
 "#,
@@ -96,7 +92,7 @@ fn validate_redacts_credentials_from_malformed_toml_errors() {
         r#"
 version = 1
 
-[[repo]]
+[repos.blog]
 url = "https://user:credential@example.com/repo.git
 "#,
     );
@@ -120,8 +116,7 @@ fn validate_does_not_require_git() {
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "git@example.com:blog.git"
 "#,
@@ -149,8 +144,7 @@ fn validate_rejects_repository_path_escaping_root_through_symlink() {
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "escape/blog"
 url = "git@example.com:blog.git"
 "#,
@@ -178,13 +172,11 @@ fn validate_rejects_duplicate_repository_paths_through_symlink_aliases() {
         r#"
 version = 1
 
-[[repo]]
-name = "first"
+[repos.first]
 path = "actual/repo"
 url = "git@example.com:first.git"
 
-[[repo]]
-name = "second"
+[repos.second]
 path = "alias/repo"
 url = "git@example.com:second.git"
 "#,
@@ -205,30 +197,13 @@ fn validate_rejects_documented_catalog_invariant_violations() {
     let cases = [
         ("unsupported version", "version = 2\n", "unsupported config version 2"),
         (
-            "duplicate names",
-            r#"
-version = 1
-[[repo]]
-name = "same"
-path = "first"
-url = "git@example.com:first.git"
-[[repo]]
-name = "same"
-path = "second"
-url = "git@example.com:second.git"
-"#,
-            "duplicate repository name 'same'",
-        ),
-        (
             "duplicate paths",
             r#"
 version = 1
-[[repo]]
-name = "first"
+[repos.first]
 path = "same"
 url = "git@example.com:first.git"
-[[repo]]
-name = "second"
+[repos.second]
 path = "same"
 url = "git@example.com:second.git"
 "#,
@@ -238,12 +213,10 @@ url = "git@example.com:second.git"
             "nested paths",
             r#"
 version = 1
-[[repo]]
-name = "first"
+[repos.first]
 path = "parent"
 url = "git@example.com:first.git"
-[[repo]]
-name = "second"
+[repos.second]
 path = "parent/child"
 url = "git@example.com:second.git"
 "#,
@@ -253,8 +226,7 @@ url = "git@example.com:second.git"
             "absolute path",
             r#"
 version = 1
-[[repo]]
-name = "repo"
+[repos.repo]
 path = "/tmp/outside"
 url = "git@example.com:repo.git"
 "#,
@@ -264,12 +236,31 @@ url = "git@example.com:repo.git"
             "root escape",
             r#"
 version = 1
-[[repo]]
-name = "repo"
+[repos.repo]
 path = "../outside"
 url = "git@example.com:repo.git"
 "#,
             "path leaves the grove root",
+        ),
+        (
+            "empty path",
+            r#"
+version = 1
+[repos.repo]
+path = ""
+url = "git@example.com:repo.git"
+"#,
+            "field 'repos.repo.path' must not be empty",
+        ),
+        (
+            "blank path",
+            r#"
+version = 1
+[repos.repo]
+path = "   "
+url = "git@example.com:repo.git"
+"#,
+            "field 'repos.repo.path' must not be empty",
         ),
         (
             "unknown field",
@@ -283,8 +274,7 @@ unexpected = true
             "invalid default branch",
             r#"
 version = 1
-[[repo]]
-name = "repo"
+[repos.repo]
 path = "repo"
 url = "git@example.com:repo.git"
 default_branch = "-unsafe"
@@ -305,6 +295,131 @@ default_branch = "-unsafe"
             .failure()
             .stderr(predicate::str::contains(expected));
     }
+}
+
+#[test]
+fn validate_accepts_repository_key_names_and_default_paths() {
+    let ctx = TestContext::new();
+    let config = ctx.write_config(
+        r#"
+version = 1
+
+[repos.frontend]
+url = "git@example.com:frontend.git"
+
+[repos."company.service"]
+url = "git@example.com:company.service.git"
+"#,
+    );
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("validate")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Validated 2 repositories"))
+        .stderr(predicate::str::is_empty());
+}
+
+#[test]
+fn validate_rejects_missing_repository_url() {
+    let ctx = TestContext::new();
+    let config = ctx.write_config(
+        r#"
+version = 1
+
+[repos.blog]
+"#,
+    );
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("validate")
+        .assert()
+        .failure()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("missing required field 'repos.blog.url'"));
+}
+
+#[test]
+fn validate_rejects_invalid_repository_key_names() {
+    let ctx = TestContext::new();
+    let config = ctx.write_config(
+        r#"
+version = 1
+
+[repos."bad name"]
+url = "git@example.com:bad.git"
+"#,
+    );
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("validate")
+        .assert()
+        .failure()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("invalid repository name: bad name"));
+}
+
+#[test]
+fn validate_rejects_legacy_repository_arrays() {
+    let ctx = TestContext::new();
+    let config = ctx.write_config(
+        r#"
+version = 1
+
+[[repo]]
+name = "blog"
+path = "blog"
+url = "git@example.com:blog.git"
+"#,
+    );
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("validate")
+        .assert()
+        .failure()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("unsupported field 'repo'"))
+        .stderr(predicate::str::contains("[repos.<name>]"));
+}
+
+#[test]
+fn validate_rejects_duplicate_names_across_includes() {
+    let ctx = TestContext::new();
+    let config = ctx.write_config(
+        r#"
+version = 1
+include = ["work/grove.toml"]
+
+[repos.same]
+url = "git@example.com:first.git"
+"#,
+    );
+    ctx.write_config_at(
+        "work/grove.toml",
+        r#"
+version = 1
+
+[repos.same]
+url = "git@example.com:second.git"
+"#,
+    );
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("validate")
+        .assert()
+        .failure()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("duplicate repository name 'same'"));
 }
 
 #[test]
@@ -346,8 +461,7 @@ fn validate_accepts_symlink_target_inside_root_and_rejects_nested_alias() {
     let config = accepted.write_config(
         r#"
 version = 1
-[[repo]]
-name = "repo"
+[repos.repo]
 path = "alias/repo"
 url = "git@example.com:repo.git"
 "#,
@@ -368,12 +482,10 @@ url = "git@example.com:repo.git"
     let config = nested.write_config(
         r#"
 version = 1
-[[repo]]
-name = "parent"
+[repos.parent]
 path = "actual/repo"
 url = "git@example.com:parent.git"
-[[repo]]
-name = "child"
+[repos.child]
 path = "alias/repo/child"
 url = "git@example.com:child.git"
 "#,
@@ -394,8 +506,7 @@ fn validate_accepts_valid_default_branch_with_slash() {
     let config = ctx.write_config(
         r#"
 version = 1
-[[repo]]
-name = "repo"
+[repos.repo]
 path = "repo"
 url = "git@example.com:repo.git"
 default_branch = "release/stable"

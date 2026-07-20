@@ -7,8 +7,7 @@ fn validate_returns_config_summary() {
         r#"
 version = 1
 
-[[repo]]
-name = "frontend"
+[repos.frontend]
 path = "frontend"
 url = "git@example.com:frontend.git"
 "#,
