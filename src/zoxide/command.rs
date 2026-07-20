@@ -14,11 +14,12 @@ impl ZoxideClient for CommandZoxideClient {
         command.arg("--version");
         let output =
             command.output().map_err(|err| AppError::ZoxideUnavailable(err.to_string()))?;
-        if output.status.success() {
-            Ok(())
-        } else {
-            Err(AppError::ZoxideUnavailable(command_message(&output)))
+        if !output.status.success() {
+            return Err(AppError::ZoxideUnavailable(command_message(&output)));
         }
+
+        verify_capability(&["query", "--help"])?;
+        verify_capability(&["add", "--help"])
     }
 
     fn resolve_symlinks(&self) -> bool {
@@ -43,6 +44,22 @@ impl ZoxideClient for CommandZoxideClient {
             format!("zoxide add {}", path.display()),
         )?;
         Ok(())
+    }
+}
+
+fn verify_capability(args: &[&str]) -> Result<(), AppError> {
+    let output = Command::new("zoxide")
+        .args(args)
+        .output()
+        .map_err(|err| AppError::ZoxideUnavailable(err.to_string()))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(AppError::ZoxideUnavailable(format!(
+            "required capability `zoxide {}` is unavailable: {}",
+            args.join(" "),
+            command_message(&output)
+        )))
     }
 }
 

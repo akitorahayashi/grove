@@ -2,129 +2,137 @@
 
 ## Intent
 
-`grove` is a Rust CLI for managing multiple Git repositories from
-`grove.toml`. The implementation follows concept-owned module boundaries:
-top-level modules identify owners, and each owner keeps its contracts,
-validation, and concrete implementation details inside its module.
+`grove` manages repositories declared in `grove.toml`. Concept owners contain
+their own validation, orchestration, and external-boundary behavior; generic
+utility or process layers are absent.
 
-## Design Axis
-
-The top-level source layout is organized by owning concept.
-
-- `src/cli` owns command-line parsing and terminal output.
-- `src/app` owns dependency wiring and use-case orchestration.
-- `src/config` owns `grove.toml` discovery, include resolution, path
-  normalization, and validation.
-- `src/repositories` owns repository definitions, names, selection, and state
-  models.
-- `src/git` owns the system `git` command boundary.
-- `src/error.rs` owns the application-wide error type.
-
-Boundary roles remain inside owning concepts rather than moving into generic
-top-level `ports`, `adapters`, `core`, or `utils` modules.
-
-## Current Structure
+## Source layout
 
 ```text
 src/
+  main.rs
+  lib.rs
   error.rs
+  assets/
+    grove.toml.tpl
   cli/
+    init.rs
     mod.rs
+    output.rs
     status.rs
-    sync.rs
+    validate.rs
+    sync/
+      mod.rs
+      progress.rs
   app/
     api.rs
     context.rs
+    init.rs
     status.rs
-    sync.rs
+    validate.rs
+    sync/
+      check.rs
+      events.rs
+      mod.rs
+      prepare.rs
+      report.rs
+      update.rs
+      workers.rs
+      zoxide.rs
   config/
     discovery.rs
     file.rs
     include.rs
+    mod.rs
     resolved.rs
     validation.rs
   repositories/
+    branch_name.rs
     definition.rs
+    mod.rs
     name.rs
+    path.rs
     selection.rs
+    url.rs
   git/
     client.rs
     command.rs
     default_branch.rs
+    mod.rs
+    progress.rs
     remote.rs
     update.rs
-    working_tree.rs
-  lib.rs
-  main.rs
+  zoxide/
+    client.rs
+    command.rs
+    mod.rs
 ```
 
-`src/lib.rs` is the public library surface and CLI entrypoint export.
-`src/main.rs` is the binary entrypoint that delegates to the library.
+## Boundaries
 
-## Ownership Rules
+`cli` owns Clap parsing, stream selection, terminal-safe text, styling, progress,
+and command completion. Subcommands return completion or error values. The
+crate-root `cli` function returns `ExitCode`; `main` is the sole process
+termination boundary. Output write failures propagate, and a closed stdout pipe
+has non-panicking handling.
 
-### cli/
+`app` owns the four use cases and default dependency wiring. Sync has check,
+clone/fetch preparation, update, and optional zoxide phases. Results retain
+selection order. Worker execution is bounded by the selected work, available
+parallelism, and a ceiling of eight. Shared Git common directories are
+serialized. Worker panic and channel disconnects become application errors.
 
-`src/cli` defines the `gv sync` and `gv status` command surface. It
-maps CLI interactions to application API calls and formats terminal output. It
-does not own use-case logic, configuration invariants, repository state
-inspection, or Git command behavior.
+`config` discovers the root file, resolves one include level, decodes TOML, and
+validates the complete catalog without invoking Git or zoxide. It rejects schema
+violations, unsupported versions, duplicate or nested includes, invalid names
+and branch refs, duplicate or nested repository identities, absolute paths, and
+paths outside the canonical grove root.
 
-### app/
+`repositories` owns validated repository values. `RemoteUrl` exposes raw text
+only through its process-argument accessor; `Display` and `Debug` are redacted.
+Repository path resolution canonicalizes the deepest existing ancestor and
+appends the nonexistent suffix. In-root aliases resolve to one operational
+identity while retaining the configured display path.
 
-`src/app` coordinates use cases and dependency wiring. It loads validated
-configuration, selects target repositories, invokes Git operations, and
-aggregates command results. It does not own TOML parsing, repository name
-validation, or process-level Git command execution.
+`git` owns Git availability, strict probe grammars, progress parsing, clone and
+fetch execution, and default-branch mutation. Git 2.23.0 is the minimum because
+updates use `git switch`. Expected absence statuses are declared per probe;
+other failures and malformed output remain errors. The mutation operation takes
+a fresh branch and working-tree snapshot and records restoration separately
+from the primary result.
 
-### config/
+The clone boundary revalidates the destination's existing ancestor immediately
+before creating directories and invoking Git. A filesystem actor can still
+replace components between validation and mutation; the standard filesystem
+API provides no portable atomic confinement primitive for this residual race.
 
-`src/config` owns the `grove.toml` boundary. It discovers the active config,
-loads TOML, resolves one level of includes, normalizes repository paths, and
-returns a `ResolvedConfig`.
+`zoxide` owns optional capability checks and command execution. Registration
+uses an initial database snapshot, adds missing entries with per-path outcomes,
+and uses one final snapshot to classify successful adds.
 
-Configuration validation rejects unsupported versions, missing required fields,
-nested includes, duplicate config references, duplicate repository names,
-duplicate repository paths, nested repository paths, absolute repository paths,
-and paths that leave the managed root.
+## Public facade
 
-### repositories/
+`src/lib.rs` exports `cli`, `status`, `sync`, and `validate`. It also exports the
+reports, outcomes, and `AppError` needed to consume those calls. Owner modules,
+process clients, dependency traits, events, and workers remain private.
 
-`src/repositories` owns repository-domain data. `RepositoryName` validates CLI
-target names. `RepositoryDefinition` represents a repository after config
-resolution. Selection logic lives beside those domain types.
-
-### git/
-
-`src/git` owns the system `git` command boundary. `GitClient` is the contract
-used by application use cases. `CommandGitClient` invokes the installed `git`
-binary with `std::process::Command`.
-
-Git behavior relies on the user's Git configuration, including SSH settings,
-credential helpers, proxy settings, Git LFS, URL rewriting, and authentication.
-
-### error.rs
-
-`src/error.rs` owns `AppError` when error semantics are application-wide.
-
-## Dependency Direction
+## Data flow
 
 ```text
-main -> lib -> cli -> app
-app -> config + repositories + git
-config -> repositories + error
-git -> error
-repositories -> error
-lib -> cli + app + config + repositories + git + error
+CLI or root facade
+  -> config discovery, include loading, and validation
+  -> repository selection
+  -> app use case
+  -> Git and optional zoxide boundaries
+  -> typed report
+  -> terminal-safe CLI rendering or library caller
 ```
 
-`repositories` does not depend on `config`, `git`, `app`, or `cli`.
-`config` creates repository definitions but does not execute Git commands.
-`git` inspects and updates repositories but does not load `grove.toml`.
+## Platform and automation
 
-## Testing Model
-
-- Unit tests live beside the modules they verify.
-- `tests/cli.rs` verifies the CLI boundary.
-- `tests/library.rs` verifies the public library boundary.
-- `tests/harness/` provides shared integration fixtures and local Git remotes.
+Linux and macOS are the complete supported platform set. Windows has no runtime,
+test, CI, or release support. CI obtains Rust 1.90.0 and its components from
+`rust-toolchain.toml`, while mise owns pinned development tools. GitHub Actions
+are selected by immutable commit identifiers and release permissions are scoped
+to release jobs. Releases contain four binaries and no checksum, signature, or
+attestation assets.

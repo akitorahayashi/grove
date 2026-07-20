@@ -1,23 +1,13 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitProgress {
-    phase: String,
     percent: Option<u8>,
     current: Option<u64>,
     total: Option<u64>,
 }
 
 impl GitProgress {
-    pub fn new(
-        phase: impl Into<String>,
-        percent: Option<u8>,
-        current: Option<u64>,
-        total: Option<u64>,
-    ) -> Self {
-        Self { phase: phase.into(), percent, current, total }
-    }
-
-    pub fn phase(&self) -> &str {
-        &self.phase
+    pub fn new(percent: Option<u8>, current: Option<u64>, total: Option<u64>) -> Self {
+        Self { percent, current, total }
     }
 
     pub fn percent(&self) -> Option<u8> {
@@ -39,7 +29,7 @@ pub struct GitProgressParser;
 impl GitProgressParser {
     pub fn parse(line: &str) -> Option<GitProgress> {
         let line = line.trim();
-        let (phase, detail) = line.split_once(':')?;
+        let (_, detail) = line.split_once(':')?;
         let percent = parse_percent(detail);
         let (current, total) = parse_count(detail);
 
@@ -47,7 +37,7 @@ impl GitProgressParser {
             return None;
         }
 
-        Some(GitProgress::new(phase.trim(), percent, current, total))
+        Some(GitProgress::new(percent, current, total))
     }
 }
 
@@ -84,7 +74,7 @@ mod tests {
     fn parses_git_percent_progress() {
         assert_eq!(
             GitProgressParser::parse("Receiving objects:  42% (128/302), 1.23 MiB | 2.00 MiB/s"),
-            Some(GitProgress::new("Receiving objects", Some(42), Some(128), Some(302)))
+            Some(GitProgress::new(Some(42), Some(128), Some(302)))
         );
     }
 

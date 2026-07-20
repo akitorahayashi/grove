@@ -88,26 +88,27 @@ pub(crate) fn execute_with_events(
             check::Decision::Clone => {
                 preparations.push(prepare::Task::Clone { index, repository });
             }
-            check::Decision::Fetch { common_directory, default_branch, current_branch } => {
+            check::Decision::Fetch { common_directory, default_branch } => {
                 preparations.push(prepare::Task::Fetch {
                     index,
                     repository,
                     common_directory,
                     default_branch,
-                    current_branch,
                 });
             }
         }
     }
 
     let (updates, prepared) =
-        prepare_phase(ctx.git(), &preparations, &mut entries, parallelism, events);
-    let updated = update_phase(ctx.git(), &updates, &mut entries, parallelism, events);
+        prepare_phase(ctx.git(), &preparations, &mut entries, parallelism, events)?;
+    let updated = update_phase(ctx.git(), &updates, &mut entries, parallelism, events)?;
 
     let entries = entries
         .into_iter()
-        .map(|entry| entry.expect("every selected repository should produce an outcome"))
-        .collect::<Vec<_>>();
+        .map(|entry| {
+            entry.ok_or_else(|| AppError::internal("selected repository produced no outcome"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let zoxide = if options.register_zoxide() {
         if options.dry_run() {
             Some(zoxide::dry_run(&repositories, &entries))
@@ -128,14 +129,14 @@ fn check_phase(
     dry_run: bool,
     events: &impl EventSink,
 ) -> Result<(Vec<check::Decision>, PhaseSummary), AppError> {
-    events.emit(Event::PhaseStarted { phase: Phase::Checking, total: repositories.len() });
+    events.emit(Event::PhaseStarted { phase: Phase::Checking, total: repositories.len() })?;
     let started = Instant::now();
     let results = workers::map(repositories, parallelism, |repository| {
-        emit_repository_started(events, repository, Phase::Checking);
+        emit_repository_started(events, repository, Phase::Checking)?;
         let result = check::repository(git, repository, dry_run);
-        emit_repository_finished(events, repository, Phase::Checking);
+        emit_repository_finished(events, repository, Phase::Checking)?;
         result
-    });
+    })?;
     let elapsed = started.elapsed();
 
     let mut decisions = Vec::with_capacity(results.len());
@@ -143,14 +144,14 @@ fn check_phase(
         match result {
             Ok(decision) => decisions.push(decision),
             Err(err) => {
-                events.emit(Event::PhaseFailed { phase: Phase::Checking });
+                events.emit(Event::PhaseFailed { phase: Phase::Checking })?;
                 return Err(err);
             }
         }
     }
 
     let summary = PhaseSummary::new(decisions.len(), elapsed);
-    events.emit(Event::PhaseCompleted { phase: Phase::Checking, summary });
+    events.emit(Event::PhaseCompleted { phase: Phase::Checking, summary })?;
     Ok((decisions, summary))
 }
 
@@ -160,24 +161,25 @@ fn prepare_phase<'a>(
     entries: &mut [Option<Entry>],
     parallelism: usize,
     events: &impl EventSink,
-) -> (Vec<update::Task<'a>>, PhaseSummary) {
+) -> Result<(Vec<update::Task<'a>>, PhaseSummary), AppError> {
     if tasks.is_empty() {
-        return (Vec::new(), PhaseSummary::default());
+        return Ok((Vec::new(), PhaseSummary::default()));
     }
 
-    events.emit(Event::PhaseStarted { phase: Phase::Preparing, total: tasks.len() });
+    events.emit(Event::PhaseStarted { phase: Phase::Preparing, total: tasks.len() })?;
     let started = Instant::now();
     let completions = workers::map_keyed(
         tasks,
         parallelism,
         |task| task.resource().to_path_buf(),
         |task| {
-            emit_repository_started(events, task.repository(), Phase::Preparing);
+            emit_repository_started(events, task.repository(), Phase::Preparing)?;
             let completion = prepare::repository(git, task, events);
-            emit_repository_finished(events, task.repository(), Phase::Preparing);
+            emit_repository_finished(events, task.repository(), Phase::Preparing)?;
             completion
         },
-    );
+    )?;
+    let completions = completions.into_iter().collect::<Result<Vec<_>, AppError>>()?;
     let elapsed = started.elapsed();
     let prepared = completions.iter().filter(|completion| completion.prepared()).count();
     let mut updates = Vec::new();
@@ -190,8 +192,8 @@ fn prepare_phase<'a>(
     }
 
     let summary = PhaseSummary::new(prepared, elapsed);
-    events.emit(Event::PhaseCompleted { phase: Phase::Preparing, summary });
-    (updates, summary)
+    events.emit(Event::PhaseCompleted { phase: Phase::Preparing, summary })?;
+    Ok((updates, summary))
 }
 
 fn update_phase(
@@ -200,28 +202,34 @@ fn update_phase(
     entries: &mut [Option<Entry>],
     parallelism: usize,
     events: &impl EventSink,
-) -> PhaseSummary {
+) -> Result<PhaseSummary, AppError> {
     if tasks.is_empty() {
-        return PhaseSummary::default();
+        return Ok(PhaseSummary::default());
     }
 
-    events.emit(Event::PhaseStarted { phase: Phase::Updating, total: tasks.len() });
+    events.emit(Event::PhaseStarted { phase: Phase::Updating, total: tasks.len() })?;
     let started = Instant::now();
     let outcomes = workers::map_keyed(
         tasks,
         parallelism,
         |task| task.resource().to_path_buf(),
         |task| {
-            emit_repository_started(events, task.repository(), Phase::Updating);
+            emit_repository_started(events, task.repository(), Phase::Updating)?;
             let entry = update::repository(git, task);
-            emit_repository_finished(events, task.repository(), Phase::Updating);
-            (task.index(), entry)
+            emit_repository_finished(events, task.repository(), Phase::Updating)?;
+            Ok((task.index(), entry))
         },
-    );
+    )?;
+    let outcomes = outcomes.into_iter().collect::<Result<Vec<_>, AppError>>()?;
     let elapsed = started.elapsed();
     let updated = outcomes
         .iter()
-        .filter(|(_, entry)| matches!(entry.outcome(), Outcome::Updated { .. }))
+        .filter(|(_, entry)| {
+            matches!(
+                entry.outcome(),
+                Outcome::Updated { .. } | Outcome::UpdatedButRestorationFailed { .. }
+            )
+        })
         .count();
 
     for (index, entry) in outcomes {
@@ -229,225 +237,26 @@ fn update_phase(
     }
 
     let summary = PhaseSummary::new(updated, elapsed);
-    events.emit(Event::PhaseCompleted { phase: Phase::Updating, summary });
-    summary
+    events.emit(Event::PhaseCompleted { phase: Phase::Updating, summary })?;
+    Ok(summary)
 }
 
 fn emit_repository_started(
     events: &impl EventSink,
     repository: &RepositoryDefinition,
     phase: Phase,
-) {
-    events.emit(Event::RepositoryStarted {
-        repository: repository.display_path().to_string(),
-        phase,
-    });
+) -> Result<(), AppError> {
+    events
+        .emit(Event::RepositoryStarted { repository: repository.display_path().to_string(), phase })
 }
 
 fn emit_repository_finished(
     events: &impl EventSink,
     repository: &RepositoryDefinition,
     phase: Phase,
-) {
+) -> Result<(), AppError> {
     events.emit(Event::RepositoryFinished {
         repository: repository.display_path().to_string(),
         phase,
-    });
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::{Path, PathBuf};
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::time::{Duration, Instant};
-
-    use tempfile::TempDir;
-
-    use super::execute;
-    use crate::AppError;
-    use crate::app::AppContext;
-    use crate::git::{BranchDivergence, GitClient, GitProgressSink, GitUpdate};
-
-    #[test]
-    fn serializes_shared_git_state_without_disabling_independent_concurrency() {
-        if std::thread::available_parallelism().unwrap().get() < 2 {
-            return;
-        }
-
-        let root = TempDir::new().unwrap();
-        let config = root.path().join("grove.toml");
-        std::fs::write(
-            &config,
-            r#"
-version = 1
-
-[[repo]]
-name = "third"
-path = "third"
-url = "https://example.com/third.git"
-
-[[repo]]
-name = "first"
-path = "first"
-url = "https://example.com/first.git"
-
-[[repo]]
-name = "second"
-path = "second"
-url = "https://example.com/second.git"
-"#,
-        )
-        .unwrap();
-        std::fs::create_dir(root.path().join("first")).unwrap();
-        std::fs::create_dir(root.path().join("second")).unwrap();
-        let ctx = AppContext::new(ConcurrentGit::default());
-
-        let report = execute(&ctx, Some(&config), &[], false).unwrap();
-
-        assert!(ctx.git().peak.load(Ordering::SeqCst) >= 2);
-        assert_eq!(ctx.git().fetch_peak.load(Ordering::SeqCst), 1);
-        assert_eq!(ctx.git().update_peak.load(Ordering::SeqCst), 1);
-        assert_eq!(
-            report.entries().iter().map(|entry| entry.repository()).collect::<Vec<_>>(),
-            ["third", "first", "second"]
-        );
-        assert_eq!(report.phases().prepared().count(), 3);
-    }
-
-    #[derive(Debug, Default)]
-    struct ConcurrentGit {
-        active: AtomicUsize,
-        peak: AtomicUsize,
-        fetch_active: AtomicUsize,
-        fetch_peak: AtomicUsize,
-        update_active: AtomicUsize,
-        update_peak: AtomicUsize,
-    }
-
-    impl ConcurrentGit {
-        fn record_peak(peak: &AtomicUsize, active: usize) {
-            let mut current = peak.load(Ordering::SeqCst);
-            while active > current {
-                match peak.compare_exchange(current, active, Ordering::SeqCst, Ordering::SeqCst) {
-                    Ok(_) => break,
-                    Err(actual) => current = actual,
-                }
-            }
-        }
-
-        fn prepare(&self) {
-            let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
-            Self::record_peak(&self.peak, active);
-
-            let deadline = Instant::now() + Duration::from_millis(500);
-            while self.peak.load(Ordering::SeqCst) < 2 && Instant::now() < deadline {
-                std::thread::yield_now();
-            }
-
-            self.active.fetch_sub(1, Ordering::SeqCst);
-        }
-
-        fn update(&self) {
-            let active = self.update_active.fetch_add(1, Ordering::SeqCst) + 1;
-            Self::record_peak(&self.update_peak, active);
-
-            let deadline = Instant::now() + Duration::from_millis(100);
-            while self.update_peak.load(Ordering::SeqCst) < 2 && Instant::now() < deadline {
-                std::thread::yield_now();
-            }
-
-            self.update_active.fetch_sub(1, Ordering::SeqCst);
-        }
-    }
-
-    impl GitClient for ConcurrentGit {
-        fn verify_available(&self) -> Result<(), AppError> {
-            Ok(())
-        }
-
-        fn clone_repository(
-            &self,
-            _url: &str,
-            _destination: &Path,
-            _progress: &mut dyn GitProgressSink,
-        ) -> Result<(), AppError> {
-            self.prepare();
-            Ok(())
-        }
-
-        fn fetch(
-            &self,
-            _repository: &Path,
-            _progress: &mut dyn GitProgressSink,
-        ) -> Result<(), AppError> {
-            let active = self.fetch_active.fetch_add(1, Ordering::SeqCst) + 1;
-            Self::record_peak(&self.fetch_peak, active);
-            self.prepare();
-            self.fetch_active.fetch_sub(1, Ordering::SeqCst);
-            Ok(())
-        }
-
-        fn common_directory(&self, _repository: &Path) -> Result<PathBuf, AppError> {
-            Ok(PathBuf::from("/shared/common.git"))
-        }
-
-        fn is_work_tree(&self, _repository: &Path) -> Result<bool, AppError> {
-            Ok(true)
-        }
-
-        fn current_branch(&self, _repository: &Path) -> Result<Option<String>, AppError> {
-            Ok(Some("main".to_string()))
-        }
-
-        fn working_tree_clean(&self, _repository: &Path) -> Result<bool, AppError> {
-            Ok(true)
-        }
-
-        fn remote_url(&self, repository: &Path) -> Result<Option<String>, AppError> {
-            let name = repository.file_name().unwrap().to_string_lossy();
-            Ok(Some(format!("https://example.com/{name}.git")))
-        }
-
-        fn default_branch(
-            &self,
-            _repository: &Path,
-            _configured: Option<&str>,
-        ) -> Result<Option<String>, AppError> {
-            Ok(Some("main".to_string()))
-        }
-
-        fn local_branch_exists(&self, _repository: &Path, _branch: &str) -> Result<bool, AppError> {
-            Ok(true)
-        }
-
-        fn remote_branch_exists(
-            &self,
-            _repository: &Path,
-            _branch: &str,
-        ) -> Result<bool, AppError> {
-            Ok(true)
-        }
-
-        fn branch_divergence(
-            &self,
-            _repository: &Path,
-            _branch: &str,
-        ) -> Result<Option<BranchDivergence>, AppError> {
-            Ok(Some(BranchDivergence::new(0, 0)))
-        }
-
-        fn short_revision(&self, _repository: &Path, _reference: &str) -> Result<String, AppError> {
-            unreachable!()
-        }
-
-        fn update_default_branch(
-            &self,
-            _repository: &Path,
-            _branch: &str,
-            _current_branch: &str,
-        ) -> Result<GitUpdate, AppError> {
-            self.update();
-            Ok(GitUpdate::new("abc1234".to_string(), "abc1234".to_string()))
-        }
-    }
+    })
 }

@@ -1,3 +1,3 @@
-fn main() {
-    grove::cli();
+fn main() -> std::process::ExitCode {
+    grove::cli()
 }

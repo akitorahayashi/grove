@@ -4,7 +4,10 @@ use std::path::{Component, Path, PathBuf};
 use super::include::{LoadedConfigFile, LoadedConfigTree};
 use super::resolved::ResolvedConfig;
 use crate::AppError;
-use crate::repositories::{RepositoryDefinition, RepositoryName};
+use crate::repositories::{
+    BranchName, RemoteUrl, RepositoryDefinition, RepositoryName, ResolutionError,
+    resolve_operational_path,
+};
 
 pub(super) fn resolve(tree: LoadedConfigTree) -> Result<ResolvedConfig, AppError> {
     let mut repositories = Vec::new();
@@ -19,14 +22,13 @@ pub(super) fn resolve(tree: LoadedConfigTree) -> Result<ResolvedConfig, AppError
             let path = required_field(raw.path.as_deref(), &file.path, "repo.path")?;
             let url = required_field(raw.url.as_deref(), &file.path, "repo.url")?;
             let repository_name = RepositoryName::new(name)?;
-            let resolved_path = resolve_repository_path(
+            let (resolved_path, display_path) = resolve_repository_path(
                 &file.directory,
                 path,
                 &tree.root_directory,
                 &file.path,
                 repository_name.as_str(),
             )?;
-            let display_path = relative_display(&tree.root_directory, &resolved_path);
             let source_config = file.path.clone();
             let default_branch =
                 validate_default_branch(raw.default_branch.as_deref(), &file.path)?;
@@ -60,13 +62,14 @@ pub(super) fn resolve(tree: LoadedConfigTree) -> Result<ResolvedConfig, AppError
                 url,
                 default_branch,
                 source_config,
+                tree.root_directory.clone(),
             ));
         }
     }
 
     validate_no_nested_repository_paths(&repositories)?;
 
-    Ok(ResolvedConfig::new(tree.root_path, tree.root_directory, repositories))
+    Ok(ResolvedConfig::new(tree.root_path, repositories))
 }
 
 fn validate_version(file: &LoadedConfigFile) -> Result<(), AppError> {
@@ -103,27 +106,25 @@ fn required_field<'a>(
     Ok(value)
 }
 
-fn validate_default_branch(value: Option<&str>, source: &Path) -> Result<Option<String>, AppError> {
+fn validate_default_branch(
+    value: Option<&str>,
+    source: &Path,
+) -> Result<Option<BranchName>, AppError> {
     let Some(value) = value else {
         return Ok(None);
     };
-    if value.trim().is_empty() {
-        return Err(AppError::config_error(format!(
-            "{}: default_branch must not be empty",
-            source.display()
-        )));
-    }
-    Ok(Some(value.to_string()))
+    BranchName::new(value).map(Some).map_err(|err| {
+        AppError::config_error(format!("{}: default_branch: {err}", source.display()))
+    })
 }
 
-fn validate_url(url: &str, source: &Path, name: &str) -> Result<String, AppError> {
-    if url.chars().any(char::is_control) {
-        return Err(AppError::config_error(format!(
+fn validate_url(url: &str, source: &Path, name: &str) -> Result<RemoteUrl, AppError> {
+    RemoteUrl::new(url).map_err(|_| {
+        AppError::config_error(format!(
             "{}: repository '{name}' has an invalid URL",
             source.display()
-        )));
-    }
-    Ok(url.to_string())
+        ))
+    })
 }
 
 fn resolve_repository_path(
@@ -132,7 +133,7 @@ fn resolve_repository_path(
     root: &Path,
     source: &Path,
     name: &str,
-) -> Result<PathBuf, AppError> {
+) -> Result<(PathBuf, String), AppError> {
     let path = Path::new(path);
     if path.is_absolute() {
         return Err(AppError::config_error(format!(
@@ -141,15 +142,26 @@ fn resolve_repository_path(
         )));
     }
 
-    let resolved = normalize_path(&base.join(path));
-    if !resolved.starts_with(root) {
+    let lexical = normalize_path(&base.join(path));
+    if !lexical.starts_with(root) {
         return Err(AppError::config_error(format!(
             "{}: repository '{name}' path leaves the grove root",
             source.display()
         )));
     }
 
-    Ok(resolved)
+    let resolved = match resolve_operational_path(&lexical, root) {
+        Ok(path) => path,
+        Err(ResolutionError::OutsideRoot) => {
+            return Err(AppError::config_error(format!(
+                "{}: repository '{name}' path leaves the grove root",
+                source.display()
+            )));
+        }
+        Err(ResolutionError::Io(err)) => return Err(err.into()),
+    };
+
+    Ok((resolved, relative_display(root, &lexical)))
 }
 
 fn validate_no_nested_repository_paths(
@@ -210,7 +222,7 @@ mod tests {
             resolve_repository_path(base, "../shared/repo", root, Path::new("grove.toml"), "repo")
                 .unwrap();
 
-        assert_eq!(resolved, PathBuf::from("/workspace/shared/repo"));
+        assert_eq!(resolved.0, PathBuf::from("/workspace/shared/repo"));
     }
 
     #[test]

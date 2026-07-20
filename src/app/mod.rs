@@ -1,7 +1,8 @@
-pub mod api;
+pub(crate) mod api;
 mod context;
-pub mod status;
-pub mod sync;
-pub mod validate;
+pub(crate) mod init;
+pub(crate) mod status;
+pub(crate) mod sync;
+pub(crate) mod validate;
 
-pub use context::AppContext;
+pub(crate) use context::AppContext;

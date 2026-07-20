@@ -1,4 +1,4 @@
-use std::io::{self, IsTerminal};
+use std::io;
 use std::path::PathBuf;
 
 use clap::Args;
@@ -7,7 +7,9 @@ use owo_colors::OwoColorize;
 use crate::AppError;
 use crate::app::api;
 use crate::app::status::{BranchTrackingStatus, DefaultBranchStatus, StatusCondition, StatusEntry};
-use crate::git::redact_url_for_display;
+
+use super::Completion;
+use super::output::{Output, terminal_text};
 
 #[derive(Args)]
 pub(super) struct StatusCommand {
@@ -18,19 +20,23 @@ pub(super) struct StatusCommand {
     fetch: bool,
 }
 
-pub(super) fn run(config: Option<PathBuf>, command: StatusCommand) -> Result<(), AppError> {
+pub(super) fn run(
+    config: Option<PathBuf>,
+    command: StatusCommand,
+    output: &mut Output<'_>,
+) -> Result<Completion, AppError> {
     let show_detail = command.repositories.len() == 1;
     let report = api::status(config, command.repositories, command.fetch)?;
     let entries = report.entries();
-    let styled = io::stdout().is_terminal();
+    let styled = output.stdout_is_terminal();
 
     if show_detail && entries.len() == 1 {
-        print_detail(&entries[0], styled);
+        print_detail(&entries[0], styled, output)?;
     } else {
-        print_table(entries, styled);
+        print_table(entries, styled, output)?;
     }
 
-    Ok(())
+    Ok(Completion::Success)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -53,8 +59,8 @@ impl ColumnWidths {
         };
 
         for entry in entries {
-            widths.name = widths.name.max(entry.name().len());
-            widths.repository = widths.repository.max(entry.display_path().len());
+            widths.name = widths.name.max(terminal_text(entry.name()).len());
+            widths.repository = widths.repository.max(terminal_text(entry.display_path()).len());
             widths.branch = widths.branch.max(branch(entry).len());
             widths.state = widths.state.max(table_state(entry).len());
             widths.default_branch = widths.default_branch.max(default_branch(entry).len());
@@ -68,18 +74,19 @@ impl ColumnWidths {
     }
 }
 
-fn print_table(entries: &[StatusEntry], styled: bool) {
+fn print_table(entries: &[StatusEntry], styled: bool, output: &mut Output<'_>) -> io::Result<()> {
     let widths = ColumnWidths::for_entries(entries);
 
-    println!();
-    print_header(widths, styled);
-    print_separator(widths, styled);
+    output.stdout(format_args!("\n"))?;
+    print_header(widths, styled, output)?;
+    print_separator(widths, styled, output)?;
     for entry in entries {
-        print_row(entry, widths, styled);
+        print_row(entry, widths, styled, output)?;
     }
+    Ok(())
 }
 
-fn print_header(widths: ColumnWidths, styled: bool) {
+fn print_header(widths: ColumnWidths, styled: bool, output: &mut Output<'_>) -> io::Result<()> {
     let name = format_cell("NAME", widths.name);
     let repository = format_cell("REPOSITORY", widths.repository);
     let branch = format_cell("BRANCH", widths.branch);
@@ -87,130 +94,145 @@ fn print_header(widths: ColumnWidths, styled: bool) {
     let default_branch = format_cell("DEFAULT", widths.default_branch);
 
     if styled {
-        println!(
+        output.stdout(format_args!(
             "{}  {}  {}  {}  {}",
             name.yellow().bold(),
             repository.yellow().bold(),
             branch.yellow().bold(),
             state.yellow().bold(),
             default_branch.yellow().bold()
-        );
+        ))?;
     } else {
-        println!("{name}  {repository}  {branch}  {state}  {default_branch}");
+        output.stdout(format_args!("{name}  {repository}  {branch}  {state}  {default_branch}"))?;
     }
+    output.stdout(format_args!("\n"))
 }
 
-fn print_separator(widths: ColumnWidths, styled: bool) {
+fn print_separator(widths: ColumnWidths, styled: bool, output: &mut Output<'_>) -> io::Result<()> {
     let separator = "-".repeat(widths.separator_len());
     if styled {
-        println!("{}", separator.dimmed());
+        output.stdout(format_args!("{}\n", separator.dimmed()))
     } else {
-        println!("{separator}");
+        output.stdout(format_args!("{separator}\n"))
     }
 }
 
-fn print_row(entry: &StatusEntry, widths: ColumnWidths, styled: bool) {
-    let name = format_cell(entry.name(), widths.name);
-    let repository = format_cell(entry.display_path(), widths.repository);
+fn print_row(
+    entry: &StatusEntry,
+    widths: ColumnWidths,
+    styled: bool,
+    output: &mut Output<'_>,
+) -> io::Result<()> {
+    let name = format_cell(&terminal_text(entry.name()), widths.name);
+    let repository = format_cell(&terminal_text(entry.display_path()), widths.repository);
     let branch = format_cell(&branch(entry), widths.branch);
     let state = format_cell(&table_state(entry), widths.state);
     let default_branch = format_cell(&default_branch(entry), widths.default_branch);
 
     if styled {
-        println!(
+        output.stdout(format_args!(
             "{}  {}  {}  {}  {}",
             name.bold(),
             repository.cyan(),
             branch.blue(),
             format_state(&state, entry.condition()),
             default_branch.dimmed()
-        );
+        ))?;
     } else {
-        println!("{name}  {repository}  {branch}  {state}  {default_branch}");
+        output.stdout(format_args!("{name}  {repository}  {branch}  {state}  {default_branch}"))?;
     }
+    output.stdout(format_args!("\n"))
 }
 
-fn print_detail(entry: &StatusEntry, styled: bool) {
-    println!();
-    print_title(entry.name(), styled);
-    print_detail_separator(entry.name().len(), styled);
-    print_section("Repository", styled);
-    print_field("Path", entry.display_path(), styled);
-    print_field("Absolute path", entry.absolute_path(), styled);
-    print_field("URL", &redact_url_for_display(entry.url()), styled);
-    print_field("Config", entry.source_config(), styled);
+fn print_detail(entry: &StatusEntry, styled: bool, output: &mut Output<'_>) -> io::Result<()> {
+    let name = terminal_text(entry.name());
+    output.stdout(format_args!("\n"))?;
+    print_title(&name, styled, output)?;
+    print_detail_separator(name.len(), styled, output)?;
+    print_section("Repository", styled, output)?;
+    print_field("Path", &terminal_text(entry.display_path()), styled, output)?;
+    print_field("Absolute path", &terminal_text(entry.absolute_path()), styled, output)?;
+    print_field("URL", &terminal_text(entry.url()), styled, output)?;
+    print_field("Config", &terminal_text(entry.source_config()), styled, output)?;
 
-    println!();
-    print_section("Status", styled);
-    print_field("State", entry.condition().as_str(), styled);
-    print_field("Branch", &branch(entry), styled);
-    print_field("Default", &default_branch_name(entry), styled);
-    print_field("Tracking", &tracking(entry), styled);
+    output.stdout(format_args!("\n"))?;
+    print_section("Status", styled, output)?;
+    print_field("State", entry.condition().as_str(), styled, output)?;
+    print_field("Branch", &branch(entry), styled, output)?;
+    print_field("Default", &default_branch_name(entry), styled, output)?;
+    print_field("Tracking", &tracking(entry), styled, output)?;
 
     if entry.condition().message().is_some() || entry.remote_mismatch().is_some() {
-        println!();
-        print_section("Diagnostics", styled);
+        output.stdout(format_args!("\n"))?;
+        print_section("Diagnostics", styled, output)?;
         if let Some(message) = entry.condition().message() {
-            print_field("Reason", message, styled);
+            print_field("Reason", &terminal_text(message), styled, output)?;
         }
         if let Some(mismatch) = entry.remote_mismatch() {
-            print_diagnostic_line("Remote URL does not match grove.toml", styled);
-            print_diagnostic_field("Actual", &redact_url_for_display(mismatch.actual()), styled);
+            print_diagnostic_line("Remote URL does not match grove.toml", styled, output)?;
+            print_diagnostic_field("Actual", &terminal_text(mismatch.actual()), styled, output)?;
             print_diagnostic_field(
                 "Expected",
-                &redact_url_for_display(mismatch.expected()),
+                &terminal_text(mismatch.expected()),
                 styled,
-            );
+                output,
+            )?;
         }
     }
+    Ok(())
 }
 
-fn print_title(title: &str, styled: bool) {
+fn print_title(title: &str, styled: bool, output: &mut Output<'_>) -> io::Result<()> {
     if styled {
-        println!("{}", title.bold());
+        output.stdout(format_args!("{}\n", title.bold()))
     } else {
-        println!("{title}");
+        output.stdout(format_args!("{title}\n"))
     }
 }
 
-fn print_detail_separator(width: usize, styled: bool) {
+fn print_detail_separator(width: usize, styled: bool, output: &mut Output<'_>) -> io::Result<()> {
     let separator = "-".repeat(width.max(4));
     if styled {
-        println!("{}", separator.dimmed());
+        output.stdout(format_args!("{}\n", separator.dimmed()))
     } else {
-        println!("{separator}");
+        output.stdout(format_args!("{separator}\n"))
     }
 }
 
-fn print_section(section: &str, styled: bool) {
+fn print_section(section: &str, styled: bool, output: &mut Output<'_>) -> io::Result<()> {
     if styled {
-        println!("{}", section.yellow().bold());
+        output.stdout(format_args!("{}\n", section.yellow().bold()))
     } else {
-        println!("{section}");
+        output.stdout(format_args!("{section}\n"))
     }
 }
 
-fn print_field(label: &str, value: &str, styled: bool) {
+fn print_field(label: &str, value: &str, styled: bool, output: &mut Output<'_>) -> io::Result<()> {
     if styled {
-        println!("  {}  {}", format!("{label}:").dimmed(), value);
+        output.stdout(format_args!("  {}  {}\n", format!("{label}:").dimmed(), value))
     } else {
-        println!("  {label:<14} {value}", label = format!("{label}:"));
+        output.stdout(format_args!("  {label:<14} {value}\n", label = format!("{label}:")))
     }
 }
 
-fn print_diagnostic_line(value: &str, styled: bool) {
+fn print_diagnostic_line(value: &str, styled: bool, output: &mut Output<'_>) -> io::Result<()> {
     if styled {
-        println!("  {}", value.red());
+        output.stdout(format_args!("  {}\n", value.red()))
     } else {
-        println!("  {value}");
+        output.stdout(format_args!("  {value}\n"))
     }
 }
 
-fn print_diagnostic_field(label: &str, value: &str, styled: bool) {
+fn print_diagnostic_field(
+    label: &str,
+    value: &str,
+    styled: bool,
+    output: &mut Output<'_>,
+) -> io::Result<()> {
     if styled {
-        println!("    {} {}", format!("{label}:").dimmed(), value);
+        output.stdout(format_args!("    {} {}\n", format!("{label}:").dimmed(), value))
     } else {
-        println!("    {label:<9} {value}", label = format!("{label}:"));
+        output.stdout(format_args!("    {label:<9} {value}\n", label = format!("{label}:")))
     }
 }
 
@@ -219,7 +241,7 @@ fn format_cell(value: &str, width: usize) -> String {
 }
 
 fn branch(entry: &StatusEntry) -> String {
-    entry.branch().unwrap_or("-").to_string()
+    terminal_text(entry.branch().unwrap_or("-"))
 }
 
 fn default_branch(entry: &StatusEntry) -> String {
@@ -253,7 +275,6 @@ fn format_default_branch(status: &DefaultBranchStatus) -> String {
         }
         BranchTrackingStatus::MissingLocalBranch => parts.push("local missing".to_string()),
         BranchTrackingStatus::MissingRemoteBranch => parts.push("remote missing".to_string()),
-        BranchTrackingStatus::Unavailable => parts.push("tracking unavailable".to_string()),
     }
     parts.join(" ")
 }
@@ -273,7 +294,6 @@ fn format_tracking_status(status: &BranchTrackingStatus) -> String {
         }
         BranchTrackingStatus::MissingLocalBranch => "local branch missing".to_string(),
         BranchTrackingStatus::MissingRemoteBranch => "remote branch missing".to_string(),
-        BranchTrackingStatus::Unavailable => "unavailable".to_string(),
     }
 }
 
@@ -287,18 +307,9 @@ fn table_state(entry: &StatusEntry) -> String {
 }
 
 fn sanitize_summary(value: &str) -> String {
-    let escaped = value
-        .chars()
-        .flat_map(|character| {
-            if character.is_control() {
-                character.escape_default().collect::<Vec<_>>()
-            } else {
-                vec![character]
-            }
-        })
-        .collect::<String>();
+    let escaped = terminal_text(value);
     let single_line = escaped.split_whitespace().collect::<Vec<_>>().join(" ");
-    redact_url_for_display(&single_line)
+    crate::git::redact_url_for_display(&single_line)
 }
 
 fn format_state(padded: &str, condition: &StatusCondition) -> String {

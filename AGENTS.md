@@ -13,14 +13,20 @@ branches through the system `git` command.
   `config/` for `grove.toml`, `repositories/` for managed repository domain
   data, `git/` for the system Git boundary, and `error.rs` for
   application-wide errors.
-- `src/cli/` owns only parsing and terminal output for `sync` and `status`.
-- `src/app/` owns use-case orchestration and dependency wiring.
+- `src/cli/` owns parsing, terminal-safe output, progress, and command
+  completion for every subcommand.
+- `src/app/` owns init, status, sync, and validation orchestration and dependency
+  wiring.
 - `src/config/` owns discovery, include resolution, validation, and path
   normalization.
-- `src/repositories/` owns repository names, resolved definitions, and target
-  selection.
-- `src/git/` owns `GitClient` and the `CommandGitClient` implementation backed
-  by `std::process::Command`.
+- `src/repositories/` owns validated names, branch names, redacted URLs,
+  operational paths, definitions, and target selection.
+- `src/git/` owns strict Git probes and non-destructive mutation through the
+  system `git` command.
+- `src/zoxide/` owns optional zoxide capability checks and registration
+  commands.
+- `src/lib.rs` exposes only the root use-case facade and required result/error
+  types. Process clients and orchestration internals are private.
 
 ## Naming Conventions
 

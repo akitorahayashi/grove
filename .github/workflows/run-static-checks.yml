@@ -5,15 +5,16 @@ on:
 
 jobs:
   run-static-checks:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Setup Rust Environment
         uses: ./.github/actions/setup
         with:
-          components: rustfmt,clippy
           install-mise: 'true'
           mise-tools: just
 

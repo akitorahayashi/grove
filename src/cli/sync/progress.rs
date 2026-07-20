@@ -6,7 +6,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use crate::app::sync::{Event, Phase, PhaseSummary};
 use crate::git::GitProgress;
 
-use super::super::printer::Printer;
+use super::super::output::terminal_text;
 
 const MINIMUM_NAME_WIDTH: usize = 20;
 
@@ -47,8 +47,8 @@ struct Child {
 }
 
 impl Display {
-    pub(super) fn new(printer: Printer) -> Self {
-        Self::with_target(printer.target())
+    pub(super) fn new() -> Self {
+        Self::with_target(ProgressDrawTarget::stderr())
     }
 
     fn with_target(target: ProgressDrawTarget) -> Self {
@@ -108,12 +108,13 @@ impl Display {
             return;
         }
 
-        self.name_width = self.name_width.max(repository.chars().count());
+        let displayed = terminal_text(&repository);
+        self.name_width = self.name_width.max(displayed.chars().count());
         self.refresh_child_styles();
 
         let progress = self.multi.add(ProgressBar::new_spinner());
         progress.set_style(unknown_style(self.name_width));
-        progress.set_message(repository.clone());
+        progress.set_message(displayed);
         progress.tick();
         self.children.insert(repository, Child { progress, numeric: false });
     }
@@ -228,7 +229,7 @@ mod tests {
         });
         display.handle(Event::GitProgress {
             repository: "blog".to_string(),
-            progress: GitProgress::new("Receiving objects", Some(42), Some(128), Some(302)),
+            progress: GitProgress::new(Some(42), Some(128), Some(302)),
         });
 
         let contents = terminal.contents();

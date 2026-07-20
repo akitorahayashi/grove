@@ -1,5 +1,6 @@
 use std::sync::mpsc::Sender;
 
+use crate::AppError;
 use crate::git::GitProgress;
 
 use super::PhaseSummary;
@@ -32,12 +33,12 @@ pub(crate) enum Event {
 }
 
 pub(crate) trait EventSink: Sync {
-    fn emit(&self, event: Event);
+    fn emit(&self, event: Event) -> Result<(), AppError>;
 }
 
 impl EventSink for Sender<Event> {
-    fn emit(&self, event: Event) {
-        self.send(event).expect("sync event receiver should remain connected");
+    fn emit(&self, event: Event) -> Result<(), AppError> {
+        self.send(event).map_err(|_| AppError::internal("sync event receiver disconnected"))
     }
 }
 
@@ -45,5 +46,24 @@ impl EventSink for Sender<Event> {
 pub(super) struct DiscardEvents;
 
 impl EventSink for DiscardEvents {
-    fn emit(&self, _event: Event) {}
+    fn emit(&self, _event: Event) -> Result<(), AppError> {
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
+
+    use super::{Event, EventSink, Phase};
+
+    #[test]
+    fn disconnected_event_receiver_is_an_application_error() {
+        let (sender, receiver) = mpsc::channel();
+        drop(receiver);
+
+        let result = sender.emit(Event::PhaseStarted { phase: Phase::Checking, total: 1 });
+
+        assert!(result.is_err_and(|error| error.to_string().contains("receiver disconnected")));
+    }
 }

@@ -5,6 +5,26 @@ pub struct GitUpdate {
     after: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GitUpdateBlock {
+    DetachedHead,
+    DirtyWorkingTree,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Restoration {
+    NotNeeded,
+    Restored,
+    Failed(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GitUpdateOutcome {
+    Completed { update: GitUpdate, restoration: Restoration },
+    Blocked(GitUpdateBlock),
+    Failed { primary: String, restoration: Restoration },
+}
+
 impl GitUpdate {
     pub fn new(before: String, after: String) -> Self {
         Self { before, after }
