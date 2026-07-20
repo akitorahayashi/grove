@@ -81,7 +81,7 @@ fn run_with_progress(
         progress.finish();
         let report = execution
             .join()
-            .map_err(|_| AppError::config_error("sync execution thread panicked"))??;
+            .map_err(|_| AppError::internal("sync execution thread panicked"))??;
         if let Some(error) = output_error {
             return Err(error.into());
         }

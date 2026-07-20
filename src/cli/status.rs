@@ -309,7 +309,7 @@ fn table_state(entry: &StatusEntry) -> String {
 fn sanitize_summary(value: &str) -> String {
     let escaped = terminal_text(value);
     let single_line = escaped.split_whitespace().collect::<Vec<_>>().join(" ");
-    crate::git::redact_url_for_display(&single_line)
+    crate::repositories::redact_urls_for_display(&single_line)
 }
 
 fn format_state(padded: &str, condition: &StatusCondition) -> String {

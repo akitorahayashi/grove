@@ -9,6 +9,6 @@ mod update;
 
 pub use client::{GitClient, GitProgressSink, NoopGitProgressSink};
 pub use command::CommandGitClient;
-pub use progress::{GitProgress, GitProgressParser};
-pub use remote::{redact_url_for_display, urls_match};
+pub use progress::{GitProgress, parse_git_progress};
+pub use remote::urls_match;
 pub use update::{GitRefreshOutcome, GitUpdate, GitUpdateBlock, GitUpdateOutcome, Restoration};

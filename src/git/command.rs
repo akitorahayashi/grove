@@ -6,8 +6,8 @@ use std::process::{Command, Output, Stdio};
 
 use super::client::BranchDivergence;
 use super::{
-    GitClient, GitProgressParser, GitProgressSink, GitRefreshOutcome, GitUpdate, GitUpdateBlock,
-    GitUpdateOutcome, Restoration, default_branch,
+    GitClient, GitProgressSink, GitRefreshOutcome, GitUpdate, GitUpdateBlock, GitUpdateOutcome,
+    Restoration, default_branch, parse_git_progress,
 };
 use crate::AppError;
 use crate::repositories::redact_urls_for_display;
@@ -220,31 +220,21 @@ impl GitClient for CommandGitClient {
         branch: &str,
     ) -> Result<BranchDivergence, AppError> {
         let range = format!("{branch}...origin/{branch}");
-        let output =
-            self.git_required(repository, &["rev-list", "--left-right", "--count", &range])?;
+        let args = ["rev-list", "--left-right", "--count", &range];
+        let output = self.git_required(repository, &args)?;
         let stdout = stdout(&output);
         let mut parts = stdout.split_whitespace();
         let parsed = parts.next().zip(parts.next());
         let Some((ahead, behind)) = parsed else {
-            return Err(malformed_output(
-                repository,
-                &["rev-list", "--left-right", "--count", &range],
-                &stdout,
-            ));
+            return Err(malformed_output(repository, &args, &stdout));
         };
         if parts.next().is_some() {
-            return Err(malformed_output(
-                repository,
-                &["rev-list", "--left-right", "--count", &range],
-                &stdout,
-            ));
+            return Err(malformed_output(repository, &args, &stdout));
         }
-        let ahead = ahead.parse::<u32>().map_err(|_| {
-            malformed_output(repository, &["rev-list", "--left-right", "--count", &range], &stdout)
-        })?;
-        let behind = behind.parse::<u32>().map_err(|_| {
-            malformed_output(repository, &["rev-list", "--left-right", "--count", &range], &stdout)
-        })?;
+        let ahead =
+            ahead.parse::<u32>().map_err(|_| malformed_output(repository, &args, &stdout))?;
+        let behind =
+            behind.parse::<u32>().map_err(|_| malformed_output(repository, &args, &stdout))?;
         Ok(BranchDivergence::new(ahead, behind))
     }
 
@@ -549,7 +539,7 @@ fn run_with_progress(
 
 fn emit_progress(line: &[u8], progress: &mut dyn GitProgressSink) -> Result<(), AppError> {
     let line = String::from_utf8_lossy(line);
-    if let Some(parsed) = GitProgressParser::parse(&line) {
+    if let Some(parsed) = parse_git_progress(&line) {
         progress.progress(parsed)?;
     }
     Ok(())
@@ -571,7 +561,7 @@ fn command_message(output: &Output) -> String {
 fn progress_message(stderr: &str) -> String {
     let message = stderr
         .lines()
-        .filter(|line| GitProgressParser::parse(line).is_none())
+        .filter(|line| parse_git_progress(line).is_none())
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
@@ -580,11 +570,7 @@ fn progress_message(stderr: &str) -> String {
 }
 
 fn format_probe(repository: &Path, args: &[&str]) -> String {
-    redact_urls_for_display(&format!("git -C {} {}", repository.display(), join_args(args)))
-}
-
-fn join_args(args: &[&str]) -> String {
-    args.join(" ")
+    redact_urls_for_display(&format!("git -C {} {}", repository.display(), args.join(" ")))
 }
 
 #[cfg(test)]

@@ -194,11 +194,17 @@ fn status_for_repository(
     fetch: bool,
 ) -> Result<StatusEntry, AppError> {
     if !repository.path().exists() {
-        return Ok(entry(repository, None, StatusCondition::Missing, None, None));
+        return Ok(StatusEntry::from_repository(
+            repository,
+            None,
+            StatusCondition::Missing,
+            None,
+            None,
+        ));
     }
 
     if !repository.path().is_dir() || !git.is_work_tree(repository.path())? {
-        return Ok(entry(
+        return Ok(StatusEntry::from_repository(
             repository,
             None,
             StatusCondition::Invalid("destination exists but is not a Git repository".to_string()),
@@ -210,7 +216,7 @@ fn status_for_repository(
     if fetch {
         let mut progress = NoopGitProgressSink;
         if let Err(err) = git.fetch(repository.path(), &mut progress) {
-            return Ok(entry(
+            return Ok(StatusEntry::from_repository(
                 repository,
                 None,
                 StatusCondition::FetchFailed(err.to_string()),
@@ -243,7 +249,7 @@ fn status_for_repository(
         StatusCondition::Dirty
     };
 
-    Ok(entry(repository, branch, condition, default_branch, remote_mismatch))
+    Ok(StatusEntry::from_repository(repository, branch, condition, default_branch, remote_mismatch))
 }
 
 fn default_branch_status(
@@ -268,14 +274,4 @@ fn default_branch_status(
         branch.to_string(),
         BranchTrackingStatus::Divergence { ahead: divergence.ahead(), behind: divergence.behind() },
     )))
-}
-
-fn entry(
-    repository: &RepositoryDefinition,
-    branch: Option<String>,
-    condition: StatusCondition,
-    default_branch: Option<DefaultBranchStatus>,
-    remote_mismatch: Option<RemoteUrlMismatch>,
-) -> StatusEntry {
-    StatusEntry::from_repository(repository, branch, condition, default_branch, remote_mismatch)
 }

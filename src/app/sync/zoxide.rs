@@ -1,8 +1,8 @@
 use std::collections::HashSet;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use crate::AppError;
-use crate::repositories::RepositoryDefinition;
+use crate::repositories::{RepositoryDefinition, normalize_lexically};
 use crate::zoxide::ZoxideClient;
 
 use super::{Entry, Outcome, Plan, ZoxideEntry, ZoxideOutcome, ZoxideReport};
@@ -141,23 +141,7 @@ fn registered_paths(paths: Vec<PathBuf>, resolve_symlinks: bool) -> HashSet<Path
 }
 
 fn zoxide_path(path: &Path, resolve_symlinks: bool) -> std::io::Result<PathBuf> {
-    if resolve_symlinks { path.canonicalize() } else { Ok(normalize_absolute(path)) }
-}
-
-fn normalize_absolute(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
-            Component::RootDir => normalized.push(std::path::MAIN_SEPARATOR.to_string()),
-            Component::CurDir => {}
-            Component::ParentDir => {
-                normalized.pop();
-            }
-            Component::Normal(part) => normalized.push(part),
-        }
-    }
-    normalized
+    if resolve_symlinks { path.canonicalize() } else { Ok(normalize_lexically(path)) }
 }
 
 fn failure_message(err: AppError) -> String {

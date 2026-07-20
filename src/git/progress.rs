@@ -23,22 +23,17 @@ impl GitProgress {
     }
 }
 
-#[derive(Debug, Default)]
-pub struct GitProgressParser;
+pub fn parse_git_progress(line: &str) -> Option<GitProgress> {
+    let line = line.trim();
+    let (_, detail) = line.split_once(':')?;
+    let percent = parse_percent(detail);
+    let (current, total) = parse_count(detail);
 
-impl GitProgressParser {
-    pub fn parse(line: &str) -> Option<GitProgress> {
-        let line = line.trim();
-        let (_, detail) = line.split_once(':')?;
-        let percent = parse_percent(detail);
-        let (current, total) = parse_count(detail);
-
-        if percent.is_none() && current.is_none() && total.is_none() {
-            return None;
-        }
-
-        Some(GitProgress::new(percent, current, total))
+    if percent.is_none() && current.is_none() && total.is_none() {
+        return None;
     }
+
+    Some(GitProgress::new(percent, current, total))
 }
 
 fn parse_percent(detail: &str) -> Option<u8> {
@@ -68,18 +63,18 @@ fn parse_git_count(value: &str) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{GitProgress, GitProgressParser};
+    use super::{GitProgress, parse_git_progress};
 
     #[test]
     fn parses_git_percent_progress() {
         assert_eq!(
-            GitProgressParser::parse("Receiving objects:  42% (128/302), 1.23 MiB | 2.00 MiB/s"),
+            parse_git_progress("Receiving objects:  42% (128/302), 1.23 MiB | 2.00 MiB/s"),
             Some(GitProgress::new(Some(42), Some(128), Some(302)))
         );
     }
 
     #[test]
     fn ignores_non_progress_lines() {
-        assert_eq!(GitProgressParser::parse("Cloning into 'blog'..."), None);
+        assert_eq!(parse_git_progress("Cloning into 'blog'..."), None);
     }
 }

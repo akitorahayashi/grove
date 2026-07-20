@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use owo_colors::OwoColorize;
 
-use crate::git::redact_url_for_display;
+use crate::repositories::redact_urls_for_display;
 
 use super::output::{Output, terminal_text};
 
@@ -64,7 +64,7 @@ pub(super) fn write_line(output: &mut Output<'_>, arguments: Arguments<'_>) -> i
 }
 
 pub(super) fn safe_message(value: &str) -> String {
-    terminal_text(&redact_url_for_display(value))
+    terminal_text(&redact_urls_for_display(value))
 }
 
 fn repositories(count: usize) -> String {

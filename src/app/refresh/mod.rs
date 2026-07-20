@@ -39,7 +39,7 @@ impl RefreshOptions {
 }
 
 pub fn execute(
-    ctx: &AppContext<impl GitClient, impl crate::zoxide::ZoxideClient>,
+    ctx: &AppContext<impl GitClient>,
     config_path: Option<&Path>,
     targets: &[String],
     dry_run: bool,
@@ -48,7 +48,7 @@ pub fn execute(
 }
 
 pub fn execute_with_options(
-    ctx: &AppContext<impl GitClient, impl crate::zoxide::ZoxideClient>,
+    ctx: &AppContext<impl GitClient>,
     config_path: Option<&Path>,
     targets: &[String],
     options: RefreshOptions,
@@ -57,7 +57,7 @@ pub fn execute_with_options(
 }
 
 pub(crate) fn execute_with_events(
-    ctx: &AppContext<impl GitClient, impl crate::zoxide::ZoxideClient>,
+    ctx: &AppContext<impl GitClient>,
     config_path: Option<&Path>,
     targets: &[String],
     options: RefreshOptions,
