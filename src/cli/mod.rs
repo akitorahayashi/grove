@@ -2,8 +2,11 @@
 
 mod init;
 mod output;
+mod refresh;
+mod repository_progress;
 mod status;
 mod sync;
+mod terminal_report;
 mod validate;
 
 use std::ffi::OsString;
@@ -33,6 +36,11 @@ struct Cli {
 enum Commands {
     #[command(visible_alias = "i", about = "Create grove.toml in the current directory")]
     Init(init::InitCommand),
+    #[command(
+        visible_alias = "rf",
+        about = "Update existing repositories and switch to their default branches"
+    )]
+    Refresh(refresh::RefreshCommand),
     #[command(
         visible_alias = "s",
         about = "Clone missing repositories and safely update existing repositories"
@@ -66,6 +74,7 @@ fn run_with_args(args: impl IntoIterator<Item = OsString>, output: &mut Output<'
 
     let result = match cli.command {
         Commands::Init(command) => init::run(cli.config, command, output),
+        Commands::Refresh(command) => refresh::run(cli.config, command, output),
         Commands::Sync(command) => sync::run(cli.config, command, output),
         Commands::Status(command) => status::run(cli.config, command, output),
         Commands::Validate(command) => validate::run(cli.config, command, output),

@@ -6,8 +6,8 @@ use std::process::{Command, Output, Stdio};
 
 use super::client::BranchDivergence;
 use super::{
-    GitClient, GitProgressParser, GitProgressSink, GitUpdate, GitUpdateBlock, GitUpdateOutcome,
-    Restoration, default_branch,
+    GitClient, GitProgressParser, GitProgressSink, GitRefreshOutcome, GitUpdate, GitUpdateBlock,
+    GitUpdateOutcome, Restoration, default_branch,
 };
 use crate::AppError;
 use crate::repositories::redact_urls_for_display;
@@ -262,36 +262,55 @@ impl GitClient for CommandGitClient {
         repository: &Path,
         branch: &str,
     ) -> Result<GitUpdateOutcome, AppError> {
-        let Some(current_branch) = self.current_branch(repository)? else {
-            return Ok(GitUpdateOutcome::Blocked(GitUpdateBlock::DetachedHead));
+        let preparation = match self.prepare_default_branch(repository, branch)? {
+            Ok(preparation) => preparation,
+            Err(block) => return Ok(GitUpdateOutcome::Blocked(block)),
         };
-        if !self.working_tree_clean(repository)? {
-            return Ok(GitUpdateOutcome::Blocked(GitUpdateBlock::DirtyWorkingTree));
-        }
+        let switched =
+            self.switch_default_branch(repository, branch, &preparation.current_branch)?;
 
-        let before = self.short_revision(repository, branch)?;
-        let merge_target = format!("origin/{branch}");
-        let after = self.short_revision(repository, &merge_target)?;
-        let switched = current_branch != branch;
-
-        if switched {
-            self.git_required(repository, &["switch", "--", branch])?;
-        }
-
-        if let Err(primary) =
-            self.git_required(repository, &["merge", "--ff-only", "--", &merge_target])
-        {
+        if let Err(primary) = self.fast_forward_default_branch(repository, branch) {
             return Ok(GitUpdateOutcome::Failed {
                 primary: primary.to_string(),
-                restoration: self.restore(repository, switched, &current_branch),
+                restoration: self.restore(repository, switched, &preparation.current_branch),
             });
         }
 
         Ok(GitUpdateOutcome::Completed {
-            update: GitUpdate::new(before, after),
-            restoration: self.restore(repository, switched, &current_branch),
+            update: preparation.update,
+            restoration: self.restore(repository, switched, &preparation.current_branch),
         })
     }
+
+    fn refresh_default_branch(
+        &self,
+        repository: &Path,
+        branch: &str,
+    ) -> Result<GitRefreshOutcome, AppError> {
+        let preparation = match self.prepare_default_branch(repository, branch)? {
+            Ok(preparation) => preparation,
+            Err(block) => return Ok(GitRefreshOutcome::Blocked(block)),
+        };
+        let switched =
+            match self.switch_default_branch(repository, branch, &preparation.current_branch) {
+                Ok(switched) => switched,
+                Err(error) => return Ok(GitRefreshOutcome::Failed(error.to_string())),
+            };
+
+        if let Err(error) = self.fast_forward_default_branch(repository, branch) {
+            return Ok(GitRefreshOutcome::Failed(error.to_string()));
+        }
+
+        Ok(GitRefreshOutcome::Completed {
+            update: preparation.update,
+            previous_branch: switched.then_some(preparation.current_branch),
+        })
+    }
+}
+
+struct DefaultBranchPreparation {
+    current_branch: String,
+    update: GitUpdate,
 }
 
 impl CommandGitClient {
@@ -302,6 +321,42 @@ impl CommandGitClient {
 
     fn command(&self) -> Command {
         Command::new(&self.executable)
+    }
+
+    fn prepare_default_branch(
+        &self,
+        repository: &Path,
+        branch: &str,
+    ) -> Result<Result<DefaultBranchPreparation, GitUpdateBlock>, AppError> {
+        let Some(current_branch) = self.current_branch(repository)? else {
+            return Ok(Err(GitUpdateBlock::DetachedHead));
+        };
+        if !self.working_tree_clean(repository)? {
+            return Ok(Err(GitUpdateBlock::DirtyWorkingTree));
+        }
+
+        let before = self.short_revision(repository, branch)?;
+        let after = self.short_revision(repository, &format!("origin/{branch}"))?;
+        Ok(Ok(DefaultBranchPreparation { current_branch, update: GitUpdate::new(before, after) }))
+    }
+
+    fn switch_default_branch(
+        &self,
+        repository: &Path,
+        branch: &str,
+        current_branch: &str,
+    ) -> Result<bool, AppError> {
+        let switched = current_branch != branch;
+        if switched {
+            self.git_required(repository, &["switch", "--", branch])?;
+        }
+        Ok(switched)
+    }
+
+    fn fast_forward_default_branch(&self, repository: &Path, branch: &str) -> Result<(), AppError> {
+        let merge_target = format!("origin/{branch}");
+        self.git_required(repository, &["merge", "--ff-only", "--", &merge_target])?;
+        Ok(())
     }
 
     fn restore(&self, repository: &Path, switched: bool, branch: &str) -> Restoration {
@@ -533,8 +588,8 @@ mod tests {
 
     use crate::AppError;
     use crate::git::{
-        CommandGitClient, GitClient, GitProgress, GitProgressSink, GitUpdateBlock,
-        GitUpdateOutcome, NoopGitProgressSink, Restoration,
+        CommandGitClient, GitClient, GitProgress, GitProgressSink, GitRefreshOutcome,
+        GitUpdateBlock, GitUpdateOutcome, NoopGitProgressSink, Restoration,
     };
     use crate::repositories::{BranchName, RemoteUrl};
 
@@ -702,6 +757,70 @@ mod tests {
             git_stdout(&repository, &["rev-parse", "main"]),
             git_stdout(&repository, &["rev-parse", "origin/main"])
         );
+    }
+
+    #[test]
+    fn refresh_rechecks_detached_and_dirty_preconditions() {
+        let root = TempDir::new().unwrap();
+        let repository = root.path().join("repo");
+        initialize_committed_repository(&repository);
+        let client = CommandGitClient::default();
+
+        std::fs::write(repository.join("dirty.txt"), "dirty\n").unwrap();
+        assert_eq!(
+            client.refresh_default_branch(&repository, "main").unwrap(),
+            GitRefreshOutcome::Blocked(GitUpdateBlock::DirtyWorkingTree)
+        );
+        std::fs::remove_file(repository.join("dirty.txt")).unwrap();
+        run_git(&repository, &["checkout", "--detach"]);
+        assert_eq!(
+            client.refresh_default_branch(&repository, "main").unwrap(),
+            GitRefreshOutcome::Blocked(GitUpdateBlock::DetachedHead)
+        );
+    }
+
+    #[test]
+    fn refresh_from_feature_branch_fast_forwards_and_stays_on_default_branch() {
+        let root = TempDir::new().unwrap();
+        let repository = create_updatable_repository(root.path());
+
+        let outcome =
+            CommandGitClient::default().refresh_default_branch(&repository, "main").unwrap();
+
+        assert!(matches!(
+            outcome,
+            GitRefreshOutcome::Completed {
+                ref update,
+                previous_branch: Some(ref branch),
+            } if update.changed() && branch == "feature"
+        ));
+        assert_eq!(git_stdout(&repository, &["branch", "--show-current"]), "main");
+        assert_eq!(
+            git_stdout(&repository, &["rev-parse", "main"]),
+            git_stdout(&repository, &["rev-parse", "origin/main"])
+        );
+        assert!(git_stdout(&repository, &["branch", "--list", "feature"]).contains("feature"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refresh_merge_failure_stays_on_default_branch() {
+        let root = TempDir::new().unwrap();
+        let repository = create_updatable_repository(root.path());
+        let wrapper = git_wrapper(
+            root.path(),
+            "if [ \"$1\" = merge ]; then echo merge-failed >&2; exit 42; fi",
+        );
+
+        let outcome = CommandGitClient::with_executable(wrapper)
+            .refresh_default_branch(&repository, "main")
+            .unwrap();
+
+        assert!(matches!(
+            outcome,
+            GitRefreshOutcome::Failed(ref message) if message.contains("merge-failed")
+        ));
+        assert_eq!(git_stdout(&repository, &["branch", "--show-current"]), "main");
     }
 
     #[test]

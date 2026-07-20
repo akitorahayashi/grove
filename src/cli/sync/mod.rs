@@ -1,10 +1,8 @@
 mod progress;
 
-use std::fmt::Arguments;
 use std::io;
 use std::path::PathBuf;
 use std::sync::mpsc;
-use std::time::Duration;
 
 use clap::Args;
 use owo_colors::OwoColorize;
@@ -15,11 +13,13 @@ use crate::app::sync::{
     BlockedReasonDetails, Outcome, Phase, PhaseSummary, Plan, Report, SyncOptions, ZoxideOutcome,
     ZoxideReport,
 };
-use crate::git::redact_url_for_display;
 
 use self::progress::Display;
 use super::Completion;
 use super::output::{Output, terminal_text};
+use super::terminal_report::{
+    print_count, print_count_with_elapsed, print_phase, safe_message, write_line,
+};
 
 #[derive(Args)]
 pub(super) struct SyncCommand {
@@ -106,9 +106,13 @@ fn print_phase_completion(
     output: &mut Output<'_>,
 ) -> io::Result<()> {
     match phase {
-        Phase::Checking => print_phase("Checked", summary, output),
-        Phase::Preparing => print_count_with_elapsed("Prepared", summary, true, output),
-        Phase::Updating => print_count_with_elapsed("Updated", summary, false, output),
+        Phase::Checking => print_phase("Checked", summary.count(), summary.elapsed(), output),
+        Phase::Preparing => {
+            print_count_with_elapsed("Prepared", summary.count(), summary.elapsed(), true, output)
+        }
+        Phase::Updating => {
+            print_count_with_elapsed("Updated", summary.count(), summary.elapsed(), false, output)
+        }
     }
 }
 
@@ -299,77 +303,6 @@ fn print_zoxide_report(
         }
     }
     Ok(())
-}
-
-fn print_phase(label: &str, summary: PhaseSummary, output: &mut Output<'_>) -> io::Result<()> {
-    if summary.count() == 0 {
-        write_line(
-            output,
-            format_args!(
-                "{}",
-                format!("{label} in {}", format_duration(summary.elapsed())).dimmed()
-            ),
-        )
-    } else {
-        print_count_with_elapsed(label, summary, true, output)
-    }
-}
-
-fn print_count_with_elapsed(
-    label: &str,
-    summary: PhaseSummary,
-    show_zero: bool,
-    output: &mut Output<'_>,
-) -> io::Result<()> {
-    if summary.count() == 0 && !show_zero {
-        return Ok(());
-    }
-
-    write_line(
-        output,
-        format_args!(
-            "{}",
-            format!(
-                "{label} {} {}",
-                repositories(summary.count()).bold(),
-                format!("in {}", format_duration(summary.elapsed())).dimmed()
-            )
-            .dimmed()
-        ),
-    )
-}
-
-fn print_count(label: &str, count: usize, output: &mut Output<'_>) -> io::Result<()> {
-    if count > 0 {
-        write_line(
-            output,
-            format_args!("{}", format!("{label} {}", repositories(count).bold()).dimmed()),
-        )?;
-    }
-    Ok(())
-}
-
-fn write_line(output: &mut Output<'_>, arguments: Arguments<'_>) -> io::Result<()> {
-    output.stderr(format_args!("{arguments}\n"))
-}
-
-fn safe_message(value: &str) -> String {
-    terminal_text(&redact_url_for_display(value))
-}
-
-fn repositories(count: usize) -> String {
-    match count {
-        1 => "1 repository".to_string(),
-        _ => format!("{count} repositories"),
-    }
-}
-
-fn format_duration(duration: Duration) -> String {
-    if duration.as_secs() > 0 {
-        format!("{:.2}s", duration.as_secs_f64())
-    } else {
-        format!("{}ms", duration.as_millis())
-    }
 }
 
 fn change_rank(outcome: &Outcome) -> u8 {

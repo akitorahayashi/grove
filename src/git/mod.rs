@@ -11,4 +11,4 @@ pub use client::{GitClient, GitProgressSink, NoopGitProgressSink};
 pub use command::CommandGitClient;
 pub use progress::{GitProgress, GitProgressParser};
 pub use remote::{redact_url_for_display, urls_match};
-pub use update::{GitUpdate, GitUpdateBlock, GitUpdateOutcome, Restoration};
+pub use update::{GitRefreshOutcome, GitUpdate, GitUpdateBlock, GitUpdateOutcome, Restoration};
