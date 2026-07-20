@@ -7,8 +7,7 @@ fn status_fails_for_unknown_repository_target() {
         r#"
 version = 1
 
-[[repo]]
-name = "frontend"
+[repos.frontend]
 path = "frontend"
 url = "git@example.com:frontend.git"
 "#,
@@ -28,8 +27,7 @@ fn refresh_fails_for_unknown_repository_target() {
         r#"
 version = 1
 
-[[repo]]
-name = "frontend"
+[repos.frontend]
 path = "frontend"
 url = "git@example.com:frontend.git"
 "#,

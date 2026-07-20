@@ -9,8 +9,7 @@ fn status_reports_missing_repositories_without_fetching() {
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "personal/blog"
 url = "git@example.com:blog.git"
 "#,
@@ -36,8 +35,7 @@ fn status_fetch_updates_remote_tracking_information() {
         r#"
 version = 1
 
-[[repo]]
-name = "frontend"
+[repos.frontend]
 path = "frontend"
 url = "{}"
 "#,
@@ -65,8 +63,7 @@ fn status_target_outputs_detail_sections() {
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "personal/blog"
 url = "git@example.com:blog.git"
 "#,
@@ -91,6 +88,28 @@ url = "git@example.com:blog.git"
 }
 
 #[test]
+fn status_uses_repository_name_as_default_path() {
+    let ctx = TestContext::new();
+    let config = ctx.write_config(
+        r#"
+version = 1
+
+[repos.blog]
+url = "git@example.com:blog.git"
+"#,
+    );
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("status")
+        .arg("blog")
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match(r"(?m)^  Path:\s+blog$").unwrap());
+}
+
+#[test]
 fn status_target_reports_remote_mismatch_diagnostics() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
@@ -98,8 +117,7 @@ fn status_target_reports_remote_mismatch_diagnostics() {
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "{}"
 "#,
@@ -120,8 +138,7 @@ url = "{}"
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "https://user:ghp_expected@example.com/org/repo.git?password=expected_secret&branch=main"
 "#,
@@ -156,8 +173,7 @@ fn status_target_reports_missing_local_default_branch() {
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "{}"
 "#,
@@ -191,8 +207,7 @@ fn status_target_reports_missing_remote_default_branch() {
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "{}"
 "#,
@@ -224,8 +239,7 @@ fn status_table_preserves_fetch_failure_message() {
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "{}"
 "#,
@@ -253,8 +267,7 @@ fn status_short_alias_reports_repository_status() {
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "personal/blog"
 url = "git@example.com:blog.git"
 "#,
@@ -280,8 +293,7 @@ fn status_rejects_git_older_than_required_version_before_inspection() {
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "git@example.com:blog.git"
 "#,

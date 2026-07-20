@@ -10,8 +10,7 @@ fn sync_dry_run_plans_missing_clone_without_creating_destination() {
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "{}"
 "#,
@@ -40,8 +39,7 @@ fn sync_clones_missing_repository() {
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "{}"
 "#,
@@ -74,8 +72,7 @@ fn sync_register_zoxide_adds_cloned_repository() {
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "{}"
 "#,
@@ -112,8 +109,7 @@ fn sync_register_zoxide_reports_existing_entry_without_adding() {
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "{}"
 "#,
@@ -153,8 +149,7 @@ fn sync_register_zoxide_adds_existing_repository_when_missing_from_zoxide() {
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "{}"
 "#,
@@ -192,8 +187,7 @@ fn sync_register_zoxide_reports_when_add_does_not_register_repository() {
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "{}"
 "#,
@@ -226,8 +220,7 @@ fn sync_register_zoxide_reports_unavailable_zoxide() {
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "{}"
 "#,
@@ -257,8 +250,7 @@ fn sync_dry_run_register_zoxide_reports_planned_registration_without_running_zox
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "{}"
 "#,
@@ -291,8 +283,7 @@ fn sync_dry_run_register_zoxide_reports_existing_repository_without_running_zoxi
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "{}"
 "#,
@@ -323,8 +314,7 @@ fn sync_short_alias_plans_missing_clone() {
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "{}"
 "#,
@@ -466,13 +456,11 @@ fn sync_register_zoxide_queries_database_at_most_twice() {
         r#"
 version = 1
 
-[[repo]]
-name = "first"
+[repos.first]
 path = "first"
 url = "{}"
 
-[[repo]]
-name = "second"
+[repos.second]
 path = "second"
 url = "{}"
 "#,
@@ -495,8 +483,7 @@ fn sync_rejects_zoxide_missing_required_add_capability_before_add() {
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "{}"
 "#,
@@ -540,8 +527,7 @@ fn sync_uses_change_colors_when_color_is_forced() {
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "{}"
 "#,
@@ -568,8 +554,7 @@ fn sync_updates_default_branch_and_restores_current_branch() {
         r#"
 version = 1
 
-[[repo]]
-name = "frontend"
+[repos.frontend]
 path = "frontend"
 url = "{}"
 "#,
@@ -606,7 +591,7 @@ fn sync_reports_completed_update_when_original_branch_restoration_fails() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
     let config = ctx.write_config(&format!(
-        "version = 1\n[[repo]]\nname = \"blog\"\npath = \"blog\"\nurl = \"{}\"\n",
+        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
         remote.url()
     ));
     ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
@@ -644,7 +629,7 @@ fn sync_reports_merge_failure_and_successful_restoration() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
     let config = ctx.write_config(&format!(
-        "version = 1\n[[repo]]\nname = \"blog\"\npath = \"blog\"\nurl = \"{}\"\n",
+        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
         remote.url()
     ));
     ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
@@ -680,8 +665,7 @@ fn sync_omits_current_repository_rows_when_nothing_changed() {
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "{}"
 "#,
@@ -711,8 +695,7 @@ fn sync_reports_skipped_repositories_and_exits_with_failure() {
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "{}"
 "#,
@@ -744,8 +727,7 @@ fn sync_reports_blocked_repositories_and_exits_with_failure() {
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "{}"
 "#,
@@ -758,8 +740,7 @@ url = "{}"
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "{}"
 "#,
@@ -788,8 +769,7 @@ fn sync_redacts_credentials_in_remote_url_mismatch_details() {
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "{}"
 "#,
@@ -811,8 +791,7 @@ url = "{}"
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "https://user:ghp_expected@example.com/org/repo.git?password=expected_secret&branch=main"
 "#,
@@ -846,8 +825,7 @@ fn sync_dry_run_redacts_credentials_and_secret_query_values() {
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "https://user:credential@example.com/repo.git?access_token=secret-value&branch=main"
 "#,
@@ -898,8 +876,7 @@ exit 1
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "https://user:credential@example.com/repo.git?password=secret-value"
 "#,
@@ -939,8 +916,7 @@ fn sync_redacts_credentials_in_successful_clone_output() {
     let config = ctx.write_config(
         r#"
 version = 1
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "blog"
 url = "https://user:credential@example.com/repo.git?api_key=secret-value"
 "#,
@@ -966,7 +942,7 @@ fn sync_redacts_credentials_echoed_by_fetch_failure() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
     let config = ctx.write_config(&format!(
-        "version = 1\n[[repo]]\nname = \"blog\"\npath = \"blog\"\nurl = \"{}\"\n",
+        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
         remote.url()
     ));
     ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
@@ -996,8 +972,7 @@ fn sync_escapes_control_characters_in_repository_paths() {
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "folder\n\u001b[31m"
 url = "git@example.com:blog.git"
 "#,
@@ -1027,8 +1002,7 @@ fn sync_rejects_missing_destination_below_symlink_escaping_root() {
         r#"
 version = 1
 
-[[repo]]
-name = "blog"
+[repos.blog]
 path = "escape/blog"
 url = "{}"
 "#,
@@ -1055,14 +1029,14 @@ fn sync_accepts_existing_repository_through_in_root_symlink() {
     let remote = ctx.create_remote("blog");
     std::fs::create_dir(ctx.workspace().join("actual")).unwrap();
     let initial = ctx.write_config(&format!(
-        "version = 1\n[[repo]]\nname = \"blog\"\npath = \"actual/blog\"\nurl = \"{}\"\n",
+        "version = 1\n[repos.blog]\npath = \"actual/blog\"\nurl = \"{}\"\n",
         remote.url()
     ));
     ctx.cli().arg("--config").arg(&initial).arg("sync").assert().success();
     std::os::unix::fs::symlink(ctx.workspace().join("actual"), ctx.workspace().join("alias"))
         .unwrap();
     let aliased = ctx.write_config(&format!(
-        "version = 1\n[[repo]]\nname = \"blog\"\npath = \"alias/blog\"\nurl = \"{}\"\n",
+        "version = 1\n[repos.blog]\npath = \"alias/blog\"\nurl = \"{}\"\n",
         remote.url()
     ));
 
@@ -1078,7 +1052,7 @@ fn sync_rejects_existing_repository_symlink_outside_root_without_mutation() {
     std::fs::write(outside.join("marker"), "unchanged\n").unwrap();
     std::os::unix::fs::symlink(&outside, ctx.workspace().join("blog")).unwrap();
     let config = ctx.write_config(
-        "version = 1\n[[repo]]\nname = \"blog\"\npath = \"blog\"\nurl = \"git@example.com:blog.git\"\n",
+        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"git@example.com:blog.git\"\n",
     );
 
     ctx.cli()
@@ -1097,7 +1071,7 @@ fn sync_blocks_non_repository_missing_origin_and_detached_head() {
     let non_repository = TestContext::new();
     std::fs::create_dir(non_repository.workspace().join("blog")).unwrap();
     let config = non_repository.write_config(
-        "version = 1\n[[repo]]\nname = \"blog\"\npath = \"blog\"\nurl = \"git@example.com:blog.git\"\n",
+        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"git@example.com:blog.git\"\n",
     );
     non_repository
         .cli()
@@ -1111,7 +1085,7 @@ fn sync_blocks_non_repository_missing_origin_and_detached_head() {
     let missing_origin = TestContext::new();
     let remote = missing_origin.create_remote("blog");
     let config = missing_origin.write_config(&format!(
-        "version = 1\n[[repo]]\nname = \"blog\"\npath = \"blog\"\nurl = \"{}\"\n",
+        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
         remote.url()
     ));
     missing_origin.cli().arg("--config").arg(&config).arg("sync").assert().success();
@@ -1128,7 +1102,7 @@ fn sync_blocks_non_repository_missing_origin_and_detached_head() {
     let detached = TestContext::new();
     let remote = detached.create_remote("blog");
     let config = detached.write_config(&format!(
-        "version = 1\n[[repo]]\nname = \"blog\"\npath = \"blog\"\nurl = \"{}\"\n",
+        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
         remote.url()
     ));
     detached.cli().arg("--config").arg(&config).arg("sync").assert().success();
@@ -1148,7 +1122,7 @@ fn sync_blocks_missing_default_and_configured_branches() {
     let missing_default = TestContext::new();
     let remote = missing_default.create_remote("blog");
     let config = missing_default.write_config(&format!(
-        "version = 1\n[[repo]]\nname = \"blog\"\npath = \"blog\"\nurl = \"{}\"\n",
+        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
         remote.url()
     ));
     missing_default.cli().arg("--config").arg(&config).arg("sync").assert().success();
@@ -1168,12 +1142,12 @@ fn sync_blocks_missing_default_and_configured_branches() {
     let missing_local = TestContext::new();
     let remote = missing_local.create_remote("blog");
     let initial = missing_local.write_config(&format!(
-        "version = 1\n[[repo]]\nname = \"blog\"\npath = \"blog\"\nurl = \"{}\"\n",
+        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
         remote.url()
     ));
     missing_local.cli().arg("--config").arg(&initial).arg("sync").assert().success();
     let config = missing_local.write_config(&format!(
-        "version = 1\n[[repo]]\nname = \"blog\"\npath = \"blog\"\nurl = \"{}\"\ndefault_branch = \"ghost\"\n",
+        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\ndefault_branch = \"ghost\"\n",
         remote.url()
     ));
     missing_local
@@ -1188,13 +1162,13 @@ fn sync_blocks_missing_default_and_configured_branches() {
     let missing_remote = TestContext::new();
     let remote = missing_remote.create_remote("blog");
     let initial = missing_remote.write_config(&format!(
-        "version = 1\n[[repo]]\nname = \"blog\"\npath = \"blog\"\nurl = \"{}\"\n",
+        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
         remote.url()
     ));
     missing_remote.cli().arg("--config").arg(&initial).arg("sync").assert().success();
     run_git(&missing_remote.workspace().join("blog"), &["branch", "ghost"]);
     let configured = missing_remote.write_config(&format!(
-        "version = 1\n[[repo]]\nname = \"blog\"\npath = \"blog\"\nurl = \"{}\"\ndefault_branch = \"ghost\"\n",
+        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\ndefault_branch = \"ghost\"\n",
         remote.url()
     ));
     missing_remote
@@ -1212,7 +1186,7 @@ fn sync_blocks_ahead_and_diverged_default_branches() {
     let ahead = TestContext::new();
     let remote = ahead.create_remote("blog");
     let config = ahead.write_config(&format!(
-        "version = 1\n[[repo]]\nname = \"blog\"\npath = \"blog\"\nurl = \"{}\"\n",
+        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
         remote.url()
     ));
     ahead.cli().arg("--config").arg(&config).arg("sync").assert().success();
@@ -1229,7 +1203,7 @@ fn sync_blocks_ahead_and_diverged_default_branches() {
     let diverged = TestContext::new();
     let remote = diverged.create_remote("blog");
     let config = diverged.write_config(&format!(
-        "version = 1\n[[repo]]\nname = \"blog\"\npath = \"blog\"\nurl = \"{}\"\n",
+        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
         remote.url()
     ));
     diverged.cli().arg("--config").arg(&config).arg("sync").assert().success();
@@ -1248,9 +1222,8 @@ fn sync_blocks_ahead_and_diverged_default_branches() {
 #[test]
 fn sync_reports_fetch_and_clone_failures() {
     let clone_failure = TestContext::new();
-    let config = clone_failure.write_config(
-        "version = 1\n[[repo]]\nname = \"blog\"\npath = \"blog\"\nurl = \"/does/not/exist\"\n",
-    );
+    let config = clone_failure
+        .write_config("version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"/does/not/exist\"\n");
     clone_failure
         .cli()
         .arg("--config")
@@ -1263,7 +1236,7 @@ fn sync_reports_fetch_and_clone_failures() {
     let fetch_failure = TestContext::new();
     let remote = fetch_failure.create_remote("blog");
     let initial = fetch_failure.write_config(&format!(
-        "version = 1\n[[repo]]\nname = \"blog\"\npath = \"blog\"\nurl = \"{}\"\n",
+        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
         remote.url()
     ));
     fetch_failure.cli().arg("--config").arg(&initial).arg("sync").assert().success();
@@ -1271,9 +1244,8 @@ fn sync_reports_fetch_and_clone_failures() {
         &fetch_failure.workspace().join("blog"),
         &["remote", "set-url", "origin", "/does/not/exist"],
     );
-    let config = fetch_failure.write_config(
-        "version = 1\n[[repo]]\nname = \"blog\"\npath = \"blog\"\nurl = \"/does/not/exist\"\n",
-    );
+    let config = fetch_failure
+        .write_config("version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"/does/not/exist\"\n");
     fetch_failure
         .cli()
         .arg("--config")
@@ -1289,7 +1261,7 @@ fn configured_default_branch_overrides_stale_origin_head() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
     let config = ctx.write_config(&format!(
-        "version = 1\n[[repo]]\nname = \"blog\"\npath = \"blog\"\nurl = \"{}\"\n",
+        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
         remote.url()
     ));
     ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
@@ -1299,7 +1271,7 @@ fn configured_default_branch_overrides_stale_origin_head() {
     );
     remote.add_commit("remote.txt", "remote\n");
     let configured = ctx.write_config(&format!(
-        "version = 1\n[[repo]]\nname = \"blog\"\npath = \"blog\"\nurl = \"{}\"\ndefault_branch = \"main\"\n",
+        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\ndefault_branch = \"main\"\n",
         remote.url()
     ));
 

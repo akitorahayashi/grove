@@ -17,10 +17,11 @@ pub(super) fn resolve(tree: LoadedConfigTree) -> Result<ResolvedConfig, AppError
     for file in &tree.files {
         validate_version(file)?;
 
-        for raw in &file.raw.repositories {
-            let name = required_field(raw.name.as_deref(), &file.path, "repo.name")?;
-            let path = required_field(raw.path.as_deref(), &file.path, "repo.path")?;
-            let url = required_field(raw.url.as_deref(), &file.path, "repo.url")?;
+        for entry in &file.raw.repositories {
+            let name = entry.name.as_str();
+            let raw = &entry.repository;
+            let path = raw.path.as_deref().unwrap_or(name);
+            let url = required_field(raw.url.as_deref(), &file.path, &format!("repos.{name}.url"))?;
             let repository_name = RepositoryName::new(name)?;
             let (resolved_path, display_path) = resolve_repository_path(
                 &file.directory,

@@ -32,13 +32,11 @@ fn refresh_alias_updates_only_selected_repository_and_stays_on_default_branch() 
         r#"
 version = 1
 
-[[repo]]
-name = "first"
+[repos.first]
 path = "first"
 url = "{}"
 
-[[repo]]
-name = "second"
+[repos.second]
 path = "second"
 url = "{}"
 "#,
@@ -156,13 +154,11 @@ fn refresh_processes_independent_repositories_after_a_skip() {
         r#"
 version = 1
 
-[[repo]]
-name = "dirty"
+[repos.dirty]
 path = "dirty"
 url = "{}"
 
-[[repo]]
-name = "ready"
+[repos.ready]
 path = "ready"
 url = "{}"
 "#,
@@ -218,13 +214,11 @@ fn refresh_blocks_ahead_and_diverged_branches_before_switching() {
         r#"
 version = 1
 
-[[repo]]
-name = "ahead"
+[repos.ahead]
 path = "ahead"
 url = "{}"
 
-[[repo]]
-name = "diverged"
+[repos.diverged]
 path = "diverged"
 url = "{}"
 "#,
@@ -317,18 +311,15 @@ fn refresh_reports_invalid_destinations_origin_and_default_branch() {
         r#"
 version = 1
 
-[[repo]]
-name = "not-git"
+[repos.not-git]
 path = "not-git"
 url = "{}"
 
-[[repo]]
-name = "no-origin"
+[repos.no-origin]
 path = "no-origin"
 url = "{}"
 
-[[repo]]
-name = "no-default"
+[repos.no-default]
 path = "no-default"
 url = "{}"
 "#,
@@ -534,13 +525,11 @@ fn refresh_blocks_multiple_linked_worktrees_before_switching() {
         r#"
 version = 1
 
-[[repo]]
-name = "primary"
+[repos.primary]
 path = "primary"
 url = "{}"
 
-[[repo]]
-name = "linked"
+[repos.linked]
 path = "linked"
 url = "{}"
 "#,
@@ -577,7 +566,7 @@ fn single_repository_config(
     let configured_branch =
         default_branch.map(|branch| format!("default_branch = \"{branch}\"\n")).unwrap_or_default();
     ctx.write_config(&format!(
-        "version = 1\n[[repo]]\nname = \"{name}\"\npath = \"{name}\"\nurl = \"{url}\"\n{configured_branch}"
+        "version = 1\n[repos.{name}]\npath = \"{name}\"\nurl = \"{url}\"\n{configured_branch}"
     ))
 }
 
