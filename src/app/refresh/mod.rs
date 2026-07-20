@@ -1,4 +1,5 @@
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use crate::AppError;
@@ -181,10 +182,15 @@ fn refresh_phase(
         return Ok(PhaseSummary::default());
     }
 
+    let tasks = refreshable_tasks(tasks, entries);
+    if tasks.is_empty() {
+        return Ok(PhaseSummary::default());
+    }
+
     events.emit(Event::PhaseStarted { phase: Phase::Refreshing, total: tasks.len() })?;
     let started = Instant::now();
     let outcomes = workers::map_keyed(
-        tasks,
+        &tasks,
         parallelism,
         |task| task.resource().to_path_buf(),
         |task| {
@@ -199,7 +205,12 @@ fn refresh_phase(
     let changed = outcomes
         .iter()
         .filter(|(_, entry)| {
-            matches!(entry.outcome(), Outcome::Refreshed { .. } | Outcome::Switched { .. })
+            matches!(
+                entry.outcome(),
+                Outcome::Refreshed { .. }
+                    | Outcome::Switched { .. }
+                    | Outcome::SwitchedAndBlocked { .. }
+            )
         })
         .count();
 
@@ -210,6 +221,35 @@ fn refresh_phase(
     let summary = PhaseSummary::new(changed, elapsed);
     events.emit(Event::PhaseCompleted { phase: Phase::Refreshing, summary })?;
     Ok(summary)
+}
+
+fn refreshable_tasks<'a, 'b>(
+    tasks: &'b [update::Task<'a>],
+    entries: &mut [Option<Entry>],
+) -> Vec<&'b update::Task<'a>> {
+    let mut counts = HashMap::<(PathBuf, String), usize>::new();
+    for task in tasks {
+        let key = (task.resource().to_path_buf(), task.default_branch().to_string());
+        *counts.entry(key).or_default() += 1;
+    }
+
+    let mut refreshable = Vec::new();
+    for task in tasks {
+        let key = (task.resource().to_path_buf(), task.default_branch().to_string());
+        if counts[&key] > 1 {
+            entries[task.index()] = Some(Entry::new(
+                task.repository(),
+                Outcome::Blocked {
+                    reason: BlockedReason::LinkedWorktreeDefaultBranchConflict {
+                        branch: task.default_branch().to_string(),
+                    },
+                },
+            ));
+        } else {
+            refreshable.push(task);
+        }
+    }
+    refreshable
 }
 
 fn emit_repository_started(

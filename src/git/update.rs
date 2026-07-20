@@ -29,7 +29,7 @@ pub enum GitUpdateOutcome {
 pub enum GitRefreshOutcome {
     Completed { update: GitUpdate, previous_branch: Option<String> },
     Blocked(GitUpdateBlock),
-    Failed(String),
+    Failed { message: String, previous_branch: Option<String> },
 }
 
 impl GitUpdate {

@@ -510,9 +510,62 @@ fn refresh_merge_failure_does_not_restore_original_branch() {
         .arg("refresh")
         .assert()
         .failure()
+        .stderr(predicate::str::contains("Refreshed 1 repository"))
+        .stderr(predicate::str::contains("Blocked 1 repository"))
+        .stderr(predicate::str::contains("x blog switched to main from feature; update failed:"))
         .stderr(predicate::str::contains("merge-failed"));
 
     assert_eq!(current_branch(&repository), "main");
+}
+
+#[test]
+fn refresh_blocks_multiple_linked_worktrees_before_switching() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("shared");
+    let initial_config = single_repository_config(&ctx, "primary", &remote.url(), None);
+    ctx.cli().arg("--config").arg(&initial_config).arg("sync").assert().success();
+
+    let primary = ctx.workspace().join("primary");
+    let linked = ctx.workspace().join("linked");
+    run_git(&primary, &["worktree", "add", "-b", "feature-linked", linked.to_str().unwrap()]);
+    remote.add_commit("remote.txt", "remote\n");
+
+    let config = ctx.write_config(&format!(
+        r#"
+version = 1
+
+[[repo]]
+name = "primary"
+path = "primary"
+url = "{}"
+
+[[repo]]
+name = "linked"
+path = "linked"
+url = "{}"
+"#,
+        remote.url(),
+        remote.url()
+    ));
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("refresh")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Blocked 2 repositories"))
+        .stderr(predicate::str::contains(
+            "multiple selected linked worktrees cannot all stay on 'main'",
+        ))
+        .stderr(predicate::str::contains("Refreshed ").not());
+
+    assert_eq!(current_branch(&primary), "main");
+    assert_eq!(current_branch(&linked), "feature-linked");
+    assert_ne!(
+        git_stdout(&primary, &["rev-parse", "main"]),
+        git_stdout(&primary, &["rev-parse", "origin/main"])
+    );
 }
 
 fn single_repository_config(

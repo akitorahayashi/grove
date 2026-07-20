@@ -113,7 +113,10 @@ uses one initial zoxide database snapshot and at most one final snapshot.
 locally and leaves each successful working tree on its default branch. Missing
 repositories are blocked with guidance to run `gv sync`; they are not cloned.
 Independent repository tasks run concurrently with at most eight live tasks,
-while linked worktrees sharing a Git common directory remain serialized.
+while linked worktrees sharing a Git common directory remain serialized. Multiple
+selected linked worktrees that would finish on the same default branch are
+blocked before switching, because Git permits a branch to be checked out by only
+one linked worktree at a time.
 
 The refresh flow is:
 
@@ -126,7 +129,8 @@ git merge --ff-only origin/<default-branch>
 The switch is omitted when the default branch is already checked out. Ahead or
 diverged default branches are blocked before switching. Equal and behind
 branches are accepted, and the previous branch is neither restored nor deleted.
-A failure after a successful switch also leaves the default branch checked out.
+A failure after a successful switch also leaves the default branch checked out
+and is reported as a blocked refresh that already switched branches.
 
 `gv refresh --dry-run` performs local validation without fetching or mutating
 Git state. Divergence in a dry run reflects the locally available

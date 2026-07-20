@@ -43,6 +43,7 @@ pub enum BlockedReason {
     MissingRemoteBranch { branch: String },
     Diverged { branch: String },
     AheadOfOrigin { branch: String },
+    LinkedWorktreeDefaultBranchConflict { branch: String },
     UpdateFailed(String),
 }
 
@@ -72,6 +73,9 @@ impl BlockedReason {
             Self::AheadOfOrigin { branch } => {
                 format!("{branch} is ahead of origin/{branch}")
             }
+            Self::LinkedWorktreeDefaultBranchConflict { branch } => {
+                format!("multiple selected linked worktrees cannot all stay on '{branch}'")
+            }
         }
     }
 }
@@ -81,6 +85,7 @@ pub enum Outcome {
     Planned(Plan),
     Refreshed { branch: String, before: String, after: String, previous_branch: Option<String> },
     Switched { branch: String, previous_branch: String },
+    SwitchedAndBlocked { branch: String, previous_branch: String, reason: BlockedReason },
     Current { branch: String },
     Skipped { reason: SkippedReason },
     Blocked { reason: BlockedReason },
@@ -213,7 +218,12 @@ impl Report {
         self.entries
             .iter()
             .filter(|entry| {
-                matches!(entry.outcome, Outcome::Refreshed { .. } | Outcome::Switched { .. })
+                matches!(
+                    entry.outcome,
+                    Outcome::Refreshed { .. }
+                        | Outcome::Switched { .. }
+                        | Outcome::SwitchedAndBlocked { .. }
+                )
             })
             .count()
     }
@@ -223,12 +233,25 @@ impl Report {
     }
 
     pub fn blocked(&self) -> usize {
-        self.entries.iter().filter(|entry| matches!(entry.outcome, Outcome::Blocked { .. })).count()
+        self.entries
+            .iter()
+            .filter(|entry| {
+                matches!(
+                    entry.outcome,
+                    Outcome::Blocked { .. } | Outcome::SwitchedAndBlocked { .. }
+                )
+            })
+            .count()
     }
 
     pub fn has_failures(&self) -> bool {
-        self.entries
-            .iter()
-            .any(|entry| matches!(entry.outcome, Outcome::Skipped { .. } | Outcome::Blocked { .. }))
+        self.entries.iter().any(|entry| {
+            matches!(
+                entry.outcome,
+                Outcome::Skipped { .. }
+                    | Outcome::Blocked { .. }
+                    | Outcome::SwitchedAndBlocked { .. }
+            )
+        })
     }
 }

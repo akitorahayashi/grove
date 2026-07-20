@@ -145,6 +145,17 @@ fn print_entries(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
                     format_args!(" {} {} {}", ">".cyan(), repository.bold(), change.dimmed()),
                 )?;
             }
+            Outcome::SwitchedAndBlocked { branch, previous_branch, reason } => {
+                let repository = terminal_text(entry.repository());
+                let message = safe_message(&format!(
+                    "switched to {branch} from {previous_branch}; update failed: {}",
+                    reason.message()
+                ));
+                write_line(
+                    output,
+                    format_args!(" {} {} {}", "x".red(), repository.bold(), message.dimmed()),
+                )?;
+            }
             Outcome::Skipped { reason } => {
                 let repository = terminal_text(entry.repository());
                 write_line(
@@ -192,8 +203,9 @@ fn change_rank(outcome: &Outcome) -> u8 {
     match outcome {
         Outcome::Refreshed { .. } => 0,
         Outcome::Switched { .. } => 1,
-        Outcome::Skipped { .. } => 2,
-        Outcome::Blocked { .. } => 3,
-        Outcome::Planned(_) | Outcome::Current { .. } => 4,
+        Outcome::SwitchedAndBlocked { .. } => 2,
+        Outcome::Skipped { .. } => 3,
+        Outcome::Blocked { .. } => 4,
+        Outcome::Planned(_) | Outcome::Current { .. } => 5,
     }
 }

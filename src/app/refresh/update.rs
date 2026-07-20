@@ -35,6 +35,10 @@ impl<'a> Task<'a> {
     pub(super) fn resource(&self) -> &Path {
         &self.common_directory
     }
+
+    pub(super) fn default_branch(&self) -> &str {
+        &self.default_branch
+    }
 }
 
 pub(super) fn repository(git: &impl GitClient, task: &Task<'_>) -> Entry {
@@ -61,7 +65,17 @@ fn refresh_repository(git: &impl GitClient, task: &Task<'_>) -> Result<Entry, Ap
             task.repository,
             Outcome::Skipped { reason: SkippedReason::DirtyWorkingTree },
         )),
-        GitRefreshOutcome::Failed(message) => Ok(Entry::new(
+        GitRefreshOutcome::Failed { message, previous_branch: Some(previous_branch) } => {
+            Ok(Entry::new(
+                task.repository,
+                Outcome::SwitchedAndBlocked {
+                    branch: task.default_branch.clone(),
+                    previous_branch,
+                    reason: BlockedReason::UpdateFailed(message),
+                },
+            ))
+        }
+        GitRefreshOutcome::Failed { message, previous_branch: None } => Ok(Entry::new(
             task.repository,
             Outcome::Blocked { reason: BlockedReason::UpdateFailed(message) },
         )),

@@ -20,7 +20,8 @@ just test
 ## Source ownership
 
 - `src/cli/` owns argument adaptation, terminal rendering, and output errors.
-- `src/app/` owns init, status, sync, and validation use-case orchestration.
+- `src/app/` owns init, refresh, status, sync, and validation use-case
+  orchestration.
 - `src/config/` owns discovery, include loading, TOML decoding, and catalog
   validation.
 - `src/repositories/` owns validated names, branch names, URLs, operational

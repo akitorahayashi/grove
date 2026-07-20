@@ -294,11 +294,19 @@ impl GitClient for CommandGitClient {
         let switched =
             match self.switch_default_branch(repository, branch, &preparation.current_branch) {
                 Ok(switched) => switched,
-                Err(error) => return Ok(GitRefreshOutcome::Failed(error.to_string())),
+                Err(error) => {
+                    return Ok(GitRefreshOutcome::Failed {
+                        message: error.to_string(),
+                        previous_branch: None,
+                    });
+                }
             };
 
         if let Err(error) = self.fast_forward_default_branch(repository, branch) {
-            return Ok(GitRefreshOutcome::Failed(error.to_string()));
+            return Ok(GitRefreshOutcome::Failed {
+                message: error.to_string(),
+                previous_branch: switched.then_some(preparation.current_branch),
+            });
         }
 
         Ok(GitRefreshOutcome::Completed {
@@ -818,7 +826,10 @@ mod tests {
 
         assert!(matches!(
             outcome,
-            GitRefreshOutcome::Failed(ref message) if message.contains("merge-failed")
+            GitRefreshOutcome::Failed {
+                ref message,
+                previous_branch: Some(ref branch),
+            } if message.contains("merge-failed") && branch == "feature"
         ));
         assert_eq!(git_stdout(&repository, &["branch", "--show-current"]), "main");
     }
