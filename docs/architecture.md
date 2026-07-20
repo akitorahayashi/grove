@@ -34,6 +34,7 @@ src/
     context.rs
     events.rs
     init.rs
+    inspection.rs
     phases.rs
     refresh/
       check.rs
@@ -98,7 +99,9 @@ Worker panic and channel disconnects become application errors. Progress events
 and the phase skeleton are shared: `events` owns the phase-generic event, sink,
 and progress adapter, and `phases` owns the check and worker phase envelopes.
 Each use case supplies its own phase marker, per-repository action, and change
-predicate.
+predicate. `inspection` owns repository readiness probing and the canonical
+diagnostics for the conditions the use cases share, so their reason vocabularies
+map from one probe and their shared messages cannot drift.
 
 `config` discovers the root file, resolves one include level, decodes TOML, and
 validates the complete catalog without invoking Git or zoxide. It rejects schema

@@ -1216,7 +1216,7 @@ fn sync_blocks_ahead_and_diverged_default_branches() {
         .arg("sync")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("main has diverged"));
+        .stderr(predicate::str::contains("main has diverged from origin/main"));
 }
 
 #[test]

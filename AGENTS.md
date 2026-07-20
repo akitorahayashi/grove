@@ -18,8 +18,7 @@ working trees on their default branches.
   completion for every subcommand.
 - `src/app/` owns init, refresh, status, sync, and validation orchestration and
   dependency wiring.
-- `src/config/` owns discovery, include resolution, validation, and path
-  normalization.
+- `src/config/` owns discovery, include resolution, and validation.
 - `src/repositories/` owns validated names, branch names, redacted URLs,
   operational paths, definitions, and target selection.
 - `src/git/` owns strict Git probes and non-destructive mutation through the

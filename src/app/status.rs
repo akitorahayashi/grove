@@ -2,6 +2,7 @@ use std::path::Path;
 
 use crate::AppError;
 use crate::app::AppContext;
+use crate::app::inspection::{self, BranchReadiness};
 use crate::config;
 use crate::git::{GitClient, NoopGitProgressSink, urls_match};
 use crate::repositories::RepositoryDefinition;
@@ -257,21 +258,12 @@ fn default_branch_status(
     repository: &RepositoryDefinition,
     branch: &str,
 ) -> Result<Option<DefaultBranchStatus>, AppError> {
-    if !git.local_branch_exists(repository.path(), branch)? {
-        return Ok(Some(DefaultBranchStatus::new(
-            branch.to_string(),
-            BranchTrackingStatus::MissingLocalBranch,
-        )));
-    }
-    if !git.remote_branch_exists(repository.path(), branch)? {
-        return Ok(Some(DefaultBranchStatus::new(
-            branch.to_string(),
-            BranchTrackingStatus::MissingRemoteBranch,
-        )));
-    }
-    let divergence = git.branch_divergence(repository.path(), branch)?;
-    Ok(Some(DefaultBranchStatus::new(
-        branch.to_string(),
-        BranchTrackingStatus::Divergence { ahead: divergence.ahead(), behind: divergence.behind() },
-    )))
+    let tracking = match inspection::branch_readiness(git, repository, branch)? {
+        BranchReadiness::MissingLocal => BranchTrackingStatus::MissingLocalBranch,
+        BranchReadiness::MissingRemote => BranchTrackingStatus::MissingRemoteBranch,
+        BranchReadiness::Divergence { ahead, behind } => {
+            BranchTrackingStatus::Divergence { ahead, behind }
+        }
+    };
+    Ok(Some(DefaultBranchStatus::new(branch.to_string(), tracking)))
 }

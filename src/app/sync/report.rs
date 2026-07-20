@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use crate::app::events::PhaseSummary;
+use crate::app::inspection;
 use crate::repositories::RepositoryDefinition;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,25 +43,19 @@ impl BlockedReason {
     pub fn message(&self) -> String {
         match self {
             Self::DestinationNotGitRepository => {
-                "destination exists but is not a Git repository".to_string()
+                inspection::destination_not_git_repository().to_string()
             }
-            Self::MissingOrigin => "remote origin is missing".to_string(),
-            Self::RemoteUrlMismatch => "remote URL does not match grove.toml".to_string(),
+            Self::MissingOrigin => inspection::missing_origin().to_string(),
+            Self::RemoteUrlMismatch => inspection::remote_url_mismatch().to_string(),
             Self::DetachedHead => "detached HEAD cannot be restored safely".to_string(),
             Self::FetchFailed(message) => message.clone(),
             Self::MissingRemoteDefaultBranch => {
-                "remote default branch cannot be determined".to_string()
+                inspection::missing_remote_default_branch().to_string()
             }
-            Self::MissingLocalBranch { branch } => {
-                format!("local default branch '{branch}' is missing")
-            }
-            Self::MissingRemoteBranch { branch } => {
-                format!("remote default branch 'origin/{branch}' is missing")
-            }
-            Self::Diverged { branch } => format!("{branch} has diverged"),
-            Self::AheadOfOrigin { branch } => {
-                format!("{branch} is ahead of origin/{branch}")
-            }
+            Self::MissingLocalBranch { branch } => inspection::missing_local_branch(branch),
+            Self::MissingRemoteBranch { branch } => inspection::missing_remote_branch(branch),
+            Self::Diverged { branch } => inspection::diverged(branch),
+            Self::AheadOfOrigin { branch } => inspection::ahead_of_origin(branch),
             Self::UpdateFailed(message) | Self::CloneFailed(message) => message.clone(),
         }
     }
