@@ -29,7 +29,7 @@ pub(super) fn repository(
         Readiness::UrlMismatch { actual, expected } => {
             return Ok(Decision::Entry(Entry::blocked_with_details(
                 repository,
-                BlockedReason::RemoteUrlMismatch,
+                Outcome::Blocked { reason: BlockedReason::RemoteUrlMismatch },
                 BlockedReasonDetails::RemoteUrlMismatch { actual, expected },
             )));
         }

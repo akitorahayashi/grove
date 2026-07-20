@@ -16,11 +16,13 @@ mod update;
 mod zoxide;
 
 pub use crate::app::events::PhaseSummary;
-pub(crate) use report::BlockedReasonDetails;
+pub(crate) use crate::app::report::BlockedReasonDetails;
 pub use report::{
-    BlockedReason, Entry, Outcome, PhaseSummaries, Plan, Report, SkippedReason, ZoxideEntry,
+    BlockedReason, Outcome, PhaseSummaries, Plan, Report, SkippedReason, ZoxideEntry,
     ZoxideOutcome, ZoxideReport,
 };
+
+pub type Entry = crate::app::report::Entry<Outcome>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {

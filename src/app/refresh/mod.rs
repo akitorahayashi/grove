@@ -16,8 +16,10 @@ mod report;
 mod update;
 
 pub use crate::app::events::PhaseSummary;
-pub(crate) use report::BlockedReasonDetails;
-pub use report::{BlockedReason, Entry, Outcome, PhaseSummaries, Plan, Report, SkippedReason};
+pub(crate) use crate::app::report::BlockedReasonDetails;
+pub use report::{BlockedReason, Outcome, PhaseSummaries, Plan, Report, SkippedReason};
+
+pub type Entry = crate::app::report::Entry<Outcome>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {

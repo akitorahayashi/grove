@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crate::app::events::PhaseSummary;
 use crate::app::inspection;
-use crate::repositories::RepositoryDefinition;
+use crate::app::report::Entry;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Plan {
@@ -85,48 +85,6 @@ pub enum Outcome {
     Blocked { reason: BlockedReason },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Entry {
-    repository: String,
-    outcome: Outcome,
-    blocked_details: Option<BlockedReasonDetails>,
-}
-
-impl Entry {
-    pub(super) fn new(repository: &RepositoryDefinition, outcome: Outcome) -> Self {
-        Self { repository: repository.display_path().to_string(), outcome, blocked_details: None }
-    }
-
-    pub(super) fn blocked_with_details(
-        repository: &RepositoryDefinition,
-        reason: BlockedReason,
-        details: BlockedReasonDetails,
-    ) -> Self {
-        Self {
-            repository: repository.display_path().to_string(),
-            outcome: Outcome::Blocked { reason },
-            blocked_details: Some(details),
-        }
-    }
-
-    pub fn repository(&self) -> &str {
-        &self.repository
-    }
-
-    pub fn outcome(&self) -> &Outcome {
-        &self.outcome
-    }
-
-    pub(crate) fn blocked_details(&self) -> Option<&BlockedReasonDetails> {
-        self.blocked_details.as_ref()
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum BlockedReasonDetails {
-    RemoteUrlMismatch { actual: String, expected: String },
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PhaseSummaries {
     checked: PhaseSummary,
@@ -158,17 +116,21 @@ impl PhaseSummaries {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Report {
-    entries: Vec<Entry>,
+    entries: Vec<Entry<Outcome>>,
     elapsed: Duration,
     phases: PhaseSummaries,
 }
 
 impl Report {
-    pub(super) fn new(entries: Vec<Entry>, elapsed: Duration, phases: PhaseSummaries) -> Self {
+    pub(super) fn new(
+        entries: Vec<Entry<Outcome>>,
+        elapsed: Duration,
+        phases: PhaseSummaries,
+    ) -> Self {
         Self { entries, elapsed, phases }
     }
 
-    pub fn entries(&self) -> &[Entry] {
+    pub fn entries(&self) -> &[Entry<Outcome>] {
         &self.entries
     }
 
@@ -185,7 +147,7 @@ impl Report {
     }
 
     pub fn planned(&self) -> usize {
-        self.entries.iter().filter(|entry| matches!(entry.outcome, Outcome::Planned(_))).count()
+        self.entries.iter().filter(|entry| matches!(entry.outcome(), Outcome::Planned(_))).count()
     }
 
     pub fn refreshed(&self) -> usize {
@@ -193,7 +155,7 @@ impl Report {
             .iter()
             .filter(|entry| {
                 matches!(
-                    entry.outcome,
+                    entry.outcome(),
                     Outcome::Refreshed { .. }
                         | Outcome::Switched { .. }
                         | Outcome::SwitchedAndBlocked { .. }
@@ -203,7 +165,10 @@ impl Report {
     }
 
     pub fn skipped(&self) -> usize {
-        self.entries.iter().filter(|entry| matches!(entry.outcome, Outcome::Skipped { .. })).count()
+        self.entries
+            .iter()
+            .filter(|entry| matches!(entry.outcome(), Outcome::Skipped { .. }))
+            .count()
     }
 
     pub fn blocked(&self) -> usize {
@@ -211,7 +176,7 @@ impl Report {
             .iter()
             .filter(|entry| {
                 matches!(
-                    entry.outcome,
+                    entry.outcome(),
                     Outcome::Blocked { .. } | Outcome::SwitchedAndBlocked { .. }
                 )
             })
@@ -221,7 +186,7 @@ impl Report {
     pub fn has_failures(&self) -> bool {
         self.entries.iter().any(|entry| {
             matches!(
-                entry.outcome,
+                entry.outcome(),
                 Outcome::Skipped { .. }
                     | Outcome::Blocked { .. }
                     | Outcome::SwitchedAndBlocked { .. }

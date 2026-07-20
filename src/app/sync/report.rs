@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use crate::app::events::PhaseSummary;
 use crate::app::inspection;
+use crate::app::report::Entry;
 use crate::repositories::RepositoryDefinition;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,7 +62,7 @@ impl BlockedReason {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
     Planned(Plan),
     Cloned { url: String },
@@ -72,49 +73,7 @@ pub enum Outcome {
     Blocked { reason: BlockedReason },
 }
 
-#[derive(Debug, Clone)]
-pub struct Entry {
-    repository: String,
-    outcome: Outcome,
-    blocked_details: Option<BlockedReasonDetails>,
-}
-
-impl Entry {
-    pub(super) fn new(repository: &RepositoryDefinition, outcome: Outcome) -> Self {
-        Self { repository: repository.display_path().to_string(), outcome, blocked_details: None }
-    }
-
-    pub(super) fn blocked_with_details(
-        repository: &RepositoryDefinition,
-        reason: BlockedReason,
-        blocked_details: BlockedReasonDetails,
-    ) -> Self {
-        Self {
-            repository: repository.display_path().to_string(),
-            outcome: Outcome::Blocked { reason },
-            blocked_details: Some(blocked_details),
-        }
-    }
-
-    pub fn repository(&self) -> &str {
-        &self.repository
-    }
-
-    pub fn outcome(&self) -> &Outcome {
-        &self.outcome
-    }
-
-    pub(crate) fn blocked_details(&self) -> Option<&BlockedReasonDetails> {
-        self.blocked_details.as_ref()
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum BlockedReasonDetails {
-    RemoteUrlMismatch { actual: String, expected: String },
-}
-
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PhaseSummaries {
     checked: PhaseSummary,
     prepared: PhaseSummary,
@@ -143,9 +102,9 @@ impl PhaseSummaries {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Report {
-    entries: Vec<Entry>,
+    entries: Vec<Entry<Outcome>>,
     elapsed: Duration,
     phases: PhaseSummaries,
     zoxide: Option<ZoxideReport>,
@@ -153,7 +112,7 @@ pub struct Report {
 
 impl Report {
     pub(super) fn new(
-        entries: Vec<Entry>,
+        entries: Vec<Entry<Outcome>>,
         elapsed: Duration,
         phases: PhaseSummaries,
         zoxide: Option<ZoxideReport>,
@@ -161,7 +120,7 @@ impl Report {
         Self { entries, elapsed, phases, zoxide }
     }
 
-    pub fn entries(&self) -> &[Entry] {
+    pub fn entries(&self) -> &[Entry<Outcome>] {
         &self.entries
     }
 
@@ -184,19 +143,22 @@ impl Report {
     pub fn planned_clones(&self) -> usize {
         self.entries
             .iter()
-            .filter(|entry| matches!(entry.outcome, Outcome::Planned(Plan::Clone { .. })))
+            .filter(|entry| matches!(entry.outcome(), Outcome::Planned(Plan::Clone { .. })))
             .count()
     }
 
     pub fn planned_fetches(&self) -> usize {
         self.entries
             .iter()
-            .filter(|entry| matches!(entry.outcome, Outcome::Planned(Plan::Fetch { .. })))
+            .filter(|entry| matches!(entry.outcome(), Outcome::Planned(Plan::Fetch { .. })))
             .count()
     }
 
     pub fn cloned(&self) -> usize {
-        self.entries.iter().filter(|entry| matches!(entry.outcome, Outcome::Cloned { .. })).count()
+        self.entries
+            .iter()
+            .filter(|entry| matches!(entry.outcome(), Outcome::Cloned { .. }))
+            .count()
     }
 
     pub fn updated(&self) -> usize {
@@ -204,7 +166,7 @@ impl Report {
             .iter()
             .filter(|entry| {
                 matches!(
-                    entry.outcome,
+                    entry.outcome(),
                     Outcome::Updated { .. } | Outcome::UpdatedButRestorationFailed { .. }
                 )
             })
@@ -212,17 +174,23 @@ impl Report {
     }
 
     pub fn skipped(&self) -> usize {
-        self.entries.iter().filter(|entry| matches!(entry.outcome, Outcome::Skipped { .. })).count()
+        self.entries
+            .iter()
+            .filter(|entry| matches!(entry.outcome(), Outcome::Skipped { .. }))
+            .count()
     }
 
     pub fn blocked(&self) -> usize {
-        self.entries.iter().filter(|entry| matches!(entry.outcome, Outcome::Blocked { .. })).count()
+        self.entries
+            .iter()
+            .filter(|entry| matches!(entry.outcome(), Outcome::Blocked { .. }))
+            .count()
     }
 
     pub fn has_failures(&self) -> bool {
         self.entries.iter().any(|entry| {
             matches!(
-                entry.outcome,
+                entry.outcome(),
                 Outcome::Skipped { .. }
                     | Outcome::Blocked { .. }
                     | Outcome::UpdatedButRestorationFailed { .. }
@@ -284,6 +252,6 @@ impl ZoxideReport {
 
     pub fn has_failures(&self) -> bool {
         self.unavailable.is_some()
-            || self.entries.iter().any(|entry| matches!(entry.outcome, ZoxideOutcome::Failed(_)))
+            || self.entries.iter().any(|entry| matches!(entry.outcome(), ZoxideOutcome::Failed(_)))
     }
 }

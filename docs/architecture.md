@@ -36,6 +36,7 @@ src/
     init.rs
     inspection.rs
     phases.rs
+    report.rs
     refresh/
       check.rs
       fetch.rs
@@ -101,7 +102,9 @@ and progress adapter, and `phases` owns the check and worker phase envelopes.
 Each use case supplies its own phase marker, per-repository action, and change
 predicate. `inspection` owns repository readiness probing and the canonical
 diagnostics for the conditions the use cases share, so their reason vocabularies
-map from one probe and their shared messages cannot drift.
+map from one probe and their shared messages cannot drift. `report` owns the
+report entry, generic over each use case's outcome vocabulary, and the shared
+blocked-reason detail.
 
 `config` discovers the root file, resolves one include level, decodes TOML, and
 validates the complete catalog without invoking Git or zoxide. It rejects schema
