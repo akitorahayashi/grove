@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use owo_colors::OwoColorize;
 
+use crate::app::report::BlockedReasonDetails;
 use crate::repositories::redact_urls_for_display;
 
 use super::output::{Output, terminal_text};
@@ -67,7 +68,24 @@ pub(super) fn safe_message(value: &str) -> String {
     terminal_text(&redact_urls_for_display(value))
 }
 
-fn repositories(count: usize) -> String {
+pub(super) fn print_blocked_details(
+    details: Option<&BlockedReasonDetails>,
+    output: &mut Output<'_>,
+) -> io::Result<()> {
+    if let Some(BlockedReasonDetails::RemoteUrlMismatch { actual, expected }) = details {
+        write_line(
+            output,
+            format_args!("    {}", format!("actual:   {}", safe_message(actual)).dimmed()),
+        )?;
+        write_line(
+            output,
+            format_args!("    {}", format!("expected: {}", safe_message(expected)).dimmed()),
+        )?;
+    }
+    Ok(())
+}
+
+pub(super) fn repositories(count: usize) -> String {
     match count {
         1 => "1 repository".to_string(),
         _ => format!("{count} repositories"),

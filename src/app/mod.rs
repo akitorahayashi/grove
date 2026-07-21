@@ -5,7 +5,7 @@ pub(crate) mod init;
 mod inspection;
 mod phases;
 pub(crate) mod refresh;
-mod report;
+pub(crate) mod report;
 pub(crate) mod status;
 pub(crate) mod sync;
 pub(crate) mod validate;

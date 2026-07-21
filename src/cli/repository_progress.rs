@@ -1,12 +1,16 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::io;
+use std::sync::mpsc::{self, Sender};
 use std::time::Duration;
 
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 
+use crate::AppError;
+use crate::app::events::{Event, PhaseSummary};
 use crate::git::GitProgress;
 
-use super::output::terminal_text;
+use super::output::{Output, terminal_text};
 
 const MINIMUM_NAME_WIDTH: usize = 20;
 
@@ -166,6 +170,85 @@ fn numeric_style(name_width: usize) -> ProgressStyle {
     ))
     .expect("repository numeric progress template should be valid")
     .progress_chars("--")
+}
+
+struct Completion<P> {
+    phase: P,
+    summary: PhaseSummary,
+}
+
+struct Display<P: ProgressPhase> {
+    progress: RepositoryProgress<P>,
+}
+
+impl<P: ProgressPhase> Display<P> {
+    fn new() -> Self {
+        Self { progress: RepositoryProgress::new() }
+    }
+
+    fn handle(&mut self, event: Event<P>) -> Option<Completion<P>> {
+        match event {
+            Event::PhaseStarted { phase, total } => self.progress.start_phase(phase, total),
+            Event::RepositoryStarted { repository, phase } => {
+                self.progress.start_repository(repository, phase);
+            }
+            Event::GitProgress { repository, progress } => {
+                self.progress.update_repository(&repository, &progress);
+            }
+            Event::RepositoryFinished { repository, phase } => {
+                self.progress.finish_repository(&repository, phase);
+            }
+            Event::PhaseCompleted { phase, summary } => {
+                self.progress.finish_phase(phase);
+                return Some(Completion { phase, summary });
+            }
+            Event::PhaseFailed { phase } => self.progress.finish_phase(phase),
+        }
+        None
+    }
+
+    fn finish(&mut self) {
+        self.progress.finish();
+    }
+}
+
+/// Drive a phase-emitting use case on a worker thread while rendering its
+/// progress on this thread, printing each phase completion as it arrives.
+pub(super) fn run_with_progress<P, R>(
+    output: &mut Output<'_>,
+    thread_label: &str,
+    execute: impl FnOnce(Sender<Event<P>>) -> Result<R, AppError> + Send,
+    print_completion: impl Fn(P, PhaseSummary, &mut Output<'_>) -> io::Result<()>,
+) -> Result<R, AppError>
+where
+    P: ProgressPhase + Send,
+    R: Send,
+{
+    let (sender, receiver) = mpsc::channel();
+
+    std::thread::scope(|scope| {
+        let execution = scope.spawn(move || execute(sender));
+        let mut progress = Display::new();
+        let mut output_error = None;
+
+        for event in receiver {
+            if let Some(completion) = progress.handle(event)
+                && output_error.is_none()
+                && let Err(error) = print_completion(completion.phase, completion.summary, output)
+            {
+                output_error = Some(error);
+            }
+        }
+
+        progress.finish();
+        let report = execution.join().map_err(|_| {
+            AppError::internal(format!("{thread_label} execution thread panicked"))
+        })??;
+        if let Some(error) = output_error {
+            return Err(error.into());
+        }
+        Ok(report)
+    })
 }
 
 #[cfg(test)]

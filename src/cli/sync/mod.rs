@@ -1,8 +1,5 @@
-mod progress;
-
 use std::io;
 use std::path::PathBuf;
-use std::sync::mpsc;
 
 use clap::Args;
 use owo_colors::OwoColorize;
@@ -10,15 +7,15 @@ use owo_colors::OwoColorize;
 use crate::AppError;
 use crate::app::api;
 use crate::app::sync::{
-    BlockedReasonDetails, Outcome, Phase, PhaseSummary, Plan, Report, SyncOptions, ZoxideOutcome,
-    ZoxideReport,
+    Outcome, Phase, PhaseSummary, Plan, Report, SyncOptions, ZoxideOutcome, ZoxideReport,
 };
 
-use self::progress::Display;
 use super::Completion;
 use super::output::{Output, terminal_text};
+use super::repository_progress::{ProgressPhase, run_with_progress};
 use super::terminal_report::{
-    print_count, print_count_with_elapsed, print_phase, safe_message, write_line,
+    print_blocked_details, print_count, print_count_with_elapsed, print_phase, safe_message,
+    write_line,
 };
 
 #[derive(Args)]
@@ -42,7 +39,12 @@ pub(super) fn run(
     let report = if command.dry_run {
         api::sync_with_options(config, command.repositories, options)?
     } else {
-        run_with_progress(config, command.repositories, options, output)?
+        run_with_progress(
+            output,
+            "sync",
+            move |sender| api::sync_with_events(config, command.repositories, options, &sender),
+            print_phase_completion,
+        )?
     };
 
     print_report(&report, command.dry_run, output)?;
@@ -54,39 +56,18 @@ pub(super) fn run(
     Ok(Completion::Success)
 }
 
-fn run_with_progress(
-    config: Option<PathBuf>,
-    repositories: Vec<String>,
-    options: SyncOptions,
-    output: &mut Output<'_>,
-) -> Result<Report, AppError> {
-    let (sender, receiver) = mpsc::channel();
-
-    std::thread::scope(|scope| {
-        let execution =
-            scope.spawn(move || api::sync_with_events(config, repositories, options, &sender));
-        let mut progress = Display::new();
-        let mut output_error = None;
-
-        for event in receiver {
-            if let Some(completion) = progress.handle(event)
-                && output_error.is_none()
-                && let Err(error) =
-                    print_phase_completion(completion.phase(), completion.summary(), output)
-            {
-                output_error = Some(error);
-            }
+impl ProgressPhase for Phase {
+    fn message(self) -> &'static str {
+        match self {
+            Phase::Checking => "Checking repositories...",
+            Phase::Preparing => "Preparing repositories...",
+            Phase::Updating => "Updating repositories...",
         }
+    }
 
-        progress.finish();
-        let report = execution
-            .join()
-            .map_err(|_| AppError::internal("sync execution thread panicked"))??;
-        if let Some(error) = output_error {
-            return Err(error.into());
-        }
-        Ok(report)
-    })
+    fn shows_git_progress(self) -> bool {
+        self == Phase::Preparing
+    }
 }
 
 fn print_report(report: &Report, dry_run: bool, output: &mut Output<'_>) -> io::Result<()> {
@@ -210,23 +191,6 @@ fn print_entries(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
                 print_blocked_details(entry.blocked_details(), output)?;
             }
         }
-    }
-    Ok(())
-}
-
-fn print_blocked_details(
-    details: Option<&BlockedReasonDetails>,
-    output: &mut Output<'_>,
-) -> io::Result<()> {
-    if let Some(BlockedReasonDetails::RemoteUrlMismatch { actual, expected }) = details {
-        write_line(
-            output,
-            format_args!("    {}", format!("actual:   {}", safe_message(actual)).dimmed()),
-        )?;
-        write_line(
-            output,
-            format_args!("    {}", format!("expected: {}", safe_message(expected)).dimmed()),
-        )?;
     }
     Ok(())
 }

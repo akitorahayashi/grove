@@ -21,14 +21,12 @@ src/
     output.rs
     refresh/
       mod.rs
-      progress.rs
     repository_progress.rs
     status.rs
     terminal_report.rs
     validate.rs
     sync/
       mod.rs
-      progress.rs
   app/
     api.rs
     context.rs
@@ -85,7 +83,9 @@ src/
 ## Boundaries
 
 `cli` owns Clap parsing, stream selection, terminal-safe text, styling, progress,
-and command completion. Subcommands return completion or error values. The
+and command completion. The progress pump, the blocked-reason detail rendering,
+and the repository-count wording are shared across the phase-emitting commands
+rather than duplicated per command. Subcommands return completion or error values. The
 crate-root `cli` function returns `ExitCode`; `main` is the sole process
 termination boundary. Output write failures propagate, and a closed stdout pipe
 has non-panicking handling.
