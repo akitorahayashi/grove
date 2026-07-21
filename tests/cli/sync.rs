@@ -907,7 +907,13 @@ fn sync_redacts_credentials_in_successful_clone_output() {
     let git = bin.join("git");
     std::fs::write(
         &git,
-        "#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'git version 2.40.0'; fi\nexit 0\n",
+        r#"#!/bin/sh
+PATH="/usr/bin:/bin:$PATH"
+if [ "$1" = --version ]; then echo 'git version 2.40.0'; fi
+if [ "$1" = clone ]; then for arg in "$@"; do dest="$arg"; done; mkdir -p "$dest"; fi
+if [ "$1" = symbolic-ref ]; then echo main; fi
+exit 0
+"#,
     )
     .unwrap();
     let mut permissions = std::fs::metadata(&git).unwrap().permissions();

@@ -14,8 +14,8 @@ use super::Completion;
 use super::output::{Output, terminal_text};
 use super::repository_progress::{ProgressPhase, run_with_progress};
 use super::terminal_report::{
-    print_blocked_details, print_count, print_count_with_elapsed, print_phase, safe_message,
-    write_line,
+    cache_annotation, print_blocked_details, print_count, print_count_with_elapsed, print_phase,
+    safe_message, write_line,
 };
 
 #[derive(Args)]
@@ -129,7 +129,7 @@ fn print_entries(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
                 )?;
             }
             Outcome::Planned(Plan::Fetch { .. }) | Outcome::Current { .. } => {}
-            Outcome::Cloned { url } => {
+            Outcome::Cloned { url, cache } => {
                 let repository = terminal_text(entry.repository());
                 write_line(
                     output,
@@ -137,7 +137,8 @@ fn print_entries(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
                         " {} {} {}",
                         "+".green(),
                         repository.bold(),
-                        format!("from {}", terminal_text(url)).dimmed()
+                        format!("from {} {}", terminal_text(url), cache_annotation(*cache))
+                            .dimmed()
                     ),
                 )?;
             }

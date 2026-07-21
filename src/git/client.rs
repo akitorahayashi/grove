@@ -29,11 +29,43 @@ impl BranchDivergence {
 pub trait GitClient: Sync {
     fn verify_available(&self) -> Result<(), AppError>;
 
-    fn clone_repository(
+    /// Create a bare, single-branch cache entry at `entry`. When `branch` is
+    /// `Some`, that branch is tracked; otherwise the remote HEAD branch is.
+    /// A fetch refspec binding the tracked branch is configured so later
+    /// refreshes advance it. Returns the resolved tracked branch name.
+    fn cache_create(
+        &self,
+        url: &RemoteUrl,
+        entry: &Path,
+        branch: Option<&str>,
+        progress: &mut dyn GitProgressSink,
+    ) -> Result<String, AppError>;
+
+    /// Refresh a cache entry's tracked branch, pruning deleted refs.
+    fn cache_update(
+        &self,
+        entry: &Path,
+        progress: &mut dyn GitProgressSink,
+    ) -> Result<(), AppError>;
+
+    /// Point a cache entry at a different branch, then refresh it.
+    fn cache_retarget(
+        &self,
+        entry: &Path,
+        branch: &str,
+        progress: &mut dyn GitProgressSink,
+    ) -> Result<(), AppError>;
+
+    /// Report whether `entry` is a usable Git repository.
+    fn cache_verify(&self, entry: &Path) -> Result<bool, AppError>;
+
+    /// Clone `url` into `destination`, borrowing objects from `reference` and
+    /// dissociating so the result is self-contained.
+    fn clone_with_reference(
         &self,
         url: &RemoteUrl,
         destination: &Path,
-        grove_root: &Path,
+        reference: &Path,
         progress: &mut dyn GitProgressSink,
     ) -> Result<(), AppError>;
 

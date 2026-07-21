@@ -8,7 +8,9 @@ mod git;
 mod repositories;
 mod zoxide;
 
-pub use app::api::{refresh, status, sync, validate};
+pub use app::api::{clone, refresh, status, sync, validate};
+pub use app::cache::CacheOutcome;
+pub use app::clone::{Phase as ClonePhase, Report as CloneReport};
 pub use app::refresh::{
     BlockedReason as RefreshBlockedReason, Entry as RefreshEntry, Outcome as RefreshOutcome,
     PhaseSummaries as RefreshPhaseSummaries, PhaseSummary as RefreshPhaseSummary,

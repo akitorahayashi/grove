@@ -11,7 +11,7 @@ use super::{
 };
 use crate::AppError;
 use crate::repositories::redact_urls_for_display;
-use crate::repositories::{BranchName, RemoteUrl, ResolutionError, resolve_operational_path};
+use crate::repositories::{BranchName, RemoteUrl};
 
 #[derive(Debug, Clone)]
 pub struct CommandGitClient {
@@ -47,31 +47,82 @@ impl GitClient for CommandGitClient {
         Ok(())
     }
 
-    fn clone_repository(
+    fn cache_create(
+        &self,
+        url: &RemoteUrl,
+        entry: &Path,
+        branch: Option<&str>,
+        progress: &mut dyn GitProgressSink,
+    ) -> Result<String, AppError> {
+        if let Some(parent) = entry.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        let mut command = self.command();
+        command.arg("clone").arg("--bare").arg("--single-branch");
+        if let Some(branch) = branch {
+            command.arg("--branch").arg(branch);
+        }
+        command.arg("--progress").arg("--").arg(url.as_process_argument()).arg(entry);
+
+        let branch_display = branch.map(|branch| format!(" --branch {branch}")).unwrap_or_default();
+        run_with_progress(
+            command,
+            redact_urls_for_display(&format!(
+                "git clone --bare --single-branch{branch_display} --progress -- {url} {}",
+                entry.display()
+            )),
+            progress,
+        )?;
+
+        // `git clone --bare` configures no `remote.origin.fetch` refspec, so a
+        // later `fetch origin --prune` would only move FETCH_HEAD and leave the
+        // tracked branch stale. Bind the tracked branch explicitly so refreshes
+        // advance it. When `--branch` was omitted, the tracked branch is the one
+        // HEAD now points at (the remote default).
+        let tracked = match branch {
+            Some(branch) => branch.to_string(),
+            None => self.head_branch(entry)?,
+        };
+        let refspec = format!("+refs/heads/{tracked}:refs/heads/{tracked}");
+        self.git_required(entry, &["config", "remote.origin.fetch", &refspec])?;
+        Ok(tracked)
+    }
+
+    fn cache_update(
+        &self,
+        entry: &Path,
+        progress: &mut dyn GitProgressSink,
+    ) -> Result<(), AppError> {
+        self.git_progress_required(entry, &["fetch", "--progress", "origin", "--prune"], progress)
+    }
+
+    fn cache_retarget(
+        &self,
+        entry: &Path,
+        branch: &str,
+        progress: &mut dyn GitProgressSink,
+    ) -> Result<(), AppError> {
+        let refspec = format!("+refs/heads/{branch}:refs/heads/{branch}");
+        self.git_required(entry, &["config", "remote.origin.fetch", &refspec])?;
+        self.git_progress_required(entry, &["fetch", "--progress", "origin", "--prune"], progress)
+    }
+
+    fn cache_verify(&self, entry: &Path) -> Result<bool, AppError> {
+        if !entry.exists() {
+            return Ok(false);
+        }
+        let output = self.git_probe(entry, &["rev-parse", "--git-dir"])?;
+        Ok(output.status.success())
+    }
+
+    fn clone_with_reference(
         &self,
         url: &RemoteUrl,
         destination: &Path,
-        grove_root: &Path,
+        reference: &Path,
         progress: &mut dyn GitProgressSink,
     ) -> Result<(), AppError> {
-        match resolve_operational_path(destination, grove_root) {
-            Ok(resolved) if resolved == destination => {}
-            Ok(resolved) => {
-                return Err(AppError::config_error(format!(
-                    "clone destination changed after validation: '{}' resolves to '{}'",
-                    destination.display(),
-                    resolved.display()
-                )));
-            }
-            Err(ResolutionError::OutsideRoot) => {
-                return Err(AppError::config_error(format!(
-                    "clone destination '{}' leaves the grove root",
-                    destination.display()
-                )));
-            }
-            Err(ResolutionError::Io(err)) => return Err(err.into()),
-        }
-
         if let Some(parent) = destination.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -79,6 +130,9 @@ impl GitClient for CommandGitClient {
         let mut command = self.command();
         command
             .arg("clone")
+            .arg("--reference")
+            .arg(reference)
+            .arg("--dissociate")
             .arg("--progress")
             .arg("--")
             .arg(url.as_process_argument())
@@ -86,7 +140,8 @@ impl GitClient for CommandGitClient {
         run_with_progress(
             command,
             redact_urls_for_display(&format!(
-                "git clone --progress -- {url} {}",
+                "git clone --reference {} --dissociate --progress -- {url} {}",
+                reference.display(),
                 destination.display()
             )),
             progress,
@@ -319,6 +374,12 @@ impl CommandGitClient {
 
     fn command(&self) -> Command {
         Command::new(&self.executable)
+    }
+
+    fn head_branch(&self, entry: &Path) -> Result<String, AppError> {
+        let args = ["symbolic-ref", "--short", "HEAD"];
+        let output = self.git_required(entry, &args)?;
+        required_line(entry, &args, &output)
     }
 
     fn prepare_default_branch(
@@ -951,15 +1012,25 @@ mod tests {
         std::fs::create_dir(&workspace).unwrap();
         let workspace = workspace.canonicalize().unwrap();
         let destination = workspace.join("repo");
+        let reference = workspace.join("cache");
         let url = RemoteUrl::new("--upload-pack=hostile").unwrap();
 
         CommandGitClient::with_executable(&wrapper)
-            .clone_repository(&url, &destination, &workspace, &mut NoopGitProgressSink)
+            .clone_with_reference(&url, &destination, &reference, &mut NoopGitProgressSink)
             .unwrap();
 
         assert_eq!(
             std::fs::read_to_string(log).unwrap().lines().collect::<Vec<_>>(),
-            ["clone", "--progress", "--", "--upload-pack=hostile", destination.to_str().unwrap()]
+            [
+                "clone",
+                "--reference",
+                reference.to_str().unwrap(),
+                "--dissociate",
+                "--progress",
+                "--",
+                "--upload-pack=hostile",
+                destination.to_str().unwrap()
+            ]
         );
     }
 

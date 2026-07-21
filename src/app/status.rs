@@ -321,14 +321,45 @@ mod tests {
             Ok(())
         }
 
-        fn clone_repository(
+        fn cache_create(
+            &self,
+            _url: &RemoteUrl,
+            _entry: &Path,
+            _branch: Option<&str>,
+            _progress: &mut dyn GitProgressSink,
+        ) -> Result<String, AppError> {
+            unreachable!("status never creates cache entries")
+        }
+
+        fn cache_update(
+            &self,
+            _entry: &Path,
+            _progress: &mut dyn GitProgressSink,
+        ) -> Result<(), AppError> {
+            unreachable!("status never updates cache entries")
+        }
+
+        fn cache_retarget(
+            &self,
+            _entry: &Path,
+            _branch: &str,
+            _progress: &mut dyn GitProgressSink,
+        ) -> Result<(), AppError> {
+            unreachable!("status never retargets cache entries")
+        }
+
+        fn cache_verify(&self, _entry: &Path) -> Result<bool, AppError> {
+            unreachable!("status never verifies cache entries")
+        }
+
+        fn clone_with_reference(
             &self,
             _url: &RemoteUrl,
             _destination: &Path,
-            _grove_root: &Path,
+            _reference: &Path,
             _progress: &mut dyn GitProgressSink,
         ) -> Result<(), AppError> {
-            Ok(())
+            unreachable!("status never clones repositories")
         }
 
         fn fetch(

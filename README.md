@@ -22,6 +22,13 @@ gv refresh
 gv refresh frontend
 gv refresh --dry-run
 gv --config ~/workspace/grove.toml status
+
+gv clone git@github.com:company/frontend.git
+gv clone git@github.com:company/frontend.git frontend
+
+gv cache list
+gv cache clear
+gv cache clear frontend
 ```
 
 ## Configuration
@@ -89,7 +96,8 @@ entries preserve selection order in either case.
 ## Sync Behavior
 
 `gv sync` clones missing repositories and safely updates existing repositories'
-default branches. Existing repositories are updated through system `git`
+default branches. Missing repositories are cloned through the local clone cache
+(see Clone Cache). Existing repositories are updated through system `git`
 commands. Independent repository tasks run concurrently with at most eight live
 tasks. Linked worktrees that share a Git common directory remain serialized.
 
@@ -151,6 +159,38 @@ and is reported as a blocked refresh that already switched branches.
 Git state. Divergence in a dry run reflects the locally available
 remote-tracking refs, which may be older than the remote repository.
 
+## Clone Cache
+
+`gv sync` and `gv clone` clone through a local object cache so repeat clones of
+a previously seen URL transfer only the difference from the remote. The cache
+lives under `${XDG_CACHE_HOME}/grove`, falling back to `${HOME}/.cache/grove`;
+when neither variable is set, the command fails rather than choosing another
+location.
+
+Each cache entry is a bare, single-branch repository holding the default branch
+history, keyed by the verbatim remote URL. The `git@` and `https://` forms of
+one repository are distinct entries. Placement runs
+`git clone --reference <entry> --dissociate` against the real remote, so
+`origin` points at the requested URL and the placed clone is self-contained;
+removing the cache never affects existing clones. Because Git objects are
+content-addressed and refs always come from the real remote, a stale or narrow
+entry only reduces transfer and never yields an incorrect clone.
+
+On each use the entry is created when absent, refreshed when present, rebuilt
+when unusable, and repointed when a different default branch is requested.
+Within one process, tasks sharing a URL are serialized; concurrent `gv`
+processes operating on the same entry are not coordinated.
+
+`gv clone <url> [dest]` clones a single repository through the cache without
+reading or writing `grove.toml`. `dest` defaults to the final URL path segment
+with a trailing `.git` removed. An existing non-empty destination is rejected,
+and `--config` is not accepted. It is a cache-accelerated `git clone`, not a
+reimplementation of every `git clone` option.
+
+`gv cache list` reports cached repositories with size and last-update age. `gv
+cache clear` removes every entry; `gv cache clear <repo>...` removes the entries
+backing the named configured repositories.
+
 ## Requirements
 
 Linux and macOS are the supported platforms. Windows is unsupported.
@@ -164,12 +204,14 @@ aarch64 binaries. Checksums, signatures, and attestations are not published.
 
 ## Library API
 
-The supported Rust API is the crate-root facade: `cli`, `refresh`, `status`,
-`sync`, and `validate`, plus their report, outcome, and error types. `sync` and
-`refresh` take option structs: `sync(config, targets, SyncOptions)` and
-`refresh(config, targets, RefreshOptions)`. `SyncOptions` carries the dry-run
-and zoxide-registration flags, so library callers reach the same zoxide report
-as the CLI. `cli` returns an `ExitCode` and does not terminate its host process.
+The supported Rust API is the crate-root facade: `cli`, `clone`, `refresh`,
+`status`, `sync`, and `validate`, plus their report, outcome, and error types.
+`sync` and `refresh` take option structs: `sync(config, targets, SyncOptions)`
+and `refresh(config, targets, RefreshOptions)`. `SyncOptions` carries the
+dry-run and zoxide-registration flags, so library callers reach the same zoxide
+report as the CLI. `clone(url, destination)` clones a single URL through the
+cache and returns a `CloneReport` carrying the resulting `CacheOutcome`. `cli`
+returns an `ExitCode` and does not terminate its host process.
 
 ```rust
 let report = grove::validate(Some("/workspace/grove.toml".into()))?;

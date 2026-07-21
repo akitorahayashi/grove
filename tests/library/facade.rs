@@ -16,6 +16,8 @@ fn root_facade_exposes_supported_use_cases_and_reports() {
     ) -> Result<grove::SyncReport, grove::AppError> = grove::sync;
     let _: fn(Option<PathBuf>) -> Result<grove::ValidationReport, grove::AppError> =
         grove::validate;
+    let _: fn(String, Option<PathBuf>) -> Result<grove::CloneReport, grove::AppError> =
+        grove::clone;
     let _: fn() -> std::process::ExitCode = grove::cli;
 
     let refresh_options = grove::RefreshOptions::new(true);

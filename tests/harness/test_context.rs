@@ -47,7 +47,16 @@ impl TestContext {
     pub fn cli(&self) -> Command {
         let mut command = Command::cargo_bin("gv").expect("failed to locate gv binary");
         command.current_dir(&self.workspace);
+        command.env("XDG_CACHE_HOME", self.cache_home());
         command
+    }
+
+    pub fn cache_home(&self) -> PathBuf {
+        self.root().join("cache-home")
+    }
+
+    pub fn cache_root(&self) -> PathBuf {
+        self.cache_home().join("grove")
     }
 
     pub fn create_remote(&self, name: &str) -> RemoteRepository {
