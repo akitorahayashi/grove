@@ -33,7 +33,11 @@ url = "git@example.com:frontend.git"
 "#,
     );
 
-    let result = grove::refresh(Some(config), vec!["backend".to_string()], false);
+    let result = grove::refresh(
+        Some(config),
+        vec!["backend".to_string()],
+        grove::RefreshOptions::new(false),
+    );
 
     assert!(
         matches!(result, Err(grove::AppError::RepositoryNotFound(ref name)) if name == "backend")

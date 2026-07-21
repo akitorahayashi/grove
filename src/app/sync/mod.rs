@@ -51,15 +51,6 @@ impl SyncOptions {
     }
 }
 
-pub fn execute(
-    ctx: &AppContext<impl GitClient, impl crate::zoxide::ZoxideClient>,
-    config_path: Option<&Path>,
-    targets: &[String],
-    dry_run: bool,
-) -> Result<Report, AppError> {
-    execute_with_options(ctx, config_path, targets, SyncOptions::new(dry_run, false))
-}
-
 pub fn execute_with_options(
     ctx: &AppContext<impl GitClient, impl crate::zoxide::ZoxideClient>,
     config_path: Option<&Path>,

@@ -152,8 +152,11 @@ aarch64 binaries. Checksums, signatures, and attestations are not published.
 ## Library API
 
 The supported Rust API is the crate-root facade: `cli`, `refresh`, `status`,
-`sync`, and `validate`, plus their report, outcome, and error types. `cli`
-returns an `ExitCode` and does not terminate its host process.
+`sync`, and `validate`, plus their report, outcome, and error types. `sync` and
+`refresh` take option structs: `sync(config, targets, SyncOptions)` and
+`refresh(config, targets, RefreshOptions)`. `SyncOptions` carries the dry-run
+and zoxide-registration flags, so library callers reach the same zoxide report
+as the CLI. `cli` returns an `ExitCode` and does not terminate its host process.
 
 ```rust
 let report = grove::validate(Some("/workspace/grove.toml".into()))?;

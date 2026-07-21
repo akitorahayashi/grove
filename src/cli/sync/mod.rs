@@ -37,7 +37,7 @@ pub(super) fn run(
 ) -> Result<Completion, AppError> {
     let options = SyncOptions::new(command.dry_run, command.register_zoxide);
     let report = if command.dry_run {
-        api::sync_with_options(config, command.repositories, options)?
+        api::sync(config, command.repositories, options)?
     } else {
         run_with_progress(
             output,

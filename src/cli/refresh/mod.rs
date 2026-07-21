@@ -32,7 +32,7 @@ pub(super) fn run(
 ) -> Result<Completion, AppError> {
     let options = RefreshOptions::new(command.dry_run);
     let report = if command.dry_run {
-        api::refresh_with_options(config, command.repositories, options)?
+        api::refresh(config, command.repositories, options)?
     } else {
         run_with_progress(
             output,

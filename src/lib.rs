@@ -22,8 +22,8 @@ pub use app::status::{
 pub use app::sync::{
     BlockedReason as SyncBlockedReason, Entry as SyncEntry, Outcome as SyncOutcome,
     PhaseSummaries as SyncPhaseSummaries, PhaseSummary as SyncPhaseSummary, Plan as SyncPlan,
-    Report as SyncReport, SkippedReason as SyncSkippedReason, ZoxideEntry, ZoxideOutcome,
-    ZoxideReport,
+    Report as SyncReport, SkippedReason as SyncSkippedReason, SyncOptions, ZoxideEntry,
+    ZoxideOutcome, ZoxideReport,
 };
 pub use app::validate::Report as ValidationReport;
 pub use cli::run as cli;

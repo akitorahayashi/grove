@@ -43,15 +43,6 @@ impl RefreshOptions {
     }
 }
 
-pub fn execute(
-    ctx: &AppContext<impl GitClient>,
-    config_path: Option<&Path>,
-    targets: &[String],
-    dry_run: bool,
-) -> Result<Report, AppError> {
-    execute_with_options(ctx, config_path, targets, RefreshOptions::new(dry_run))
-}
-
 pub fn execute_with_options(
     ctx: &AppContext<impl GitClient>,
     config_path: Option<&Path>,

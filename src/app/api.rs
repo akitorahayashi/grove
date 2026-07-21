@@ -23,19 +23,19 @@ pub fn status(
 pub fn sync(
     config_path: Option<PathBuf>,
     targets: Vec<String>,
-    dry_run: bool,
+    options: sync::SyncOptions,
 ) -> Result<sync::Report, AppError> {
     let ctx = default_context();
-    sync::execute(&ctx, config_path.as_deref(), &targets, dry_run)
+    sync::execute_with_options(&ctx, config_path.as_deref(), &targets, options)
 }
 
 pub fn refresh(
     config_path: Option<PathBuf>,
     targets: Vec<String>,
-    dry_run: bool,
+    options: refresh::RefreshOptions,
 ) -> Result<refresh::Report, AppError> {
     let ctx = default_context();
-    refresh::execute(&ctx, config_path.as_deref(), &targets, dry_run)
+    refresh::execute_with_options(&ctx, config_path.as_deref(), &targets, options)
 }
 
 pub fn validate(config_path: Option<PathBuf>) -> Result<validate::Report, AppError> {
@@ -44,24 +44,6 @@ pub fn validate(config_path: Option<PathBuf>) -> Result<validate::Report, AppErr
 
 pub(crate) fn init(directory: PathBuf) -> Result<init::Report, AppError> {
     init::execute(&directory)
-}
-
-pub(crate) fn sync_with_options(
-    config_path: Option<PathBuf>,
-    targets: Vec<String>,
-    options: sync::SyncOptions,
-) -> Result<sync::Report, AppError> {
-    let ctx = default_context();
-    sync::execute_with_options(&ctx, config_path.as_deref(), &targets, options)
-}
-
-pub(crate) fn refresh_with_options(
-    config_path: Option<PathBuf>,
-    targets: Vec<String>,
-    options: refresh::RefreshOptions,
-) -> Result<refresh::Report, AppError> {
-    let ctx = default_context();
-    refresh::execute_with_options(&ctx, config_path.as_deref(), &targets, options)
 }
 
 pub(crate) fn refresh_with_events(
