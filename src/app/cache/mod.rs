@@ -129,6 +129,40 @@ impl CacheStore {
         Ok(outcome)
     }
 
+    /// Seed a cache entry for `url` from an already-present local clone,
+    /// without placing any destination. The remote's default branch is tracked
+    /// (as with `gv clone`), and objects are borrowed from `source` and
+    /// dissociated, so an existing repository populates the cache without a full
+    /// re-download. An entry that already exists is left untouched. Returns
+    /// whether a new entry was created.
+    pub(crate) fn seed_from_local(
+        &self,
+        git: &impl GitClient,
+        url: &RemoteUrl,
+        source: &Path,
+        progress: &mut dyn GitProgressSink,
+    ) -> Result<bool, AppError> {
+        let key = url.as_process_argument();
+        let lock = self.entry_lock(key);
+        let _guard = lock.lock().expect("cache entry lock poisoned");
+
+        let container = self.root.join(entry_directory_name(key));
+        if container.exists() {
+            return Ok(false);
+        }
+
+        self.build_entry(git, url, &container, None, Some(source), progress)?;
+        touch_updated(&container)?;
+        Ok(true)
+    }
+
+    /// Whether a cache entry already exists for `url`. A cheap pre-check so
+    /// callers can skip resolving a seed source for an already-cached URL; the
+    /// authoritative check happens under the entry lock in `seed_from_local`.
+    pub(crate) fn is_cached(&self, url: &RemoteUrl) -> bool {
+        self.root.join(entry_directory_name(url.as_process_argument())).exists()
+    }
+
     /// Enumerate cache entries for reporting.
     pub(crate) fn list(&self) -> Result<Vec<CacheEntryInfo>, AppError> {
         let mut infos = Vec::new();
@@ -195,13 +229,8 @@ impl CacheStore {
         wanted: Option<&str>,
         progress: &mut dyn GitProgressSink,
     ) -> Result<CacheOutcome, AppError> {
-        let temporary = temporary_path(container);
-        if temporary.exists() {
-            fs::remove_dir_all(&temporary)?;
-        }
-
         if !container.exists() {
-            self.build_entry(git, url, container, &temporary, wanted, progress)?;
+            self.build_entry(git, url, container, wanted, None, progress)?;
             return Ok(CacheOutcome::Miss);
         }
 
@@ -214,13 +243,13 @@ impl CacheStore {
                 )));
             }
             None => {
-                self.build_entry(git, url, container, &temporary, wanted, progress)?;
+                self.build_entry(git, url, container, wanted, None, progress)?;
                 return Ok(CacheOutcome::Rebuilt);
             }
         }
 
         if !git.cache_verify(bare)? {
-            self.build_entry(git, url, container, &temporary, wanted, progress)?;
+            self.build_entry(git, url, container, wanted, None, progress)?;
             return Ok(CacheOutcome::Rebuilt);
         }
 
@@ -241,18 +270,23 @@ impl CacheStore {
         git: &impl GitClient,
         url: &RemoteUrl,
         container: &Path,
-        temporary: &Path,
         wanted: Option<&str>,
+        reference: Option<&Path>,
         progress: &mut dyn GitProgressSink,
     ) -> Result<(), AppError> {
-        let tracked = git.cache_create(url, &temporary.join("git"), wanted, progress)?;
+        let temporary = temporary_path(container);
+        if temporary.exists() {
+            fs::remove_dir_all(&temporary)?;
+        }
+
+        let tracked = git.cache_create(url, &temporary.join("git"), wanted, reference, progress)?;
         fs::write(temporary.join("url"), url.as_process_argument())?;
-        write_branch(temporary, &tracked)?;
+        write_branch(&temporary, &tracked)?;
 
         if container.exists() {
             fs::remove_dir_all(container)?;
         }
-        fs::rename(temporary, container)?;
+        fs::rename(&temporary, container)?;
         Ok(())
     }
 
@@ -610,6 +644,40 @@ mod tests {
             refreshed > created,
             "a later placement must advance the reported update time, not report entry creation",
         );
+    }
+
+    #[test]
+    fn seed_from_local_populates_cache_from_an_existing_clone() {
+        let tmp = TempDir::new().unwrap();
+        let remote = make_remote(&tmp.path().join("origin"), false);
+        let cache_root = tmp.path().join("cache");
+        let store = CacheStore::with_root(cache_root.clone());
+        let git = CommandGitClient::default();
+        let url = url_of(&remote);
+
+        // A clone the user already has on disk, with no cache entry yet.
+        let existing = tmp.path().join("existing");
+        run_git(tmp.path(), &["clone", remote.to_str().unwrap(), existing.to_str().unwrap()]);
+
+        let seeded = store
+            .seed_from_local(&git, &url, &existing.join(".git"), &mut NoopGitProgressSink)
+            .unwrap();
+        assert!(seeded, "an uncached repository is seeded");
+
+        // The entry tracks the remote's default branch at its tip.
+        let bare = single_entry(&cache_root).join("git");
+        assert_eq!(git_rev(&bare, "refs/heads/main"), git_rev(&remote, "refs/heads/main"));
+
+        // A repository that is already cached is left untouched.
+        let seeded_again = store
+            .seed_from_local(&git, &url, &existing.join(".git"), &mut NoopGitProgressSink)
+            .unwrap();
+        assert!(!seeded_again, "an already-cached repository is not re-seeded");
+
+        // The entry is self-contained: it still resolves its objects after the
+        // source it borrowed from is deleted.
+        fs::remove_dir_all(&existing).unwrap();
+        run_git(&bare, &["fsck", "--connectivity-only"]);
     }
 
     fn git_rev(directory: &Path, reference: &str) -> String {

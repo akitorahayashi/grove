@@ -62,11 +62,12 @@ impl ProgressPhase for Phase {
             Phase::Checking => "Checking repositories...",
             Phase::Preparing => "Preparing repositories...",
             Phase::Updating => "Updating repositories...",
+            Phase::Seeding => "Seeding cache...",
         }
     }
 
     fn shows_git_progress(self) -> bool {
-        self == Phase::Preparing
+        matches!(self, Phase::Preparing | Phase::Seeding)
     }
 }
 
@@ -93,6 +94,9 @@ fn print_phase_completion(
         }
         Phase::Updating => {
             print_count_with_elapsed("Updated", summary.count(), summary.elapsed(), false, output)
+        }
+        Phase::Seeding => {
+            print_count_with_elapsed("Seeded", summary.count(), summary.elapsed(), false, output)
         }
     }
 }
@@ -191,6 +195,26 @@ fn print_entries(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
                 )?;
                 print_blocked_details(entry.blocked_details(), output)?;
             }
+        }
+
+        if let Some(warning) = entry.warning() {
+            // Outcomes that print no line of their own need a header so the
+            // note has a subject.
+            let has_line = !matches!(
+                entry.outcome(),
+                Outcome::Planned(Plan::Fetch { .. }) | Outcome::Current { .. }
+            );
+            if !has_line {
+                let repository = terminal_text(entry.repository());
+                write_line(output, format_args!(" {} {}", "=".cyan(), repository.bold()))?;
+            }
+            write_line(
+                output,
+                format_args!(
+                    "    {}",
+                    format!("clone cache not seeded: {}", safe_message(warning)).dimmed()
+                ),
+            )?;
         }
     }
     Ok(())

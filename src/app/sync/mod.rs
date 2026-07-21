@@ -1,11 +1,12 @@
+use std::collections::HashSet;
 use std::path::Path;
 use std::time::Instant;
 
 use crate::AppError;
 use crate::app::AppContext;
 use crate::app::cache::CacheStore;
-use crate::app::events::{DiscardEvents, EventSink};
-use crate::app::phases;
+use crate::app::events::{DiscardEvents, EventProgress, EventSink};
+use crate::app::phases::{self, PhaseTask};
 use crate::config;
 use crate::git::GitClient;
 use crate::repositories::{RepositoryDefinition, select_repositories};
@@ -25,11 +26,34 @@ pub use report::{
 
 pub type Entry = crate::app::report::Entry<Outcome>;
 
+/// An existing repository eligible to seed the clone cache from its objects.
+struct SeedTask<'a> {
+    index: usize,
+    repository: &'a RepositoryDefinition,
+}
+
+impl PhaseTask for SeedTask<'_> {
+    fn repository(&self) -> &RepositoryDefinition {
+        self.repository
+    }
+
+    fn resource(&self) -> &Path {
+        self.repository.path()
+    }
+}
+
+/// The result of seeding one repository: the note to attach when seeding failed.
+struct SeedOutcome {
+    index: usize,
+    warning: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
     Checking,
     Preparing,
     Updating,
+    Seeding,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -81,6 +105,7 @@ pub(crate) fn execute_with_events(
         check_phase(ctx.git(), &repositories, parallelism, options.dry_run(), events)?;
 
     let mut preparations = Vec::new();
+    let mut seed_indices = Vec::new();
     for (index, (repository, decision)) in repositories.iter().copied().zip(decisions).enumerate() {
         match decision {
             check::Decision::Entry(entry) => entries[index] = Some(entry),
@@ -95,12 +120,22 @@ pub(crate) fn execute_with_events(
                     default_branch,
                 });
             }
+            check::Decision::SeedOnly { entry } => {
+                entries[index] = Some(entry);
+                seed_indices.push(index);
+            }
         }
     }
 
     let (updates, prepared) =
         prepare_phase(ctx.git(), &cache, &preparations, &mut entries, parallelism, events)?;
     let updated = update_phase(ctx.git(), &updates, &mut entries, parallelism, events)?;
+
+    // Repositories that reached the update phase fetched successfully, so their
+    // remote is reachable and can be seeded; this covers cleanly updated,
+    // up-to-date, and diverged repositories alike.
+    seed_indices.extend(updates.iter().map(update::Task::index));
+    seed_phase(ctx.git(), &cache, &repositories, &seed_indices, &mut entries, parallelism, events)?;
 
     let entries = entries
         .into_iter()
@@ -185,4 +220,75 @@ fn update_phase(
         entries[index] = Some(entry);
     }
     Ok(summary)
+}
+
+/// Seed the clone cache from existing repositories that are not yet cached, so
+/// later clones of the same URL borrow their objects. Seeding runs after the
+/// outcomes are known and is best-effort: a failure is surfaced as a note on
+/// the already-final entry, never as a repository failure. Repositories left
+/// untouched for a dirty working tree or detached HEAD are seeded here too,
+/// since seeding reads only the object store. Each distinct URL is seeded once.
+fn seed_phase(
+    git: &impl GitClient,
+    cache: &CacheStore,
+    repositories: &[&RepositoryDefinition],
+    indices: &[usize],
+    entries: &mut [Option<Entry>],
+    parallelism: usize,
+    events: &impl EventSink<Phase>,
+) -> Result<(), AppError> {
+    // One task per distinct URL, and only for URLs not already cached, so an
+    // all-cached run resolves no seed sources and skips the phase entirely.
+    let mut seen = HashSet::new();
+    let tasks = indices
+        .iter()
+        .filter(|&&index| seen.insert(repositories[index].url().as_process_argument()))
+        .filter(|&&index| !cache.is_cached(repositories[index].url()))
+        .map(|&index| SeedTask { index, repository: repositories[index] })
+        .collect::<Vec<_>>();
+
+    let (outcomes, _summary) = phases::run_worker_phase(
+        events,
+        Phase::Seeding,
+        &tasks,
+        parallelism,
+        |task| seed_repository(git, cache, task, events),
+        |outcome| outcome.warning.is_none(),
+    )?;
+
+    for outcome in outcomes {
+        if let Some(message) = outcome.warning
+            && let Some(entry) = entries[outcome.index].as_mut()
+        {
+            entry.set_warning(message);
+        }
+    }
+    Ok(())
+}
+
+fn seed_repository(
+    git: &impl GitClient,
+    cache: &CacheStore,
+    task: &SeedTask<'_>,
+    events: &impl EventSink<Phase>,
+) -> Result<SeedOutcome, AppError> {
+    let mut progress = EventProgress::new(task.repository, events);
+    let source = match git.common_directory(task.repository.path()) {
+        Ok(source) => source,
+        Err(error) => return demote_seed_failure(task.index, error),
+    };
+    match cache.seed_from_local(git, task.repository.url(), &source, &mut progress) {
+        Ok(_) => Ok(SeedOutcome { index: task.index, warning: None }),
+        Err(error) => demote_seed_failure(task.index, error),
+    }
+}
+
+/// A genuine internal error propagates and aborts the run, matching the prepare
+/// phase's error taxonomy; any other seeding failure becomes a note on the entry.
+fn demote_seed_failure(index: usize, error: AppError) -> Result<SeedOutcome, AppError> {
+    if matches!(error, AppError::Internal(_)) {
+        Err(error)
+    } else {
+        Ok(SeedOutcome { index, warning: Some(error.to_string()) })
+    }
 }

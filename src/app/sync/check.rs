@@ -10,7 +10,16 @@ use super::{BlockedReason, Entry, Outcome, Plan, SkippedReason};
 pub(super) enum Decision {
     Entry(Entry),
     Clone,
-    Fetch { common_directory: PathBuf, default_branch: String },
+    Fetch {
+        common_directory: PathBuf,
+        default_branch: String,
+    },
+    /// A terminal outcome whose repository is still eligible to seed the cache
+    /// from its local objects — an existing, URL-matching clone grove leaves
+    /// untouched (a dirty working tree or a detached HEAD).
+    SeedOnly {
+        entry: Entry,
+    },
 }
 
 pub(super) fn repository(
@@ -41,12 +50,20 @@ pub(super) fn repository(
                 super::BlockedReasonDetails::RemoteUrlMismatch { actual, expected },
             )));
         }
-        Readiness::DetachedHead => return blocked(repository, BlockedReason::DetachedHead),
+        Readiness::DetachedHead => {
+            return Ok(seed_only_or_terminal(
+                Entry::new(repository, Outcome::Blocked { reason: BlockedReason::DetachedHead }),
+                dry_run,
+            ));
+        }
         Readiness::DirtyTree => {
-            return Ok(Decision::Entry(Entry::new(
-                repository,
-                Outcome::Skipped { reason: SkippedReason::DirtyWorkingTree },
-            )));
+            return Ok(seed_only_or_terminal(
+                Entry::new(
+                    repository,
+                    Outcome::Skipped { reason: SkippedReason::DirtyWorkingTree },
+                ),
+                dry_run,
+            ));
         }
         Readiness::NoDefaultBranch => {
             return blocked(repository, BlockedReason::MissingRemoteDefaultBranch);
@@ -70,6 +87,12 @@ pub(super) fn repository(
 
 fn blocked(repository: &RepositoryDefinition, reason: BlockedReason) -> Result<Decision, AppError> {
     Ok(Decision::Entry(Entry::new(repository, Outcome::Blocked { reason })))
+}
+
+/// A repository grove leaves untouched still seeds the cache during a real run;
+/// under `--dry-run` it stays a plain terminal entry with no side effects.
+fn seed_only_or_terminal(entry: Entry, dry_run: bool) -> Decision {
+    if dry_run { Decision::Entry(entry) } else { Decision::SeedOnly { entry } }
 }
 
 fn default_branch_block_reason(
