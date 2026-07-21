@@ -62,11 +62,12 @@ impl ProgressPhase for Phase {
             Phase::Checking => "Checking repositories...",
             Phase::Preparing => "Preparing repositories...",
             Phase::Updating => "Updating repositories...",
+            Phase::Seeding => "Seeding cache...",
         }
     }
 
     fn shows_git_progress(self) -> bool {
-        self == Phase::Preparing
+        matches!(self, Phase::Preparing | Phase::Seeding)
     }
 }
 
@@ -94,6 +95,9 @@ fn print_phase_completion(
         Phase::Updating => {
             print_count_with_elapsed("Updated", summary.count(), summary.elapsed(), false, output)
         }
+        Phase::Seeding => {
+            print_count_with_elapsed("Seeded", summary.count(), summary.elapsed(), false, output)
+        }
     }
 }
 
@@ -115,7 +119,7 @@ fn print_entries(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
     });
 
     for entry in entries {
-        let printed = match entry.outcome() {
+        match entry.outcome() {
             Outcome::Planned(Plan::Clone { url }) => {
                 let repository = terminal_text(entry.repository());
                 write_line(
@@ -127,9 +131,8 @@ fn print_entries(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
                         format!("from {}", terminal_text(url)).dimmed()
                     ),
                 )?;
-                true
             }
-            Outcome::Planned(Plan::Fetch { .. }) | Outcome::Current { .. } => false,
+            Outcome::Planned(Plan::Fetch { .. }) | Outcome::Current { .. } => {}
             Outcome::Cloned { url, cache } => {
                 let repository = terminal_text(entry.repository());
                 write_line(
@@ -142,7 +145,6 @@ fn print_entries(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
                             .dimmed()
                     ),
                 )?;
-                true
             }
             Outcome::Updated { branch, before, after } => {
                 let repository = terminal_text(entry.repository());
@@ -155,7 +157,6 @@ fn print_entries(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
                         terminal_text(&format!("{branch} {before} -> {after}")).dimmed()
                     ),
                 )?;
-                true
             }
             Outcome::UpdatedButRestorationFailed { branch, before, after, message } => {
                 let repository = terminal_text(entry.repository());
@@ -172,7 +173,6 @@ fn print_entries(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
                         .dimmed()
                     ),
                 )?;
-                true
             }
             Outcome::Skipped { reason } => {
                 let repository = terminal_text(entry.repository());
@@ -185,7 +185,6 @@ fn print_entries(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
                         terminal_text(reason.message()).dimmed()
                     ),
                 )?;
-                true
             }
             Outcome::Blocked { reason } => {
                 let repository = terminal_text(entry.repository());
@@ -195,12 +194,17 @@ fn print_entries(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
                     format_args!(" {} {} {}", "x".red(), repository.bold(), message.dimmed()),
                 )?;
                 print_blocked_details(entry.blocked_details(), output)?;
-                true
             }
-        };
+        }
 
         if let Some(warning) = entry.warning() {
-            if !printed {
+            // Outcomes that print no line of their own need a header so the
+            // note has a subject.
+            let has_line = !matches!(
+                entry.outcome(),
+                Outcome::Planned(Plan::Fetch { .. }) | Outcome::Current { .. }
+            );
+            if !has_line {
                 let repository = terminal_text(entry.repository());
                 write_line(output, format_args!(" {} {}", "=".cyan(), repository.bold()))?;
             }

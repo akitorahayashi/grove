@@ -1001,6 +1001,38 @@ fn sync_seeds_cache_from_diverged_existing_repository() {
 }
 
 #[test]
+fn sync_seeds_cache_from_detached_head_existing_repository() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+
+    // An existing clone on a detached HEAD: grove leaves it untouched, but it
+    // still seeds the cache. There is no cache entry.
+    let destination = ctx.workspace().join("blog");
+    run_git(ctx.workspace(), &["clone", &remote.url(), destination.to_str().unwrap()]);
+    run_git(&destination, &["checkout", "--detach"]);
+
+    let config = ctx.write_config(&format!(
+        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
+        remote.url()
+    ));
+
+    ctx.cli()
+        .arg("--config")
+        .arg(&config)
+        .arg("sync")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("detached HEAD"));
+
+    ctx.cli()
+        .arg("cache")
+        .arg("list")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("blog.git"));
+}
+
+#[test]
 fn sync_redacts_credentials_in_successful_clone_output() {
     use std::os::unix::fs::PermissionsExt;
 

@@ -39,11 +39,10 @@ impl<O> Entry<O> {
         }
     }
 
-    /// Attach a non-fatal note to an otherwise successful outcome (for example,
-    /// a repository that updated cleanly but whose cache could not be seeded).
-    pub(crate) fn with_warning(mut self, warning: String) -> Self {
+    /// Attach a non-fatal note to an outcome (for example, a repository whose
+    /// cache could not be seeded).
+    pub(crate) fn set_warning(&mut self, warning: String) {
         self.warning = Some(warning);
-        self
     }
 
     pub fn repository(&self) -> &str {

@@ -130,16 +130,16 @@ impl CacheStore {
     }
 
     /// Seed a cache entry for `url` from an already-present local clone,
-    /// without placing any destination. Objects are borrowed from `source`
-    /// and dissociated, so an existing repository populates the cache without
-    /// a full re-download. An entry that already exists is left untouched.
-    /// Returns whether a new entry was created.
+    /// without placing any destination. The remote's default branch is tracked
+    /// (as with `gv clone`), and objects are borrowed from `source` and
+    /// dissociated, so an existing repository populates the cache without a full
+    /// re-download. An entry that already exists is left untouched. Returns
+    /// whether a new entry was created.
     pub(crate) fn seed_from_local(
         &self,
         git: &impl GitClient,
         url: &RemoteUrl,
         source: &Path,
-        branch: &str,
         progress: &mut dyn GitProgressSink,
     ) -> Result<bool, AppError> {
         let key = url.as_process_argument();
@@ -151,9 +151,16 @@ impl CacheStore {
             return Ok(false);
         }
 
-        self.build_entry(git, url, &container, Some(branch), Some(source), progress)?;
+        self.build_entry(git, url, &container, None, Some(source), progress)?;
         touch_updated(&container)?;
         Ok(true)
+    }
+
+    /// Whether a cache entry already exists for `url`. A cheap pre-check so
+    /// callers can skip resolving a seed source for an already-cached URL; the
+    /// authoritative check happens under the entry lock in `seed_from_local`.
+    pub(crate) fn is_cached(&self, url: &RemoteUrl) -> bool {
+        self.root.join(entry_directory_name(url.as_process_argument())).exists()
     }
 
     /// Enumerate cache entries for reporting.
@@ -653,23 +660,24 @@ mod tests {
         run_git(tmp.path(), &["clone", remote.to_str().unwrap(), existing.to_str().unwrap()]);
 
         let seeded = store
-            .seed_from_local(&git, &url, &existing.join(".git"), "main", &mut NoopGitProgressSink)
+            .seed_from_local(&git, &url, &existing.join(".git"), &mut NoopGitProgressSink)
             .unwrap();
         assert!(seeded, "an uncached repository is seeded");
 
-        // The entry tracks main at the remote tip and is self-contained.
+        // The entry tracks the remote's default branch at its tip.
         let bare = single_entry(&cache_root).join("git");
         assert_eq!(git_rev(&bare, "refs/heads/main"), git_rev(&remote, "refs/heads/main"));
-        assert!(
-            !bare.join("objects/info/alternates").exists(),
-            "the entry must be dissociated from the source",
-        );
 
         // A repository that is already cached is left untouched.
         let seeded_again = store
-            .seed_from_local(&git, &url, &existing.join(".git"), "main", &mut NoopGitProgressSink)
+            .seed_from_local(&git, &url, &existing.join(".git"), &mut NoopGitProgressSink)
             .unwrap();
         assert!(!seeded_again, "an already-cached repository is not re-seeded");
+
+        // The entry is self-contained: it still resolves its objects after the
+        // source it borrowed from is deleted.
+        fs::remove_dir_all(&existing).unwrap();
+        run_git(&bare, &["fsck", "--connectivity-only"]);
     }
 
     fn git_rev(directory: &Path, reference: &str) -> String {

@@ -14,13 +14,11 @@ pub(super) enum Decision {
         common_directory: PathBuf,
         default_branch: String,
     },
-    /// A terminal outcome that still contributes a cache seed — an existing
-    /// repository grove leaves untouched (a dirty working tree) but whose
-    /// objects can still populate the cache.
+    /// A terminal outcome whose repository is still eligible to seed the cache
+    /// from its local objects — an existing, URL-matching clone grove leaves
+    /// untouched (a dirty working tree or a detached HEAD).
     SeedOnly {
         entry: Entry,
-        common_directory: PathBuf,
-        default_branch: String,
     },
 }
 
@@ -52,25 +50,20 @@ pub(super) fn repository(
                 super::BlockedReasonDetails::RemoteUrlMismatch { actual, expected },
             )));
         }
-        Readiness::DetachedHead => return blocked(repository, BlockedReason::DetachedHead),
+        Readiness::DetachedHead => {
+            return Ok(seed_only_or_terminal(
+                Entry::new(repository, Outcome::Blocked { reason: BlockedReason::DetachedHead }),
+                dry_run,
+            ));
+        }
         Readiness::DirtyTree => {
-            let entry = Entry::new(
-                repository,
-                Outcome::Skipped { reason: SkippedReason::DirtyWorkingTree },
-            );
-            // A dirty repository is left untouched, but its objects still seed
-            // the cache. Seeding needs a branch to track and the object store;
-            // when the default branch cannot be resolved, skip without seeding.
-            if dry_run {
-                return Ok(Decision::Entry(entry));
-            }
-            let Some(default_branch) =
-                git.default_branch(repository.path(), repository.default_branch())?
-            else {
-                return Ok(Decision::Entry(entry));
-            };
-            let common_directory = git.common_directory(repository.path())?;
-            return Ok(Decision::SeedOnly { entry, common_directory, default_branch });
+            return Ok(seed_only_or_terminal(
+                Entry::new(
+                    repository,
+                    Outcome::Skipped { reason: SkippedReason::DirtyWorkingTree },
+                ),
+                dry_run,
+            ));
         }
         Readiness::NoDefaultBranch => {
             return blocked(repository, BlockedReason::MissingRemoteDefaultBranch);
@@ -94,6 +87,12 @@ pub(super) fn repository(
 
 fn blocked(repository: &RepositoryDefinition, reason: BlockedReason) -> Result<Decision, AppError> {
     Ok(Decision::Entry(Entry::new(repository, Outcome::Blocked { reason })))
+}
+
+/// A repository grove leaves untouched still seeds the cache during a real run;
+/// under `--dry-run` it stays a plain terminal entry with no side effects.
+fn seed_only_or_terminal(entry: Entry, dry_run: bool) -> Decision {
+    if dry_run { Decision::Entry(entry) } else { Decision::SeedOnly { entry } }
 }
 
 fn default_branch_block_reason(
