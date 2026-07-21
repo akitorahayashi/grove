@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use crate::app::cache::CacheStore;
 use crate::app::events::{EventProgress, EventSink};
 use crate::app::phases::PhaseTask;
 use crate::git::GitClient;
@@ -52,6 +53,7 @@ impl Completion<'_> {
 
 pub(super) fn repository<'a>(
     git: &impl GitClient,
+    cache: &CacheStore,
     task: &Task<'a>,
     events: &impl EventSink<Phase>,
 ) -> Result<Completion<'a>, crate::AppError> {
@@ -60,17 +62,19 @@ pub(super) fn repository<'a>(
 
     match task {
         Task::Clone { index, repository } => Ok(
-            match git.clone_repository(
+            match cache.place(
+                git,
                 repository.url(),
                 repository.path(),
-                repository.root(),
+                Some(repository.root()),
+                repository.default_branch(),
                 &mut progress,
             ) {
-                Ok(()) => Completion::Entry {
+                Ok(cache) => Completion::Entry {
                     index: *index,
                     entry: Entry::new(
                         repository,
-                        Outcome::Cloned { url: repository.url().to_string() },
+                        Outcome::Cloned { url: repository.url().to_string(), cache },
                     ),
                     prepared: true,
                 },

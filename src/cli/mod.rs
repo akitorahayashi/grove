@@ -1,5 +1,7 @@
 //! CLI adapter.
 
+mod cache;
+mod clone;
 mod init;
 mod output;
 mod refresh;
@@ -34,6 +36,13 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    #[command(about = "Inspect and clear the local clone cache")]
+    Cache(cache::CacheCommand),
+    #[command(
+        visible_alias = "c",
+        about = "Clone a repository through the local cache, without grove.toml"
+    )]
+    Clone(clone::CloneCommand),
     #[command(visible_alias = "i", about = "Create grove.toml in the current directory")]
     Init(init::InitCommand),
     #[command(
@@ -73,6 +82,8 @@ fn run_with_args(args: impl IntoIterator<Item = OsString>, output: &mut Output<'
     };
 
     let result = match cli.command {
+        Commands::Cache(command) => cache::run(cli.config, command, output),
+        Commands::Clone(command) => clone::run(cli.config, command, output),
         Commands::Init(command) => init::run(cli.config, command, output),
         Commands::Refresh(command) => refresh::run(cli.config, command, output),
         Commands::Sync(command) => sync::run(cli.config, command, output),

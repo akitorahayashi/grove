@@ -3,6 +3,7 @@ use std::time::Instant;
 
 use crate::AppError;
 use crate::app::AppContext;
+use crate::app::cache::CacheStore;
 use crate::app::events::{DiscardEvents, EventSink};
 use crate::app::phases;
 use crate::config;
@@ -68,6 +69,7 @@ pub(crate) fn execute_with_events(
     events: &impl EventSink<Phase>,
 ) -> Result<Report, AppError> {
     ctx.git().verify_available()?;
+    let cache = CacheStore::from_env()?;
     let config = config::load(config_path)?;
     let repositories = select_repositories(config.repositories(), targets)?;
     let parallelism = std::thread::available_parallelism()?.get();
@@ -97,7 +99,7 @@ pub(crate) fn execute_with_events(
     }
 
     let (updates, prepared) =
-        prepare_phase(ctx.git(), &preparations, &mut entries, parallelism, events)?;
+        prepare_phase(ctx.git(), &cache, &preparations, &mut entries, parallelism, events)?;
     let updated = update_phase(ctx.git(), &updates, &mut entries, parallelism, events)?;
 
     let entries = entries
@@ -133,6 +135,7 @@ fn check_phase(
 
 fn prepare_phase<'a>(
     git: &impl GitClient,
+    cache: &CacheStore,
     tasks: &[prepare::Task<'a>],
     entries: &mut [Option<Entry>],
     parallelism: usize,
@@ -143,7 +146,7 @@ fn prepare_phase<'a>(
         Phase::Preparing,
         tasks,
         parallelism,
-        |task| prepare::repository(git, task, events),
+        |task| prepare::repository(git, cache, task, events),
         |completion| completion.prepared(),
     )?;
 

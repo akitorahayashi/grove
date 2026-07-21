@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use crate::app::cache::CacheOutcome;
 use crate::app::events::PhaseSummary;
 use crate::app::inspection;
 use crate::app::report::Entry;
@@ -65,7 +66,7 @@ impl BlockedReason {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
     Planned(Plan),
-    Cloned { url: String },
+    Cloned { url: String, cache: CacheOutcome },
     Updated { branch: String, before: String, after: String },
     UpdatedButRestorationFailed { branch: String, before: String, after: String, message: String },
     Current { branch: String },

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use crate::AppError;
 use crate::app::events::EventSink;
-use crate::app::{AppContext, init, refresh, status, sync, validate};
+use crate::app::{AppContext, cache, clone, init, refresh, status, sync, validate};
 use crate::git::CommandGitClient;
 
 fn default_context() -> AppContext<CommandGitClient> {
@@ -42,6 +42,38 @@ pub fn validate(config_path: Option<PathBuf>) -> Result<validate::Report, AppErr
     validate::execute(config_path.as_deref())
 }
 
+pub fn clone(url: String, destination: Option<PathBuf>) -> Result<clone::Report, AppError> {
+    let ctx = default_context();
+    clone::execute(&ctx, &url, destination)
+}
+
+pub(crate) fn cache_list() -> Result<Vec<cache::CacheEntryInfo>, AppError> {
+    cache::CacheStore::from_env()?.list()
+}
+
+pub(crate) fn cache_clear(
+    config_path: Option<PathBuf>,
+    targets: Vec<String>,
+) -> Result<cache::CacheClearReport, AppError> {
+    let store = cache::CacheStore::from_env()?;
+    if targets.is_empty() {
+        return Ok(cache::CacheClearReport::new(store.clear_all()?, Vec::new()));
+    }
+
+    let config = crate::config::load(config_path.as_deref())?;
+    let repositories = crate::repositories::select_repositories(config.repositories(), &targets)?;
+    let mut removed = 0;
+    let mut absent = Vec::new();
+    for repository in repositories {
+        if store.remove(repository.url())? {
+            removed += 1;
+        } else {
+            absent.push(repository.display_path().to_string());
+        }
+    }
+    Ok(cache::CacheClearReport::new(removed, absent))
+}
+
 pub(crate) fn init(directory: PathBuf) -> Result<init::Report, AppError> {
     init::execute(&directory)
 }
@@ -64,4 +96,13 @@ pub(crate) fn sync_with_events(
 ) -> Result<sync::Report, AppError> {
     let ctx = default_context();
     sync::execute_with_events(&ctx, config_path.as_deref(), &targets, options, events)
+}
+
+pub(crate) fn clone_with_events(
+    url: String,
+    destination: Option<PathBuf>,
+    events: &impl EventSink<clone::Phase>,
+) -> Result<clone::Report, AppError> {
+    let ctx = default_context();
+    clone::execute_with_events(&ctx, &url, destination, events)
 }

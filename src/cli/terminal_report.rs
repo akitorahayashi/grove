@@ -4,10 +4,20 @@ use std::time::Duration;
 
 use owo_colors::OwoColorize;
 
+use crate::app::cache::CacheOutcome;
 use crate::app::report::BlockedReasonDetails;
 use crate::repositories::redact_urls_for_display;
 
 use super::output::{Output, terminal_text};
+
+pub(super) fn cache_annotation(cache: CacheOutcome) -> &'static str {
+    match cache {
+        CacheOutcome::Miss => "(cached)",
+        CacheOutcome::Hit => "(from cache)",
+        CacheOutcome::Rebuilt => "(cache rebuilt)",
+        CacheOutcome::Retargeted => "(cache retargeted)",
+    }
+}
 
 pub(super) fn print_phase(
     label: &str,
