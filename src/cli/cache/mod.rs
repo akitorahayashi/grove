@@ -21,9 +21,9 @@ pub(super) struct CacheCommand {
 
 #[derive(Subcommand)]
 enum CacheSubcommand {
-    #[command(about = "List cached repositories")]
+    #[command(visible_alias = "ls", about = "List cached repositories")]
     List(ListCommand),
-    #[command(about = "Remove cached repositories, or those named")]
+    #[command(visible_alias = "clr", about = "Remove cached repositories, or those named")]
     Clear(ClearCommand),
 }
 

@@ -36,10 +36,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    #[command(about = "Inspect and clear the local clone cache")]
+    #[command(visible_alias = "c", about = "Inspect and clear the local clone cache")]
     Cache(cache::CacheCommand),
     #[command(
-        visible_alias = "c",
+        visible_alias = "cl",
         about = "Clone a repository through the local cache, without grove.toml"
     )]
     Clone(clone::CloneCommand),

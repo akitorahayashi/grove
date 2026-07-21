@@ -31,6 +31,10 @@ gv cache clear
 gv cache clear frontend
 ```
 
+`gv clone`, with the alias `gv cl`, and `gv cache`, with the alias `gv c`, expose the
+local clone cache from the command line. `gv cache list`, with the alias `gv c ls`,
+and `gv cache clear`, with the alias `gv c clr`, operate on cache entries.
+
 ## Configuration
 
 `grove.toml` declares repository names, target paths, and clone URLs.
