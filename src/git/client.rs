@@ -31,13 +31,15 @@ pub trait GitClient: Sync {
 
     /// Create a bare, single-branch cache entry at `entry`. When `branch` is
     /// `Some`, that branch is tracked; otherwise the remote HEAD branch is.
+    /// A fetch refspec binding the tracked branch is configured so later
+    /// refreshes advance it. Returns the resolved tracked branch name.
     fn cache_create(
         &self,
         url: &RemoteUrl,
         entry: &Path,
         branch: Option<&str>,
         progress: &mut dyn GitProgressSink,
-    ) -> Result<(), AppError>;
+    ) -> Result<String, AppError>;
 
     /// Refresh a cache entry's tracked branch, pruning deleted refs.
     fn cache_update(

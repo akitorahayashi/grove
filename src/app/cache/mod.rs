@@ -120,6 +120,11 @@ impl CacheStore {
         let wanted = branch.map(BranchName::as_str);
 
         let outcome = self.ensure_entry(git, url, &container, &bare, wanted, progress)?;
+        // Fetches land beneath `<container>/git`, which never advances the outer
+        // container's own mtime. Record the last successful cache operation
+        // explicitly so `cache list` reports a truthful age rather than the
+        // container's creation time.
+        touch_updated(&container)?;
         git.clone_with_reference(url, destination, &bare, progress)?;
         Ok(outcome)
     }
@@ -141,7 +146,9 @@ impl CacheStore {
             infos.push(CacheEntryInfo {
                 url,
                 size_bytes: directory_size(&container)?,
-                modified: fs::metadata(&container).and_then(|meta| meta.modified()).ok(),
+                modified: fs::metadata(container.join("updated"))
+                    .and_then(|meta| meta.modified())
+                    .ok(),
             });
         }
         infos.sort_by(|left, right| left.url.cmp(&right.url));
@@ -221,7 +228,7 @@ impl CacheStore {
             && read_metadata(container, "branch")?.as_deref() != Some(wanted)
         {
             git.cache_retarget(bare, wanted, progress)?;
-            write_branch(container, Some(wanted))?;
+            write_branch(container, wanted)?;
             return Ok(CacheOutcome::Retargeted);
         }
 
@@ -238,9 +245,9 @@ impl CacheStore {
         wanted: Option<&str>,
         progress: &mut dyn GitProgressSink,
     ) -> Result<(), AppError> {
-        git.cache_create(url, &temporary.join("git"), wanted, progress)?;
+        let tracked = git.cache_create(url, &temporary.join("git"), wanted, progress)?;
         fs::write(temporary.join("url"), url.as_process_argument())?;
-        write_branch(temporary, wanted)?;
+        write_branch(temporary, &tracked)?;
 
         if container.exists() {
             fs::remove_dir_all(container)?;
@@ -354,16 +361,15 @@ fn read_metadata(container: &Path, name: &str) -> Result<Option<String>, AppErro
     }
 }
 
-fn write_branch(container: &Path, branch: Option<&str>) -> Result<(), AppError> {
-    let path = container.join("branch");
-    match branch {
-        Some(branch) => fs::write(path, branch)?,
-        None => match fs::remove_file(&path) {
-            Ok(()) => {}
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-            Err(err) => return Err(err.into()),
-        },
-    }
+fn write_branch(container: &Path, branch: &str) -> Result<(), AppError> {
+    fs::write(container.join("branch"), branch)?;
+    Ok(())
+}
+
+/// Stamp the container's last successful cache operation. The marker's mtime,
+/// not the container directory's, is what `cache list` reports as the age.
+fn touch_updated(container: &Path) -> Result<(), AppError> {
+    fs::write(container.join("updated"), [])?;
     Ok(())
 }
 
@@ -542,5 +548,77 @@ mod tests {
             .place(&git, &url, &tmp.path().join("b"), None, None, &mut NoopGitProgressSink)
             .unwrap_err();
         assert!(!matches!(error, AppError::Internal(_)));
+    }
+
+    #[test]
+    fn hit_advances_cached_branch_after_remote_moves() {
+        let tmp = TempDir::new().unwrap();
+        let origin = tmp.path().join("origin");
+        let remote = make_remote(&origin, false);
+        let cache_root = tmp.path().join("cache");
+        let store = CacheStore::with_root(cache_root.clone());
+        let git = CommandGitClient::default();
+        let url = url_of(&remote);
+
+        store
+            .place(&git, &url, &tmp.path().join("a"), None, None, &mut NoopGitProgressSink)
+            .unwrap();
+
+        let seed = origin.join("seed");
+        fs::write(seed.join("second.txt"), "second\n").unwrap();
+        run_git(&seed, &["add", "second.txt"]);
+        run_git(&seed, &["-c", "user.name=T", "-c", "user.email=t@e.x", "commit", "-m", "second"]);
+        run_git(&seed, &["push", "origin", "main"]);
+
+        let outcome = store
+            .place(&git, &url, &tmp.path().join("b"), None, None, &mut NoopGitProgressSink)
+            .unwrap();
+        assert_eq!(outcome, CacheOutcome::Hit);
+
+        let bare = single_entry(&cache_root).join("git");
+        assert_eq!(
+            git_rev(&bare, "refs/heads/main"),
+            git_rev(&seed, "main"),
+            "a cache hit must fast-forward the tracked branch to the new remote tip",
+        );
+    }
+
+    #[test]
+    fn list_reports_the_time_of_the_last_placement() {
+        let tmp = TempDir::new().unwrap();
+        let remote = make_remote(&tmp.path().join("origin"), false);
+        let cache_root = tmp.path().join("cache");
+        let store = CacheStore::with_root(cache_root);
+        let git = CommandGitClient::default();
+        let url = url_of(&remote);
+
+        store
+            .place(&git, &url, &tmp.path().join("a"), None, None, &mut NoopGitProgressSink)
+            .unwrap();
+        let created =
+            store.list().unwrap()[0].modified().expect("placement records an update time");
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        store
+            .place(&git, &url, &tmp.path().join("b"), None, None, &mut NoopGitProgressSink)
+            .unwrap();
+        let refreshed =
+            store.list().unwrap()[0].modified().expect("placement records an update time");
+
+        assert!(
+            refreshed > created,
+            "a later placement must advance the reported update time, not report entry creation",
+        );
+    }
+
+    fn git_rev(directory: &Path, reference: &str) -> String {
+        let output = Command::new("git")
+            .current_dir(directory)
+            .args(["rev-parse", reference])
+            .output()
+            .expect("run git rev-parse");
+        assert!(output.status.success(), "git rev-parse {reference} failed");
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
     }
 }

@@ -96,10 +96,14 @@ fn resolve_destination(url: &RemoteUrl, destination: Option<PathBuf>) -> Result<
 }
 
 fn default_destination_name(url: &str) -> Result<String, AppError> {
-    let trimmed = url.trim_end_matches('/');
+    // Derive the name from the path only. Query and fragment components can
+    // carry credentials (`?access_token=...`); keeping them would place the
+    // secret in the filesystem path and print it unredacted.
+    let path = url.split(['?', '#']).next().unwrap_or_default();
+    let trimmed = path.trim_end_matches('/');
     let tail = trimmed.rsplit(['/', ':']).next().unwrap_or_default();
     let name = tail.strip_suffix(".git").unwrap_or(tail);
-    if name.is_empty() {
+    if name.is_empty() || name == "." || name == ".." {
         Err(AppError::config_error(
             "cannot infer a destination directory from the URL; specify one explicitly",
         ))
@@ -123,5 +127,36 @@ struct NamedProgress<'a, P> {
 impl<P> GitProgressSink for NamedProgress<'_, P> {
     fn progress(&mut self, progress: GitProgress) -> Result<(), AppError> {
         self.events.emit(Event::GitProgress { repository: self.name.clone(), progress })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::default_destination_name;
+
+    #[test]
+    fn infers_name_from_path_tail() {
+        assert_eq!(default_destination_name("https://example.com/org/repo.git").unwrap(), "repo");
+        assert_eq!(default_destination_name("git@example.com:org/repo.git").unwrap(), "repo");
+        assert_eq!(default_destination_name("https://example.com/org/repo/").unwrap(), "repo");
+    }
+
+    #[test]
+    fn drops_query_and_fragment_so_credentials_never_reach_the_path() {
+        assert_eq!(
+            default_destination_name("https://example.com/repo.git?access_token=secret").unwrap(),
+            "repo"
+        );
+        assert_eq!(
+            default_destination_name("https://example.com/repo.git#fragment").unwrap(),
+            "repo"
+        );
+    }
+
+    #[test]
+    fn rejects_names_that_are_not_a_usable_directory() {
+        for url in ["https://example.com/.git", "https://example.com/..", "https://example.com/."] {
+            assert!(default_destination_name(url).is_err(), "{url} should be rejected");
+        }
     }
 }

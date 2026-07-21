@@ -53,7 +53,7 @@ impl GitClient for CommandGitClient {
         entry: &Path,
         branch: Option<&str>,
         progress: &mut dyn GitProgressSink,
-    ) -> Result<(), AppError> {
+    ) -> Result<String, AppError> {
         if let Some(parent) = entry.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -73,7 +73,20 @@ impl GitClient for CommandGitClient {
                 entry.display()
             )),
             progress,
-        )
+        )?;
+
+        // `git clone --bare` configures no `remote.origin.fetch` refspec, so a
+        // later `fetch origin --prune` would only move FETCH_HEAD and leave the
+        // tracked branch stale. Bind the tracked branch explicitly so refreshes
+        // advance it. When `--branch` was omitted, the tracked branch is the one
+        // HEAD now points at (the remote default).
+        let tracked = match branch {
+            Some(branch) => branch.to_string(),
+            None => self.head_branch(entry)?,
+        };
+        let refspec = format!("+refs/heads/{tracked}:refs/heads/{tracked}");
+        self.git_required(entry, &["config", "remote.origin.fetch", &refspec])?;
+        Ok(tracked)
     }
 
     fn cache_update(
@@ -361,6 +374,12 @@ impl CommandGitClient {
 
     fn command(&self) -> Command {
         Command::new(&self.executable)
+    }
+
+    fn head_branch(&self, entry: &Path) -> Result<String, AppError> {
+        let args = ["symbolic-ref", "--short", "HEAD"];
+        let output = self.git_required(entry, &args)?;
+        required_line(entry, &args, &output)
     }
 
     fn prepare_default_branch(

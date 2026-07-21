@@ -327,7 +327,7 @@ mod tests {
             _entry: &Path,
             _branch: Option<&str>,
             _progress: &mut dyn GitProgressSink,
-        ) -> Result<(), AppError> {
+        ) -> Result<String, AppError> {
             unreachable!("status never creates cache entries")
         }
 
