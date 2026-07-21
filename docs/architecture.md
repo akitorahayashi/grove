@@ -21,21 +21,22 @@ src/
     output.rs
     refresh/
       mod.rs
-      progress.rs
     repository_progress.rs
     status.rs
     terminal_report.rs
     validate.rs
     sync/
       mod.rs
-      progress.rs
   app/
     api.rs
     context.rs
+    events.rs
     init.rs
+    inspection.rs
+    phases.rs
+    report.rs
     refresh/
       check.rs
-      events.rs
       fetch.rs
       mod.rs
       report.rs
@@ -44,7 +45,6 @@ src/
     validate.rs
     sync/
       check.rs
-      events.rs
       mod.rs
       prepare.rs
       report.rs
@@ -83,18 +83,30 @@ src/
 ## Boundaries
 
 `cli` owns Clap parsing, stream selection, terminal-safe text, styling, progress,
-and command completion. Subcommands return completion or error values. The
+and command completion. The progress pump, the blocked-reason detail rendering,
+and the repository-count wording are shared across the phase-emitting commands
+rather than duplicated per command. Subcommands return completion or error values. The
 crate-root `cli` function returns `ExitCode`; `main` is the sole process
 termination boundary. Output write failures propagate, and a closed stdout pipe
 has non-panicking handling.
 
 `app` owns the five use cases and default dependency wiring. Sync has check,
 clone/fetch preparation, update, and optional zoxide phases. Refresh has check,
-fetch, and default-branch refresh phases. Results retain selection order.
+fetch, and default-branch refresh phases. Status inspects repositories serially,
+or, with `--fetch`, through the same bounded parallel workers keyed by Git common
+directory. Results retain selection order.
 Worker execution is bounded by the selected work, available parallelism, and a
 ceiling of eight. Shared Git common directories are serialized, and refresh
 blocks selected linked worktrees that would finish on the same default branch.
-Worker panic and channel disconnects become application errors.
+Worker panic and channel disconnects become application errors. Progress events
+and the phase skeleton are shared: `events` owns the phase-generic event, sink,
+and progress adapter, and `phases` owns the check and worker phase envelopes.
+Each use case supplies its own phase marker, per-repository action, and change
+predicate. `inspection` owns repository readiness probing and the canonical
+diagnostics for the conditions the use cases share, so their reason vocabularies
+map from one probe and their shared messages cannot drift. `report` owns the
+report entry, generic over each use case's outcome vocabulary, and the shared
+blocked-reason detail.
 
 `config` discovers the root file, resolves one include level, decodes TOML, and
 validates the complete catalog without invoking Git or zoxide. It rejects schema

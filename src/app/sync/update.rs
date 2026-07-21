@@ -1,10 +1,11 @@
 use std::path::{Path, PathBuf};
 
 use crate::AppError;
+use crate::app::inspection::{self, BranchReadiness};
+use crate::app::phases::PhaseTask;
 use crate::git::{GitClient, GitUpdateBlock, GitUpdateOutcome, Restoration};
 use crate::repositories::RepositoryDefinition;
 
-use super::check::default_branch_block_reason;
 use super::{BlockedReason, Entry, Outcome};
 
 pub(super) struct Task<'a> {
@@ -27,12 +28,14 @@ impl<'a> Task<'a> {
     pub(super) fn index(&self) -> usize {
         self.index
     }
+}
 
-    pub(super) fn repository(&self) -> &RepositoryDefinition {
+impl PhaseTask for Task<'_> {
+    fn repository(&self) -> &RepositoryDefinition {
         self.repository
     }
 
-    pub(super) fn resource(&self) -> &Path {
+    fn resource(&self) -> &Path {
         &self.common_directory
     }
 }
@@ -48,26 +51,47 @@ pub(super) fn repository(git: &impl GitClient, task: &Task<'_>) -> Entry {
 }
 
 fn update_repository(git: &impl GitClient, task: &Task<'_>) -> Result<Entry, AppError> {
-    if let Some(reason) = default_branch_block_reason(git, task.repository, &task.default_branch)? {
-        return Ok(Entry::new(task.repository, Outcome::Blocked { reason }));
-    }
-
-    let divergence = git.branch_divergence(task.repository.path(), &task.default_branch)?;
-    if divergence.ahead() > 0 && divergence.behind() > 0 {
-        return Ok(Entry::new(
-            task.repository,
-            Outcome::Blocked {
-                reason: BlockedReason::Diverged { branch: task.default_branch.clone() },
-            },
-        ));
-    }
-    if divergence.ahead() > 0 {
-        return Ok(Entry::new(
-            task.repository,
-            Outcome::Blocked {
-                reason: BlockedReason::AheadOfOrigin { branch: task.default_branch.clone() },
-            },
-        ));
+    match inspection::branch_readiness(git, task.repository, &task.default_branch)? {
+        BranchReadiness::MissingLocal => {
+            return Ok(Entry::new(
+                task.repository,
+                Outcome::Blocked {
+                    reason: BlockedReason::MissingLocalBranch {
+                        branch: task.default_branch.clone(),
+                    },
+                },
+            ));
+        }
+        BranchReadiness::MissingRemote => {
+            return Ok(Entry::new(
+                task.repository,
+                Outcome::Blocked {
+                    reason: BlockedReason::MissingRemoteBranch {
+                        branch: task.default_branch.clone(),
+                    },
+                },
+            ));
+        }
+        BranchReadiness::Divergence { ahead, behind } => {
+            if ahead > 0 && behind > 0 {
+                return Ok(Entry::new(
+                    task.repository,
+                    Outcome::Blocked {
+                        reason: BlockedReason::Diverged { branch: task.default_branch.clone() },
+                    },
+                ));
+            }
+            if ahead > 0 {
+                return Ok(Entry::new(
+                    task.repository,
+                    Outcome::Blocked {
+                        reason: BlockedReason::AheadOfOrigin {
+                            branch: task.default_branch.clone(),
+                        },
+                    },
+                ));
+            }
+        }
     }
 
     let result = git.update_default_branch(task.repository.path(), &task.default_branch)?;

@@ -1,23 +1,19 @@
-mod progress;
-
 use std::io;
 use std::path::PathBuf;
-use std::sync::mpsc;
 
 use clap::Args;
 use owo_colors::OwoColorize;
 
 use crate::AppError;
 use crate::app::api;
-use crate::app::refresh::{
-    BlockedReasonDetails, Outcome, Phase, PhaseSummary, RefreshOptions, Report,
-};
+use crate::app::refresh::{Outcome, Phase, PhaseSummary, RefreshOptions, Report};
 
-use self::progress::Display;
 use super::Completion;
 use super::output::{Output, terminal_text};
+use super::repository_progress::{ProgressPhase, run_with_progress};
 use super::terminal_report::{
-    print_count, print_count_with_elapsed, print_phase, safe_message, write_line,
+    print_blocked_details, print_count, print_count_with_elapsed, print_phase, safe_message,
+    write_line,
 };
 
 #[derive(Args)]
@@ -36,48 +32,32 @@ pub(super) fn run(
 ) -> Result<Completion, AppError> {
     let options = RefreshOptions::new(command.dry_run);
     let report = if command.dry_run {
-        api::refresh_with_options(config, command.repositories, options)?
+        api::refresh(config, command.repositories, options)?
     } else {
-        run_with_progress(config, command.repositories, options, output)?
+        run_with_progress(
+            output,
+            "refresh",
+            move |sender| api::refresh_with_events(config, command.repositories, options, &sender),
+            print_phase_completion,
+        )?
     };
 
     print_report(&report, command.dry_run, output)?;
     if report.has_failures() { Ok(Completion::Failure) } else { Ok(Completion::Success) }
 }
 
-fn run_with_progress(
-    config: Option<PathBuf>,
-    repositories: Vec<String>,
-    options: RefreshOptions,
-    output: &mut Output<'_>,
-) -> Result<Report, AppError> {
-    let (sender, receiver) = mpsc::channel();
-
-    std::thread::scope(|scope| {
-        let execution =
-            scope.spawn(move || api::refresh_with_events(config, repositories, options, &sender));
-        let mut progress = Display::new();
-        let mut output_error = None;
-
-        for event in receiver {
-            if let Some(completion) = progress.handle(event)
-                && output_error.is_none()
-                && let Err(error) =
-                    print_phase_completion(completion.phase(), completion.summary(), output)
-            {
-                output_error = Some(error);
-            }
+impl ProgressPhase for Phase {
+    fn message(self) -> &'static str {
+        match self {
+            Phase::Checking => "Checking repositories...",
+            Phase::Fetching => "Fetching repositories...",
+            Phase::Refreshing => "Refreshing repositories...",
         }
+    }
 
-        progress.finish();
-        let report = execution
-            .join()
-            .map_err(|_| AppError::config_error("refresh execution thread panicked"))??;
-        if let Some(error) = output_error {
-            return Err(error.into());
-        }
-        Ok(report)
-    })
+    fn shows_git_progress(self) -> bool {
+        self == Phase::Fetching
+    }
 }
 
 fn print_report(report: &Report, dry_run: bool, output: &mut Output<'_>) -> io::Result<()> {
@@ -178,23 +158,6 @@ fn print_entries(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
                 print_blocked_details(entry.blocked_details(), output)?;
             }
         }
-    }
-    Ok(())
-}
-
-fn print_blocked_details(
-    details: Option<&BlockedReasonDetails>,
-    output: &mut Output<'_>,
-) -> io::Result<()> {
-    if let Some(BlockedReasonDetails::RemoteUrlMismatch { actual, expected }) = details {
-        write_line(
-            output,
-            format_args!("    {}", format!("actual:   {}", safe_message(actual)).dimmed()),
-        )?;
-        write_line(
-            output,
-            format_args!("    {}", format!("expected: {}", safe_message(expected)).dimmed()),
-        )?;
     }
     Ok(())
 }

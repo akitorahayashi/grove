@@ -19,7 +19,7 @@ pub(super) struct LoadedConfigTree {
 }
 
 pub(super) fn load_tree(root_path: &Path) -> Result<LoadedConfigTree, AppError> {
-    let root = load_one(root_path)?;
+    let root = load_one(&root_path.canonicalize()?)?;
     let root_directory = root
         .path
         .parent()
@@ -62,14 +62,13 @@ pub(super) fn load_tree(root_path: &Path) -> Result<LoadedConfigTree, AppError> 
 }
 
 fn load_one(path: &Path) -> Result<LoadedConfigFile, AppError> {
-    let path = path.canonicalize()?;
     let directory = path
         .parent()
         .ok_or_else(|| AppError::config_error(format!("{} has no parent", path.display())))?
         .to_path_buf();
-    let contents = fs::read_to_string(&path)?;
+    let contents = fs::read_to_string(path)?;
     let raw = file::parse(&contents, &path.display().to_string())?;
-    Ok(LoadedConfigFile { path, directory, raw })
+    Ok(LoadedConfigFile { path: path.to_path_buf(), directory, raw })
 }
 
 fn resolve_include(base: &Path, include: &str) -> Result<PathBuf, AppError> {

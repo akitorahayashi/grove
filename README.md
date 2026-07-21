@@ -73,6 +73,19 @@ configuration files.
 `gv validate` loads `grove.toml`, resolves includes, and validates configuration
 without inspecting repository working trees or requiring network access.
 
+## Status Behavior
+
+`gv status`, with the aliases `gv st` and `gv ts`, reports managed repository
+state as a table, or as a single-repository detail view when one repository is
+named. Plain `gv status` is read-only; neither it nor `--fetch` changes the
+working tree or the checked-out branch.
+
+`gv status --fetch` refreshes remote-tracking state before reporting. The fetch
+runs independent repositories concurrently with at most eight live tasks, while
+linked worktrees sharing a Git common directory remain serialized, matching sync
+and refresh. Without `--fetch`, repositories are inspected serially. Report
+entries preserve selection order in either case.
+
 ## Sync Behavior
 
 `gv sync` clones missing repositories and safely updates existing repositories'
@@ -152,8 +165,11 @@ aarch64 binaries. Checksums, signatures, and attestations are not published.
 ## Library API
 
 The supported Rust API is the crate-root facade: `cli`, `refresh`, `status`,
-`sync`, and `validate`, plus their report, outcome, and error types. `cli`
-returns an `ExitCode` and does not terminate its host process.
+`sync`, and `validate`, plus their report, outcome, and error types. `sync` and
+`refresh` take option structs: `sync(config, targets, SyncOptions)` and
+`refresh(config, targets, RefreshOptions)`. `SyncOptions` carries the dry-run
+and zoxide-registration flags, so library callers reach the same zoxide report
+as the CLI. `cli` returns an `ExitCode` and does not terminate its host process.
 
 ```rust
 let report = grove::validate(Some("/workspace/grove.toml".into()))?;

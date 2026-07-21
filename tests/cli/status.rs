@@ -57,6 +57,44 @@ url = "{}"
 }
 
 #[test]
+fn status_fetch_reports_missing_repositories_alongside_fetched_ones() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("frontend");
+    let config = ctx.write_config(&format!(
+        r#"
+version = 1
+
+[repos.frontend]
+path = "frontend"
+url = "{}"
+
+[repos.backend]
+path = "backend"
+url = "git@example.com:backend.git"
+"#,
+        remote.url()
+    ));
+
+    ctx.cli().arg("--config").arg(&config).arg("sync").arg("frontend").assert().success();
+    remote.add_commit("change.txt", "change\n");
+
+    // backend is never cloned, so its common-directory probe fails and it keys
+    // on its own path; frontend resolves its common directory and fetches. Both
+    // must be reported.
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("status")
+        .arg("--fetch")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("frontend"))
+        .stdout(predicate::str::contains("behind 1"))
+        .stdout(predicate::str::contains("backend"))
+        .stdout(predicate::str::contains("missing"));
+}
+
+#[test]
 fn status_target_outputs_detail_sections() {
     let ctx = TestContext::new();
     let config = ctx.write_config(

@@ -6,7 +6,7 @@ use super::resolved::ResolvedConfig;
 use crate::AppError;
 use crate::repositories::{
     BranchName, RemoteUrl, RepositoryDefinition, RepositoryName, ResolutionError,
-    resolve_operational_path,
+    normalize_lexically, resolve_operational_path,
 };
 
 pub(super) fn resolve(tree: LoadedConfigTree) -> Result<ResolvedConfig, AppError> {
@@ -148,7 +148,7 @@ fn resolve_repository_path(
         )));
     }
 
-    let lexical = normalize_path(&base.join(path));
+    let lexical = normalize_lexically(&base.join(path));
     if !lexical.starts_with(root) {
         return Err(AppError::config_error(format!(
             "{}: repository '{name}' path leaves the grove root",
@@ -197,22 +197,6 @@ fn relative_display(root: &Path, path: &Path) -> String {
         })
         .collect::<Vec<_>>()
         .join("/")
-}
-
-fn normalize_path(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
-            Component::RootDir => normalized.push(std::path::MAIN_SEPARATOR.to_string()),
-            Component::CurDir => {}
-            Component::ParentDir => {
-                normalized.pop();
-            }
-            Component::Normal(part) => normalized.push(part),
-        }
-    }
-    normalized
 }
 
 #[cfg(test)]

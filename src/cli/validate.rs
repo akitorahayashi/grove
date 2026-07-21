@@ -8,6 +8,7 @@ use crate::app::validate::Report;
 
 use super::Completion;
 use super::output::{Output, terminal_text};
+use super::terminal_report::repositories;
 
 #[derive(Args)]
 pub(super) struct ValidateCommand {}
@@ -26,11 +27,4 @@ fn print_report(report: &Report, output: &mut Output<'_>) -> std::io::Result<()>
     output.stdout(format_args!("Validated {}\n", repositories(report.repository_count())))?;
     let path = terminal_text(&report.config_path().display().to_string());
     output.stdout(format_args!("Config: {path}\n"))
-}
-
-fn repositories(count: usize) -> String {
-    match count {
-        1 => "1 repository".to_string(),
-        _ => format!("{count} repositories"),
-    }
 }

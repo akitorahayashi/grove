@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
 use crate::AppError;
-use crate::git::{GitClient, urls_match};
+use crate::app::inspection::{self, Readiness};
+use crate::git::GitClient;
 use crate::repositories::RepositoryDefinition;
 
 use super::{BlockedReason, Entry, Outcome, Plan, SkippedReason};
@@ -28,51 +29,29 @@ pub(super) fn repository(
         return Ok(Decision::Clone);
     }
 
-    if !repository.path().is_dir() || !git.is_work_tree(repository.path())? {
-        return Ok(Decision::Entry(Entry::new(
-            repository,
-            Outcome::Blocked { reason: BlockedReason::DestinationNotGitRepository },
-        )));
-    }
-
-    let Some(actual_url) = git.remote_url(repository.path())? else {
-        return Ok(Decision::Entry(Entry::new(
-            repository,
-            Outcome::Blocked { reason: BlockedReason::MissingOrigin },
-        )));
-    };
-    if !urls_match(&actual_url, repository.url()) {
-        return Ok(Decision::Entry(Entry::blocked_with_details(
-            repository,
-            BlockedReason::RemoteUrlMismatch,
-            super::BlockedReasonDetails::RemoteUrlMismatch {
-                actual: actual_url.to_string(),
-                expected: repository.url().to_string(),
-            },
-        )));
-    }
-
-    if git.current_branch(repository.path())?.is_none() {
-        return Ok(Decision::Entry(Entry::new(
-            repository,
-            Outcome::Blocked { reason: BlockedReason::DetachedHead },
-        )));
-    }
-
-    if !git.working_tree_clean(repository.path())? {
-        return Ok(Decision::Entry(Entry::new(
-            repository,
-            Outcome::Skipped { reason: SkippedReason::DirtyWorkingTree },
-        )));
-    }
-
-    let Some(default_branch) =
-        git.default_branch(repository.path(), repository.default_branch())?
-    else {
-        return Ok(Decision::Entry(Entry::new(
-            repository,
-            Outcome::Blocked { reason: BlockedReason::MissingRemoteDefaultBranch },
-        )));
+    let default_branch = match inspection::inspect(git, repository)? {
+        Readiness::NotAWorkTree => {
+            return blocked(repository, BlockedReason::DestinationNotGitRepository);
+        }
+        Readiness::MissingOrigin => return blocked(repository, BlockedReason::MissingOrigin),
+        Readiness::UrlMismatch { actual, expected } => {
+            return Ok(Decision::Entry(Entry::blocked_with_details(
+                repository,
+                Outcome::Blocked { reason: BlockedReason::RemoteUrlMismatch },
+                super::BlockedReasonDetails::RemoteUrlMismatch { actual, expected },
+            )));
+        }
+        Readiness::DetachedHead => return blocked(repository, BlockedReason::DetachedHead),
+        Readiness::DirtyTree => {
+            return Ok(Decision::Entry(Entry::new(
+                repository,
+                Outcome::Skipped { reason: SkippedReason::DirtyWorkingTree },
+            )));
+        }
+        Readiness::NoDefaultBranch => {
+            return blocked(repository, BlockedReason::MissingRemoteDefaultBranch);
+        }
+        Readiness::Ready { default_branch } => default_branch,
     };
 
     if dry_run {
@@ -89,7 +68,11 @@ pub(super) fn repository(
     Ok(Decision::Fetch { common_directory, default_branch })
 }
 
-pub(super) fn default_branch_block_reason(
+fn blocked(repository: &RepositoryDefinition, reason: BlockedReason) -> Result<Decision, AppError> {
+    Ok(Decision::Entry(Entry::new(repository, Outcome::Blocked { reason })))
+}
+
+fn default_branch_block_reason(
     git: &impl GitClient,
     repository: &RepositoryDefinition,
     default_branch: &str,

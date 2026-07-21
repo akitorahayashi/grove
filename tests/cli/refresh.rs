@@ -335,7 +335,9 @@ url = "{}"
         .assert()
         .failure()
         .stderr(predicate::str::contains("Blocked 3 repositories"))
-        .stderr(predicate::str::contains("x not-git destination exists but is not a Git worktree"))
+        .stderr(predicate::str::contains(
+            "x not-git destination exists but is not a Git repository",
+        ))
         .stderr(predicate::str::contains("x no-origin remote origin is missing"))
         .stderr(predicate::str::contains(
             "x no-default remote default branch cannot be determined",
