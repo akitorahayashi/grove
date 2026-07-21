@@ -52,6 +52,7 @@ impl GitClient for CommandGitClient {
         url: &RemoteUrl,
         entry: &Path,
         branch: Option<&str>,
+        reference: Option<&Path>,
         progress: &mut dyn GitProgressSink,
     ) -> Result<String, AppError> {
         if let Some(parent) = entry.parent() {
@@ -63,13 +64,19 @@ impl GitClient for CommandGitClient {
         if let Some(branch) = branch {
             command.arg("--branch").arg(branch);
         }
+        if let Some(reference) = reference {
+            command.arg("--reference").arg(reference).arg("--dissociate");
+        }
         command.arg("--progress").arg("--").arg(url.as_process_argument()).arg(entry);
 
         let branch_display = branch.map(|branch| format!(" --branch {branch}")).unwrap_or_default();
+        let reference_display = reference
+            .map(|reference| format!(" --reference {} --dissociate", reference.display()))
+            .unwrap_or_default();
         run_with_progress(
             command,
             redact_urls_for_display(&format!(
-                "git clone --bare --single-branch{branch_display} --progress -- {url} {}",
+                "git clone --bare --single-branch{branch_display}{reference_display} --progress -- {url} {}",
                 entry.display()
             )),
             progress,

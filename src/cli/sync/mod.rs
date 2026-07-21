@@ -115,7 +115,7 @@ fn print_entries(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
     });
 
     for entry in entries {
-        match entry.outcome() {
+        let printed = match entry.outcome() {
             Outcome::Planned(Plan::Clone { url }) => {
                 let repository = terminal_text(entry.repository());
                 write_line(
@@ -127,8 +127,9 @@ fn print_entries(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
                         format!("from {}", terminal_text(url)).dimmed()
                     ),
                 )?;
+                true
             }
-            Outcome::Planned(Plan::Fetch { .. }) | Outcome::Current { .. } => {}
+            Outcome::Planned(Plan::Fetch { .. }) | Outcome::Current { .. } => false,
             Outcome::Cloned { url, cache } => {
                 let repository = terminal_text(entry.repository());
                 write_line(
@@ -141,6 +142,7 @@ fn print_entries(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
                             .dimmed()
                     ),
                 )?;
+                true
             }
             Outcome::Updated { branch, before, after } => {
                 let repository = terminal_text(entry.repository());
@@ -153,6 +155,7 @@ fn print_entries(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
                         terminal_text(&format!("{branch} {before} -> {after}")).dimmed()
                     ),
                 )?;
+                true
             }
             Outcome::UpdatedButRestorationFailed { branch, before, after, message } => {
                 let repository = terminal_text(entry.repository());
@@ -169,6 +172,7 @@ fn print_entries(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
                         .dimmed()
                     ),
                 )?;
+                true
             }
             Outcome::Skipped { reason } => {
                 let repository = terminal_text(entry.repository());
@@ -181,6 +185,7 @@ fn print_entries(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
                         terminal_text(reason.message()).dimmed()
                     ),
                 )?;
+                true
             }
             Outcome::Blocked { reason } => {
                 let repository = terminal_text(entry.repository());
@@ -190,7 +195,22 @@ fn print_entries(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
                     format_args!(" {} {} {}", "x".red(), repository.bold(), message.dimmed()),
                 )?;
                 print_blocked_details(entry.blocked_details(), output)?;
+                true
             }
+        };
+
+        if let Some(warning) = entry.warning() {
+            if !printed {
+                let repository = terminal_text(entry.repository());
+                write_line(output, format_args!(" {} {}", "=".cyan(), repository.bold()))?;
+            }
+            write_line(
+                output,
+                format_args!(
+                    "    {}",
+                    format!("clone cache not seeded: {}", safe_message(warning)).dimmed()
+                ),
+            )?;
         }
     }
     Ok(())

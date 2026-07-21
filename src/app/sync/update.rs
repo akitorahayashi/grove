@@ -28,6 +28,18 @@ impl<'a> Task<'a> {
     pub(super) fn index(&self) -> usize {
         self.index
     }
+
+    pub(super) fn definition(&self) -> &'a RepositoryDefinition {
+        self.repository
+    }
+
+    pub(super) fn common_directory(&self) -> &Path {
+        &self.common_directory
+    }
+
+    pub(super) fn default_branch(&self) -> &str {
+        &self.default_branch
+    }
 }
 
 impl PhaseTask for Task<'_> {

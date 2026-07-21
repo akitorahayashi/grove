@@ -1,13 +1,13 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use crate::AppError;
 use crate::app::AppContext;
 use crate::app::cache::CacheStore;
 use crate::app::events::{DiscardEvents, EventSink};
-use crate::app::phases;
+use crate::app::{phases, workers};
 use crate::config;
-use crate::git::GitClient;
+use crate::git::{GitClient, NoopGitProgressSink};
 use crate::repositories::{RepositoryDefinition, select_repositories};
 
 mod check;
@@ -24,6 +24,15 @@ pub use report::{
 };
 
 pub type Entry = crate::app::report::Entry<Outcome>;
+
+/// An existing repository whose objects can seed the clone cache once its
+/// outcome is known.
+struct SeedTask<'a> {
+    index: usize,
+    repository: &'a RepositoryDefinition,
+    common_directory: PathBuf,
+    default_branch: String,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
@@ -81,6 +90,7 @@ pub(crate) fn execute_with_events(
         check_phase(ctx.git(), &repositories, parallelism, options.dry_run(), events)?;
 
     let mut preparations = Vec::new();
+    let mut seeds = Vec::new();
     for (index, (repository, decision)) in repositories.iter().copied().zip(decisions).enumerate() {
         match decision {
             check::Decision::Entry(entry) => entries[index] = Some(entry),
@@ -95,12 +105,29 @@ pub(crate) fn execute_with_events(
                     default_branch,
                 });
             }
+            check::Decision::SeedOnly { entry, common_directory, default_branch } => {
+                entries[index] = Some(entry);
+                seeds.push(SeedTask { index, repository, common_directory, default_branch });
+            }
         }
     }
 
     let (updates, prepared) =
         prepare_phase(ctx.git(), &cache, &preparations, &mut entries, parallelism, events)?;
     let updated = update_phase(ctx.git(), &updates, &mut entries, parallelism, events)?;
+
+    // Repositories that reached the update phase fetched successfully, so their
+    // remote is reachable; seeding them will not repeat a fetch failure. This
+    // seeds cleanly updated, up-to-date, and diverged repositories alike.
+    for task in &updates {
+        seeds.push(SeedTask {
+            index: task.index(),
+            repository: task.definition(),
+            common_directory: task.common_directory().to_path_buf(),
+            default_branch: task.default_branch().to_string(),
+        });
+    }
+    seed_phase(ctx.git(), &cache, &seeds, &mut entries, parallelism)?;
 
     let entries = entries
         .into_iter()
@@ -185,4 +212,38 @@ fn update_phase(
         entries[index] = Some(entry);
     }
     Ok(summary)
+}
+
+/// Seed the clone cache from existing repositories that are not yet cached, so
+/// later clones of the same URL borrow their objects. Seeding runs after the
+/// outcomes are known and is best-effort: a failure is surfaced as a note on
+/// the already-final entry, never as a repository failure. Repositories left
+/// untouched for a dirty working tree are seeded here too, since seeding reads
+/// only the object store.
+fn seed_phase(
+    git: &impl GitClient,
+    cache: &CacheStore,
+    tasks: &[SeedTask<'_>],
+    entries: &mut [Option<Entry>],
+    parallelism: usize,
+) -> Result<(), AppError> {
+    let notes = workers::map(tasks, parallelism, |task| {
+        cache
+            .seed_from_local(
+                git,
+                task.repository.url(),
+                &task.common_directory,
+                &task.default_branch,
+                &mut NoopGitProgressSink,
+            )
+            .err()
+            .map(|error| (task.index, error.to_string()))
+    })?;
+
+    for (index, message) in notes.into_iter().flatten() {
+        if let Some(entry) = entries[index].take() {
+            entries[index] = Some(entry.with_warning(message));
+        }
+    }
+    Ok(())
 }

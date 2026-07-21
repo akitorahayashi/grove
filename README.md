@@ -102,8 +102,10 @@ entries preserve selection order in either case.
 `gv sync` clones missing repositories and safely updates existing repositories'
 default branches. Missing repositories are cloned through the local clone cache
 (see Clone Cache). Existing repositories are updated through system `git`
-commands. Independent repository tasks run concurrently with at most eight live
-tasks. Linked worktrees that share a Git common directory remain serialized.
+commands, and an existing repository whose URL has no cache entry seeds one from
+its local objects (see Clone Cache). Independent repository tasks run
+concurrently with at most eight live tasks. Linked worktrees that share a Git
+common directory remain serialized.
 
 The update flow is:
 
@@ -184,6 +186,12 @@ On each use the entry is created when absent, refreshed when present, rebuilt
 when unusable, and repointed when a different default branch is requested.
 Within one process, tasks sharing a URL are serialized; concurrent `gv`
 processes operating on the same entry are not coordinated.
+
+`gv sync` also seeds the cache from repositories already on disk: when an
+existing repository's URL has no entry, one is built from its local objects,
+borrowed and dissociated like any placement, so later clones of that URL
+transfer only the difference. Seeding is best-effort; a failure is reported as
+a note and the repository still counts as updated.
 
 `gv clone <url> [dest]` clones a single repository through the cache without
 reading or writing `grove.toml`. `dest` defaults to the final URL path segment
