@@ -73,6 +73,18 @@ configuration files.
 `gv validate` loads `grove.toml`, resolves includes, and validates configuration
 without inspecting repository working trees or requiring network access.
 
+## Status Behavior
+
+`gv status`, with the aliases `gv st` and `gv ts`, reports managed repository
+state as a table, or as a single-repository detail view when one repository is
+named. It never mutates Git state.
+
+`gv status --fetch` refreshes remote-tracking state before reporting. The fetch
+runs independent repositories concurrently with at most eight live tasks, while
+linked worktrees sharing a Git common directory remain serialized, matching sync
+and refresh. Without `--fetch`, repositories are inspected serially. Report
+entries preserve selection order in either case.
+
 ## Sync Behavior
 
 `gv sync` clones missing repositories and safely updates existing repositories'

@@ -1,8 +1,9 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::AppError;
 use crate::app::AppContext;
 use crate::app::inspection::{self, BranchReadiness};
+use crate::app::workers;
 use crate::config;
 use crate::git::{GitClient, NoopGitProgressSink, urls_match};
 use crate::repositories::RepositoryDefinition;
@@ -180,13 +181,39 @@ pub fn execute(
     ctx.git().verify_available()?;
     let config = config::load(config_path)?;
     let repositories = select_repositories(config.repositories(), targets)?;
-    let mut entries = Vec::new();
+    let parallelism = if fetch { std::thread::available_parallelism()?.get() } else { 1 };
 
-    for repository in repositories {
-        entries.push(status_for_repository(ctx.git(), repository, fetch)?);
+    Ok(StatusReport::new(collect_entries(ctx.git(), &repositories, fetch, parallelism)?))
+}
+
+/// Collect one status entry per repository, preserving selection order. The
+/// no-fetch path stays serial; `--fetch` runs through bounded parallel workers
+/// keyed by Git common directory, matching sync and refresh, so linked
+/// worktrees sharing a common directory are serialized.
+fn collect_entries(
+    git: &impl GitClient,
+    repositories: &[&RepositoryDefinition],
+    fetch: bool,
+    parallelism: usize,
+) -> Result<Vec<StatusEntry>, AppError> {
+    if !fetch {
+        return repositories
+            .iter()
+            .map(|repository| status_for_repository(git, repository, fetch))
+            .collect();
     }
 
-    Ok(StatusReport::new(entries))
+    let results = workers::map_keyed(
+        repositories,
+        parallelism,
+        |repository| status_resource(git, repository),
+        |repository| status_for_repository(git, repository, fetch),
+    )?;
+    results.into_iter().collect()
+}
+
+fn status_resource(git: &impl GitClient, repository: &RepositoryDefinition) -> PathBuf {
+    git.common_directory(repository.path()).unwrap_or_else(|_| repository.path().to_path_buf())
 }
 
 fn status_for_repository(
@@ -266,4 +293,145 @@ fn default_branch_status(
         }
     };
     Ok(Some(DefaultBranchStatus::new(branch.to_string(), tracking)))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+    use std::sync::{Arc, Barrier};
+
+    use super::{AppError, StatusCondition, collect_entries};
+    use crate::git::{
+        BranchDivergence, GitClient, GitProgressSink, GitRefreshOutcome, GitUpdateOutcome,
+    };
+    use crate::repositories::{BranchName, RemoteUrl, RepositoryDefinition, RepositoryName};
+
+    struct BarrierGit {
+        barrier: Arc<Barrier>,
+    }
+
+    impl GitClient for BarrierGit {
+        fn verify_available(&self) -> Result<(), AppError> {
+            Ok(())
+        }
+
+        fn clone_repository(
+            &self,
+            _url: &RemoteUrl,
+            _destination: &Path,
+            _grove_root: &Path,
+            _progress: &mut dyn GitProgressSink,
+        ) -> Result<(), AppError> {
+            Ok(())
+        }
+
+        fn fetch(
+            &self,
+            _repository: &Path,
+            _progress: &mut dyn GitProgressSink,
+        ) -> Result<(), AppError> {
+            self.barrier.wait();
+            Ok(())
+        }
+
+        fn common_directory(&self, repository: &Path) -> Result<PathBuf, AppError> {
+            Ok(repository.to_path_buf())
+        }
+
+        fn is_work_tree(&self, _repository: &Path) -> Result<bool, AppError> {
+            Ok(true)
+        }
+
+        fn current_branch(&self, _repository: &Path) -> Result<Option<String>, AppError> {
+            Ok(Some("main".to_string()))
+        }
+
+        fn working_tree_clean(&self, _repository: &Path) -> Result<bool, AppError> {
+            Ok(true)
+        }
+
+        fn remote_url(&self, _repository: &Path) -> Result<Option<RemoteUrl>, AppError> {
+            Ok(None)
+        }
+
+        fn default_branch(
+            &self,
+            _repository: &Path,
+            _configured: Option<&BranchName>,
+        ) -> Result<Option<String>, AppError> {
+            Ok(Some("main".to_string()))
+        }
+
+        fn local_branch_exists(&self, _repository: &Path, _branch: &str) -> Result<bool, AppError> {
+            Ok(true)
+        }
+
+        fn remote_branch_exists(
+            &self,
+            _repository: &Path,
+            _branch: &str,
+        ) -> Result<bool, AppError> {
+            Ok(true)
+        }
+
+        fn branch_divergence(
+            &self,
+            _repository: &Path,
+            _branch: &str,
+        ) -> Result<BranchDivergence, AppError> {
+            Ok(BranchDivergence::new(0, 0))
+        }
+
+        fn short_revision(&self, _repository: &Path, _reference: &str) -> Result<String, AppError> {
+            Ok("0000000".to_string())
+        }
+
+        fn update_default_branch(
+            &self,
+            _repository: &Path,
+            _branch: &str,
+        ) -> Result<GitUpdateOutcome, AppError> {
+            unreachable!("status never updates the default branch")
+        }
+
+        fn refresh_default_branch(
+            &self,
+            _repository: &Path,
+            _branch: &str,
+        ) -> Result<GitRefreshOutcome, AppError> {
+            unreachable!("status never refreshes the default branch")
+        }
+    }
+
+    #[test]
+    fn fetch_status_runs_independent_repositories_concurrently() {
+        let root = tempfile::tempdir().unwrap();
+        let count = 4;
+        let definitions = (0..count)
+            .map(|index| {
+                let path = root.path().join(format!("repo{index}"));
+                std::fs::create_dir_all(&path).unwrap();
+                RepositoryDefinition::new(
+                    RepositoryName::new(&format!("repo{index}")).unwrap(),
+                    path,
+                    format!("repo{index}"),
+                    RemoteUrl::new("https://example.com/repo.git").unwrap(),
+                    None,
+                    root.path().join("grove.toml"),
+                    root.path().to_path_buf(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let repositories = definitions.iter().collect::<Vec<_>>();
+
+        // A serial fetch would leave every fetch after the first waiting on a
+        // barrier that never fills; concurrent execution lets all `count`
+        // fetches arrive together and proceed. Each repository has a distinct
+        // common directory, so none serialize against another.
+        let git = BarrierGit { barrier: Arc::new(Barrier::new(count)) };
+        let entries = collect_entries(&git, &repositories, true, count).unwrap();
+
+        assert_eq!(entries.len(), count);
+        assert!(entries.iter().all(|entry| matches!(entry.condition(), StatusCondition::Clean)));
+    }
 }

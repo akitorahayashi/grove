@@ -92,7 +92,9 @@ has non-panicking handling.
 
 `app` owns the five use cases and default dependency wiring. Sync has check,
 clone/fetch preparation, update, and optional zoxide phases. Refresh has check,
-fetch, and default-branch refresh phases. Results retain selection order.
+fetch, and default-branch refresh phases. Status inspects repositories serially,
+or, with `--fetch`, through the same bounded parallel workers keyed by Git common
+directory. Results retain selection order.
 Worker execution is bounded by the selected work, available parallelism, and a
 ceiling of eight. Shared Git common directories are serialized, and refresh
 blocks selected linked worktrees that would finish on the same default branch.
