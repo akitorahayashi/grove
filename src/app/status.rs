@@ -212,6 +212,12 @@ fn collect_entries(
     results.into_iter().collect()
 }
 
+// Group repositories by Git common directory so linked worktrees of one
+// repository serialize their fetches. A valid work tree always resolves its
+// common directory, so the probe fails only for missing or non-repository
+// paths; those never fetch (`status_for_repository` reports them Missing or
+// Invalid), so keying them on their own path is the harmless fallback the
+// status --fetch design specifies.
 fn status_resource(git: &impl GitClient, repository: &RepositoryDefinition) -> PathBuf {
     git.common_directory(repository.path()).unwrap_or_else(|_| repository.path().to_path_buf())
 }

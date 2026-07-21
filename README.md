@@ -77,7 +77,8 @@ without inspecting repository working trees or requiring network access.
 
 `gv status`, with the aliases `gv st` and `gv ts`, reports managed repository
 state as a table, or as a single-repository detail view when one repository is
-named. It never mutates Git state.
+named. Plain `gv status` is read-only; neither it nor `--fetch` changes the
+working tree or the checked-out branch.
 
 `gv status --fetch` refreshes remote-tracking state before reporting. The fetch
 runs independent repositories concurrently with at most eight live tasks, while
