@@ -5,13 +5,13 @@ use clap::Args;
 use crate::AppError;
 use crate::app::api;
 
-use super::Completion;
-use super::output::{Output, terminal_text};
+use crate::cli::Completion;
+use crate::cli::output::{Output, terminal_text};
 
 #[derive(Args)]
-pub(super) struct InitCommand;
+pub(in crate::cli) struct InitCommand;
 
-pub(super) fn run(
+pub(in crate::cli) fn run(
     config: Option<PathBuf>,
     _command: InitCommand,
     output: &mut Output<'_>,

@@ -8,13 +8,13 @@ use crate::AppError;
 use crate::app::api;
 use crate::app::clone::{Phase, PhaseSummary, Report};
 
-use super::Completion;
-use super::output::{Output, terminal_text};
-use super::repository_progress::{ProgressPhase, run_with_progress};
-use super::terminal_report::{cache_annotation, write_line};
+use crate::cli::Completion;
+use crate::cli::output::{Output, terminal_text};
+use crate::cli::tty::progress::{ProgressPhase, run_with_progress};
+use crate::cli::tty::report::{cache_annotation, write_line};
 
 #[derive(Args)]
-pub(super) struct CloneCommand {
+pub(in crate::cli) struct CloneCommand {
     #[arg(value_name = "url")]
     url: String,
 
@@ -22,7 +22,7 @@ pub(super) struct CloneCommand {
     dest: Option<PathBuf>,
 }
 
-pub(super) fn run(
+pub(in crate::cli) fn run(
     config: Option<PathBuf>,
     command: CloneCommand,
     output: &mut Output<'_>,

@@ -8,9 +8,9 @@ use crate::app::cache::CacheOutcome;
 use crate::app::report::BlockedReasonDetails;
 use crate::repositories::redact_urls_for_display;
 
-use super::output::{Output, terminal_text};
+use crate::cli::output::{Output, terminal_text};
 
-pub(super) fn cache_annotation(cache: CacheOutcome) -> &'static str {
+pub(in crate::cli) fn cache_annotation(cache: CacheOutcome) -> &'static str {
     match cache {
         CacheOutcome::Miss => "(cached)",
         CacheOutcome::Hit => "(from cache)",
@@ -19,7 +19,7 @@ pub(super) fn cache_annotation(cache: CacheOutcome) -> &'static str {
     }
 }
 
-pub(super) fn print_phase(
+pub(in crate::cli) fn print_phase(
     label: &str,
     count: usize,
     elapsed: Duration,
@@ -35,7 +35,7 @@ pub(super) fn print_phase(
     }
 }
 
-pub(super) fn print_count_with_elapsed(
+pub(in crate::cli) fn print_count_with_elapsed(
     label: &str,
     count: usize,
     elapsed: Duration,
@@ -60,7 +60,11 @@ pub(super) fn print_count_with_elapsed(
     )
 }
 
-pub(super) fn print_count(label: &str, count: usize, output: &mut Output<'_>) -> io::Result<()> {
+pub(in crate::cli) fn print_count(
+    label: &str,
+    count: usize,
+    output: &mut Output<'_>,
+) -> io::Result<()> {
     if count > 0 {
         write_line(
             output,
@@ -70,15 +74,18 @@ pub(super) fn print_count(label: &str, count: usize, output: &mut Output<'_>) ->
     Ok(())
 }
 
-pub(super) fn write_line(output: &mut Output<'_>, arguments: Arguments<'_>) -> io::Result<()> {
+pub(in crate::cli) fn write_line(
+    output: &mut Output<'_>,
+    arguments: Arguments<'_>,
+) -> io::Result<()> {
     output.stderr(format_args!("{arguments}\n"))
 }
 
-pub(super) fn safe_message(value: &str) -> String {
+pub(in crate::cli) fn safe_message(value: &str) -> String {
     terminal_text(&redact_urls_for_display(value))
 }
 
-pub(super) fn print_blocked_details(
+pub(in crate::cli) fn print_blocked_details(
     details: Option<&BlockedReasonDetails>,
     output: &mut Output<'_>,
 ) -> io::Result<()> {
@@ -95,7 +102,7 @@ pub(super) fn print_blocked_details(
     Ok(())
 }
 
-pub(super) fn repositories(count: usize) -> String {
+pub(in crate::cli) fn repositories(count: usize) -> String {
     match count {
         1 => "1 repository".to_string(),
         _ => format!("{count} repositories"),

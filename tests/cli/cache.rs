@@ -3,7 +3,7 @@ use predicates::prelude::*;
 use crate::harness::TestContext;
 
 #[test]
-fn cache_list_reports_empty_when_nothing_cached() {
+fn cache_list_shows_headers_when_nothing_cached() {
     let ctx = TestContext::new();
 
     ctx.cli()
@@ -11,7 +11,7 @@ fn cache_list_reports_empty_when_nothing_cached() {
         .arg("list")
         .assert()
         .success()
-        .stdout(predicate::str::contains("No cached repositories"));
+        .stdout(predicate::str::contains("URL").and(predicate::str::contains("UPDATED")));
 }
 
 #[test]
@@ -48,7 +48,7 @@ fn cache_clean_removes_all_entries() {
         .arg("list")
         .assert()
         .success()
-        .stdout(predicate::str::contains("No cached repositories"));
+        .stdout(predicate::str::contains("blog.git").not());
 }
 
 #[test]

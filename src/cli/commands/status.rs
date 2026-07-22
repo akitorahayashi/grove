@@ -8,11 +8,12 @@ use crate::AppError;
 use crate::app::api;
 use crate::app::status::{BranchTrackingStatus, DefaultBranchStatus, StatusCondition, StatusEntry};
 
-use super::Completion;
-use super::output::{Output, terminal_text};
+use crate::cli::Completion;
+use crate::cli::output::{Output, terminal_text};
+use crate::cli::tty::table::{Cell, Paint, Table};
 
 #[derive(Args)]
-pub(super) struct StatusCommand {
+pub(in crate::cli) struct StatusCommand {
     #[arg(value_name = "repo")]
     repositories: Vec<String>,
 
@@ -20,7 +21,7 @@ pub(super) struct StatusCommand {
     fetch: bool,
 }
 
-pub(super) fn run(
+pub(in crate::cli) fn run(
     config: Option<PathBuf>,
     command: StatusCommand,
     output: &mut Output<'_>,
@@ -39,109 +40,18 @@ pub(super) fn run(
     Ok(Completion::Success)
 }
 
-#[derive(Debug, Clone, Copy)]
-struct ColumnWidths {
-    name: usize,
-    repository: usize,
-    branch: usize,
-    state: usize,
-    default_branch: usize,
-}
-
-impl ColumnWidths {
-    fn for_entries(entries: &[StatusEntry]) -> Self {
-        let mut widths = Self {
-            name: "NAME".len(),
-            repository: "REPOSITORY".len(),
-            branch: "BRANCH".len(),
-            state: "STATE".len(),
-            default_branch: "DEFAULT".len(),
-        };
-
-        for entry in entries {
-            widths.name = widths.name.max(terminal_text(entry.name()).len());
-            widths.repository = widths.repository.max(terminal_text(entry.display_path()).len());
-            widths.branch = widths.branch.max(branch(entry).len());
-            widths.state = widths.state.max(table_state(entry).len());
-            widths.default_branch = widths.default_branch.max(default_branch(entry).len());
-        }
-
-        widths
-    }
-
-    fn separator_len(self) -> usize {
-        self.name + self.repository + self.branch + self.state + self.default_branch + 8
-    }
-}
-
 fn print_table(entries: &[StatusEntry], styled: bool, output: &mut Output<'_>) -> io::Result<()> {
-    let widths = ColumnWidths::for_entries(entries);
-
-    output.stdout(format_args!("\n"))?;
-    print_header(widths, styled, output)?;
-    print_separator(widths, styled, output)?;
+    let mut table = Table::new(["NAME", "REPOSITORY", "BRANCH", "STATE", "DEFAULT"]);
     for entry in entries {
-        print_row(entry, widths, styled, output)?;
+        table.push_row(vec![
+            Cell::new(terminal_text(entry.name()), Paint::Bold),
+            Cell::new(terminal_text(entry.display_path()), Paint::Cyan),
+            Cell::new(branch(entry), Paint::Blue),
+            Cell::new(table_state(entry), state_paint(entry.condition())),
+            Cell::new(default_branch(entry), Paint::Dimmed),
+        ]);
     }
-    Ok(())
-}
-
-fn print_header(widths: ColumnWidths, styled: bool, output: &mut Output<'_>) -> io::Result<()> {
-    let name = format_cell("NAME", widths.name);
-    let repository = format_cell("REPOSITORY", widths.repository);
-    let branch = format_cell("BRANCH", widths.branch);
-    let state = format_cell("STATE", widths.state);
-    let default_branch = format_cell("DEFAULT", widths.default_branch);
-
-    if styled {
-        output.stdout(format_args!(
-            "{}  {}  {}  {}  {}",
-            name.yellow().bold(),
-            repository.yellow().bold(),
-            branch.yellow().bold(),
-            state.yellow().bold(),
-            default_branch.yellow().bold()
-        ))?;
-    } else {
-        output.stdout(format_args!("{name}  {repository}  {branch}  {state}  {default_branch}"))?;
-    }
-    output.stdout(format_args!("\n"))
-}
-
-fn print_separator(widths: ColumnWidths, styled: bool, output: &mut Output<'_>) -> io::Result<()> {
-    let separator = "-".repeat(widths.separator_len());
-    if styled {
-        output.stdout(format_args!("{}\n", separator.dimmed()))
-    } else {
-        output.stdout(format_args!("{separator}\n"))
-    }
-}
-
-fn print_row(
-    entry: &StatusEntry,
-    widths: ColumnWidths,
-    styled: bool,
-    output: &mut Output<'_>,
-) -> io::Result<()> {
-    let name = format_cell(&terminal_text(entry.name()), widths.name);
-    let repository = format_cell(&terminal_text(entry.display_path()), widths.repository);
-    let branch = format_cell(&branch(entry), widths.branch);
-    let state = format_cell(&table_state(entry), widths.state);
-    let default_branch = format_cell(&default_branch(entry), widths.default_branch);
-
-    if styled {
-        output.stdout(format_args!(
-            "{}  {}  {}  {}  {}",
-            name.bold(),
-            repository.cyan(),
-            branch.blue(),
-            format_state(&state, entry.condition()),
-            default_branch.dimmed()
-        ))?;
-    } else {
-        output.stdout(format_args!("{name}  {repository}  {branch}  {state}  {default_branch}"))?;
-    }
-    output.stdout(format_args!("\n"))
+    table.render(styled, output)
 }
 
 fn print_detail(entry: &StatusEntry, styled: bool, output: &mut Output<'_>) -> io::Result<()> {
@@ -236,10 +146,6 @@ fn print_diagnostic_field(
     }
 }
 
-fn format_cell(value: &str, width: usize) -> String {
-    format!("{value:<width$}")
-}
-
 fn branch(entry: &StatusEntry) -> String {
     terminal_text(entry.branch().unwrap_or("-"))
 }
@@ -312,13 +218,13 @@ fn sanitize_summary(value: &str) -> String {
     crate::repositories::redact_urls_for_display(&single_line)
 }
 
-fn format_state(padded: &str, condition: &StatusCondition) -> String {
+fn state_paint(condition: &StatusCondition) -> Paint {
     match condition {
-        StatusCondition::Clean => padded.green().to_string(),
-        StatusCondition::Dirty => padded.yellow().to_string(),
+        StatusCondition::Clean => Paint::Green,
+        StatusCondition::Dirty => Paint::Yellow,
         StatusCondition::Missing
         | StatusCondition::Invalid(_)
         | StatusCondition::RemoteMismatch
-        | StatusCondition::FetchFailed(_) => padded.red().to_string(),
+        | StatusCondition::FetchFailed(_) => Paint::Red,
     }
 }

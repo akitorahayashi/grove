@@ -10,16 +10,16 @@ use crate::app::sync::{
     Outcome, Phase, PhaseSummary, Plan, Report, SyncOptions, ZoxideOutcome, ZoxideReport,
 };
 
-use super::Completion;
-use super::output::{Output, terminal_text};
-use super::repository_progress::{ProgressPhase, run_with_progress};
-use super::terminal_report::{
+use crate::cli::Completion;
+use crate::cli::output::{Output, terminal_text};
+use crate::cli::tty::progress::{ProgressPhase, run_with_progress};
+use crate::cli::tty::report::{
     cache_annotation, print_blocked_details, print_count, print_count_with_elapsed, print_phase,
     safe_message, write_line,
 };
 
 #[derive(Args)]
-pub(super) struct SyncCommand {
+pub(in crate::cli) struct SyncCommand {
     #[arg(value_name = "repo")]
     repositories: Vec<String>,
 
@@ -30,7 +30,7 @@ pub(super) struct SyncCommand {
     register_zoxide: bool,
 }
 
-pub(super) fn run(
+pub(in crate::cli) fn run(
     config: Option<PathBuf>,
     command: SyncCommand,
     output: &mut Output<'_>,

@@ -10,17 +10,17 @@ use crate::AppError;
 use crate::app::events::{Event, PhaseSummary};
 use crate::git::GitProgress;
 
-use super::output::{Output, terminal_text};
+use crate::cli::output::{Output, terminal_text};
 
 const MINIMUM_NAME_WIDTH: usize = 20;
 
-pub(super) trait ProgressPhase: Copy + Debug + Eq {
+pub(in crate::cli) trait ProgressPhase: Copy + Debug + Eq {
     fn message(self) -> &'static str;
     fn shows_git_progress(self) -> bool;
 }
 
 #[derive(Debug)]
-pub(super) struct RepositoryProgress<P: ProgressPhase> {
+pub(in crate::cli) struct RepositoryProgress<P: ProgressPhase> {
     multi: MultiProgress,
     root: Option<Root<P>>,
     children: HashMap<String, Child>,
@@ -40,7 +40,7 @@ struct Child {
 }
 
 impl<P: ProgressPhase> RepositoryProgress<P> {
-    pub(super) fn new() -> Self {
+    pub(in crate::cli) fn new() -> Self {
         Self::with_target(ProgressDrawTarget::stderr())
     }
 
@@ -53,7 +53,7 @@ impl<P: ProgressPhase> RepositoryProgress<P> {
         }
     }
 
-    pub(super) fn start_phase(&mut self, phase: P, total: usize) {
+    pub(in crate::cli) fn start_phase(&mut self, phase: P, total: usize) {
         self.clear_progress();
         let progress = self.multi.add(ProgressBar::new(total as u64));
         progress.enable_steady_tick(Duration::from_millis(200));
@@ -63,7 +63,7 @@ impl<P: ProgressPhase> RepositoryProgress<P> {
         self.root = Some(Root { phase, progress });
     }
 
-    pub(super) fn start_repository(&mut self, repository: String, phase: P) {
+    pub(in crate::cli) fn start_repository(&mut self, repository: String, phase: P) {
         if !phase.shows_git_progress() || !self.phase_is_active(phase) {
             return;
         }
@@ -79,7 +79,7 @@ impl<P: ProgressPhase> RepositoryProgress<P> {
         self.children.insert(repository, Child { progress, numeric: false });
     }
 
-    pub(super) fn update_repository(&mut self, repository: &str, progress: &GitProgress) {
+    pub(in crate::cli) fn update_repository(&mut self, repository: &str, progress: &GitProgress) {
         let Some(child) = self.children.get_mut(repository) else {
             return;
         };
@@ -100,7 +100,7 @@ impl<P: ProgressPhase> RepositoryProgress<P> {
         child.progress.tick();
     }
 
-    pub(super) fn finish_repository(&mut self, repository: &str, phase: P) {
+    pub(in crate::cli) fn finish_repository(&mut self, repository: &str, phase: P) {
         if !self.phase_is_active(phase) {
             return;
         }
@@ -115,13 +115,13 @@ impl<P: ProgressPhase> RepositoryProgress<P> {
         }
     }
 
-    pub(super) fn finish_phase(&mut self, phase: P) {
+    pub(in crate::cli) fn finish_phase(&mut self, phase: P) {
         if self.phase_is_active(phase) {
             self.clear_progress();
         }
     }
 
-    pub(super) fn finish(&mut self) {
+    pub(in crate::cli) fn finish(&mut self) {
         self.clear_progress();
     }
 
@@ -214,7 +214,7 @@ impl<P: ProgressPhase> Display<P> {
 
 /// Drive a phase-emitting use case on a worker thread while rendering its
 /// progress on this thread, printing each phase completion as it arrives.
-pub(super) fn run_with_progress<P, R>(
+pub(in crate::cli) fn run_with_progress<P, R>(
     output: &mut Output<'_>,
     thread_label: &str,
     execute: impl FnOnce(Sender<Event<P>>) -> Result<R, AppError> + Send,
