@@ -29,18 +29,17 @@ pub(in crate::cli) fn run(
     let show_detail = command.repositories.len() == 1;
     let report = api::status(config, command.repositories, command.fetch)?;
     let entries = report.entries();
-    let styled = output.stdout_is_terminal();
 
     if show_detail && entries.len() == 1 {
-        print_detail(&entries[0], styled, output)?;
+        print_detail(&entries[0], output.stdout_is_terminal(), output)?;
     } else {
-        print_table(entries, styled, output)?;
+        print_table(entries, output)?;
     }
 
     Ok(Completion::Success)
 }
 
-fn print_table(entries: &[StatusEntry], styled: bool, output: &mut Output<'_>) -> io::Result<()> {
+fn print_table(entries: &[StatusEntry], output: &mut Output<'_>) -> io::Result<()> {
     let mut table = Table::new(["NAME", "REPOSITORY", "BRANCH", "STATE", "DEFAULT"]);
     for entry in entries {
         table.push_row(vec![
@@ -51,7 +50,7 @@ fn print_table(entries: &[StatusEntry], styled: bool, output: &mut Output<'_>) -
             Cell::new(default_branch(entry), Paint::Dimmed),
         ]);
     }
-    table.render(styled, output)
+    table.render(output)
 }
 
 fn print_detail(entry: &StatusEntry, styled: bool, output: &mut Output<'_>) -> io::Result<()> {

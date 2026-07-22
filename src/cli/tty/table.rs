@@ -1,12 +1,13 @@
 use std::io;
 
 use owo_colors::OwoColorize;
+use unicode_width::UnicodeWidthStr;
 
 use crate::cli::output::Output;
 
 const COLUMN_GAP: &str = "  ";
 
-/// Color applied to a rendered cell when the destination is a styled terminal.
+/// Color carried by a rendered cell.
 #[derive(Debug, Clone, Copy)]
 pub(in crate::cli) enum Paint {
     Bold,
@@ -35,6 +36,10 @@ impl Cell {
 }
 
 /// A column-aligned table with a colored header and a dimmed rule.
+///
+/// Styling is emitted unconditionally; [`Output`] strips ANSI when the
+/// destination and environment call for plain text, so the color decision stays
+/// centralized rather than duplicated per call site.
 #[derive(Debug)]
 pub(in crate::cli) struct Table {
     headers: Vec<String>,
@@ -55,75 +60,46 @@ impl Table {
         self.rows.push(cells);
     }
 
-    pub(in crate::cli) fn render(&self, styled: bool, output: &mut Output<'_>) -> io::Result<()> {
+    pub(in crate::cli) fn render(&self, output: &mut Output<'_>) -> io::Result<()> {
         let widths = self.column_widths();
 
         output.stdout(format_args!("\n"))?;
-        self.render_header(&widths, styled, output)?;
-        self.render_rule(&widths, styled, output)?;
+        self.render_header(&widths, output)?;
+        self.render_rule(&widths, output)?;
         for row in &self.rows {
-            render_line(
-                row.iter().map(|cell| (cell.text.as_str(), cell.paint)),
-                &widths,
-                styled,
-                output,
-            )?;
+            let cells = row
+                .iter()
+                .zip(&widths)
+                .map(|(cell, &width)| apply(pad(&cell.text, width), cell.paint));
+            write_row(cells, output)?;
         }
         Ok(())
     }
 
     fn column_widths(&self) -> Vec<usize> {
-        let mut widths: Vec<usize> =
-            self.headers.iter().map(|header| header.chars().count()).collect();
+        let mut widths: Vec<usize> = self.headers.iter().map(|header| header.width()).collect();
         for row in &self.rows {
             for (width, cell) in widths.iter_mut().zip(row) {
-                *width = (*width).max(cell.text.chars().count());
+                *width = (*width).max(cell.text.width());
             }
         }
         widths
     }
 
-    fn render_header(
-        &self,
-        widths: &[usize],
-        styled: bool,
-        output: &mut Output<'_>,
-    ) -> io::Result<()> {
-        let cells = self.headers.iter().zip(widths).map(|(header, &width)| {
-            let padded = format!("{header:<width$}");
-            if styled { padded.yellow().bold().to_string() } else { padded }
-        });
+    fn render_header(&self, widths: &[usize], output: &mut Output<'_>) -> io::Result<()> {
+        let cells = self
+            .headers
+            .iter()
+            .zip(widths)
+            .map(|(header, &width)| pad(header, width).yellow().bold().to_string());
         write_row(cells, output)
     }
 
-    fn render_rule(
-        &self,
-        widths: &[usize],
-        styled: bool,
-        output: &mut Output<'_>,
-    ) -> io::Result<()> {
+    fn render_rule(&self, widths: &[usize], output: &mut Output<'_>) -> io::Result<()> {
         let span =
             widths.iter().sum::<usize>() + COLUMN_GAP.len() * self.headers.len().saturating_sub(1);
-        let rule = "-".repeat(span);
-        if styled {
-            output.stdout(format_args!("{}\n", rule.dimmed()))
-        } else {
-            output.stdout(format_args!("{rule}\n"))
-        }
+        output.stdout(format_args!("{}\n", "-".repeat(span).dimmed()))
     }
-}
-
-fn render_line<'a>(
-    cells: impl Iterator<Item = (&'a str, Paint)>,
-    widths: &[usize],
-    styled: bool,
-    output: &mut Output<'_>,
-) -> io::Result<()> {
-    let rendered = cells.zip(widths).map(|((text, paint), &width)| {
-        let padded = format!("{text:<width$}");
-        apply(padded, paint, styled)
-    });
-    write_row(rendered, output)
 }
 
 fn write_row(cells: impl Iterator<Item = String>, output: &mut Output<'_>) -> io::Result<()> {
@@ -131,10 +107,19 @@ fn write_row(cells: impl Iterator<Item = String>, output: &mut Output<'_>) -> io
     output.stdout(format_args!("{line}\n"))
 }
 
-fn apply(text: String, paint: Paint, styled: bool) -> String {
-    if !styled {
-        return text;
-    }
+/// Right-pads `text` with spaces to reach `width` terminal columns.
+///
+/// Padding is based on display width, not scalar count, so wide (CJK) and
+/// zero-width (combining) characters keep following columns aligned.
+fn pad(text: &str, width: usize) -> String {
+    let deficit = width.saturating_sub(text.width());
+    let mut padded = String::with_capacity(text.len() + deficit);
+    padded.push_str(text);
+    padded.push_str(&" ".repeat(deficit));
+    padded
+}
+
+fn apply(text: String, paint: Paint) -> String {
     match paint {
         Paint::Bold => text.bold().to_string(),
         Paint::Dimmed => text.dimmed().to_string(),
@@ -143,5 +128,41 @@ fn apply(text: String, paint: Paint, styled: bool) -> String {
         Paint::Green => text.green().to_string(),
         Paint::Yellow => text.yellow().to_string(),
         Paint::Red => text.red().to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use unicode_width::UnicodeWidthStr;
+
+    use super::{Cell, Paint, Table, pad};
+
+    #[test]
+    fn pads_wide_characters_by_display_width() {
+        // "東京" is two scalars but four terminal columns.
+        let padded = pad("東京", 6);
+        assert_eq!(padded, "東京  ");
+        assert_eq!(padded.width(), 6);
+    }
+
+    #[test]
+    fn pads_combining_sequence_by_display_width() {
+        // "e" + combining acute renders in one column despite two scalars.
+        let padded = pad("e\u{0301}", 3);
+        assert!(padded.starts_with("e\u{0301}"));
+        assert_eq!(padded.width(), 3);
+    }
+
+    #[test]
+    fn does_not_truncate_when_content_exceeds_width() {
+        assert_eq!(pad("東京", 2), "東京");
+    }
+
+    #[test]
+    fn column_width_uses_display_width_not_scalar_count() {
+        let mut table = Table::new(["A"]);
+        table.push_row(vec![Cell::new("東", Paint::Bold)]);
+
+        assert_eq!(table.column_widths(), vec![2]);
     }
 }

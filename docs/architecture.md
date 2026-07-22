@@ -16,19 +16,32 @@ src/
   assets/
     grove.toml.tpl
   cli/
-    init.rs
     mod.rs
     output.rs
-    refresh/
+    commands/
       mod.rs
-    repository_progress.rs
-    status.rs
-    terminal_report.rs
-    validate.rs
-    sync/
+      cache/
+        mod.rs
+      clone/
+        mod.rs
+      init.rs
+      refresh/
+        mod.rs
+      status.rs
+      sync/
+        mod.rs
+      validate.rs
+    tty/
       mod.rs
+      progress.rs
+      report.rs
+      table.rs
   app/
     api.rs
+    cache/
+      mod.rs
+    clone/
+      mod.rs
     context.rs
     events.rs
     init.rs
@@ -83,9 +96,14 @@ src/
 ## Boundaries
 
 `cli` owns Clap parsing, stream selection, terminal-safe text, styling, progress,
-and command completion. The progress pump, the blocked-reason detail rendering,
-and the repository-count wording are shared across the phase-emitting commands
-rather than duplicated per command. Subcommands return completion or error values. The
+and command completion. Subcommand implementations live under `commands`, while
+`tty` owns the terminal presentation vocabulary built on the shared `output`
+sink. The progress pump, the blocked-reason detail rendering, and the
+repository-count wording are shared across the phase-emitting commands rather
+than duplicated per command. The column-aligned table is shared between the
+status and cache listings, which emit styling unconditionally and let `output`
+strip ANSI when the destination or environment calls for plain text.
+Subcommands return completion or error values. The
 crate-root `cli` function returns `ExitCode`; `main` is the sole process
 termination boundary. Output write failures propagate, and a closed stdout pipe
 has non-panicking handling.

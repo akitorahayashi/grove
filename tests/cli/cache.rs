@@ -30,6 +30,23 @@ fn cache_list_shows_entry_after_clone() {
 }
 
 #[test]
+fn cache_list_emits_color_when_forced() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+
+    ctx.cli().arg("clone").arg(remote.url()).arg("cloned").assert().success();
+
+    ctx.cli()
+        .env_remove("NO_COLOR")
+        .env("CLICOLOR_FORCE", "1")
+        .arg("cache")
+        .arg("list")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\u{1b}[1m"));
+}
+
+#[test]
 fn cache_clean_removes_all_entries() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");

@@ -49,7 +49,6 @@ pub(in crate::cli) fn run(
 
 fn run_list(output: &mut Output<'_>) -> Result<Completion, AppError> {
     let entries = api::cache_list()?;
-    let styled = output.stdout_is_terminal();
     let mut table = Table::new(["URL", "SIZE", "UPDATED"]);
     for entry in &entries {
         table.push_row(vec![
@@ -58,7 +57,7 @@ fn run_list(output: &mut Output<'_>) -> Result<Completion, AppError> {
             Cell::new(updated(entry), Paint::Dimmed),
         ]);
     }
-    table.render(styled, output)?;
+    table.render(output)?;
     Ok(Completion::Success)
 }
 
