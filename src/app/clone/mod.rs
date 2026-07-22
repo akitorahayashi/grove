@@ -104,7 +104,7 @@ fn default_destination_name(url: &str) -> Result<String, AppError> {
     let tail = trimmed.rsplit(['/', ':']).next().unwrap_or_default();
     let name = tail.strip_suffix(".git").unwrap_or(tail);
     if name.is_empty() || name == "." || name == ".." {
-        Err(AppError::config_error(
+        Err(AppError::invalid_arguments(
             "cannot infer a destination directory from the URL; specify one explicitly",
         ))
     } else {

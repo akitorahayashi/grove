@@ -8,7 +8,7 @@ pub struct RemoteUrl(String);
 impl RemoteUrl {
     pub fn new(value: &str) -> Result<Self, AppError> {
         if value.is_empty() || value.chars().any(char::is_control) {
-            Err(AppError::config_error("invalid repository URL"))
+            Err(AppError::invalid_arguments("invalid repository URL"))
         } else {
             Ok(Self(value.to_string()))
         }

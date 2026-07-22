@@ -10,7 +10,7 @@ impl BranchName {
         if is_valid(value) {
             Ok(Self(value.to_string()))
         } else {
-            Err(AppError::config_error(format!("invalid Git branch name '{value}'")))
+            Err(AppError::invalid_arguments(format!("invalid Git branch name '{value}'")))
         }
     }
 

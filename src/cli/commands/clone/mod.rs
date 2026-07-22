@@ -28,7 +28,7 @@ pub(in crate::cli) fn run(
     output: &mut Output<'_>,
 ) -> Result<Completion, AppError> {
     if config.is_some() {
-        return Err(AppError::config_error("--config cannot be used with clone"));
+        return Err(AppError::invalid_arguments("--config cannot be used with clone"));
     }
 
     let report = run_with_progress(

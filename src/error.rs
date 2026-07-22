@@ -9,6 +9,12 @@ pub enum AppError {
     #[error("{0}")]
     ConfigError(String),
 
+    #[error("{0}")]
+    CacheState(String),
+
+    #[error("{0}")]
+    InvalidArguments(String),
+
     #[error("invalid repository name: {0}")]
     InvalidRepositoryName(String),
 
@@ -34,6 +40,14 @@ pub enum AppError {
 impl AppError {
     pub(crate) fn config_error<S: Into<String>>(message: S) -> Self {
         AppError::ConfigError(message.into())
+    }
+
+    pub(crate) fn cache_state<S: Into<String>>(message: S) -> Self {
+        AppError::CacheState(message.into())
+    }
+
+    pub(crate) fn invalid_arguments<S: Into<String>>(message: S) -> Self {
+        AppError::InvalidArguments(message.into())
     }
 
     pub(crate) fn git_command_failed<C: Into<String>, M: Into<String>>(

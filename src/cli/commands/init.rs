@@ -17,7 +17,7 @@ pub(in crate::cli) fn run(
     output: &mut Output<'_>,
 ) -> Result<Completion, AppError> {
     if config.is_some() {
-        return Err(AppError::config_error("--config cannot be used with init"));
+        return Err(AppError::invalid_arguments("--config cannot be used with init"));
     }
 
     let report = api::init(std::env::current_dir()?)?;

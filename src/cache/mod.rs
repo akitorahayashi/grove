@@ -215,7 +215,7 @@ impl Store {
         match read_metadata(container, "url")? {
             Some(recorded) if recorded == url.as_process_argument() => {}
             Some(_) => {
-                return Err(AppError::config_error(format!(
+                return Err(AppError::cache_state(format!(
                     "cache entry '{}' records a different URL",
                     container.display()
                 )));
@@ -279,14 +279,14 @@ fn guard_destination(destination: &Path, grove_root: Option<&Path>) -> Result<()
         match resolve_operational_path(destination, root) {
             Ok(resolved) if resolved == destination => {}
             Ok(resolved) => {
-                return Err(AppError::config_error(format!(
+                return Err(AppError::cache_state(format!(
                     "clone destination changed after validation: '{}' resolves to '{}'",
                     destination.display(),
                     resolved.display()
                 )));
             }
             Err(ResolutionError::OutsideRoot) => {
-                return Err(AppError::config_error(format!(
+                return Err(AppError::cache_state(format!(
                     "clone destination '{}' leaves the grove root",
                     destination.display()
                 )));
@@ -297,13 +297,13 @@ fn guard_destination(destination: &Path, grove_root: Option<&Path>) -> Result<()
 
     if destination.is_dir() {
         if fs::read_dir(destination)?.next().is_some() {
-            return Err(AppError::config_error(format!(
+            return Err(AppError::cache_state(format!(
                 "destination '{}' already exists and is not empty",
                 destination.display()
             )));
         }
     } else if destination.exists() {
-        return Err(AppError::config_error(format!(
+        return Err(AppError::cache_state(format!(
             "destination '{}' already exists",
             destination.display()
         )));
@@ -322,7 +322,7 @@ fn cache_root_from_env() -> Result<PathBuf, AppError> {
     {
         return Ok(PathBuf::from(home).join(".cache").join("grove"));
     }
-    Err(AppError::config_error("cannot determine the cache directory: set XDG_CACHE_HOME or HOME"))
+    Err(AppError::cache_state("cannot determine the cache directory: set XDG_CACHE_HOME or HOME"))
 }
 
 fn entry_directory_name(url: &str) -> String {

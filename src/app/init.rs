@@ -43,12 +43,12 @@ fn remove_partial_file(path: &Path, write_error: &std::io::Error) -> Result<(), 
     match fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(remove_error) if remove_error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(remove_error) => Err(AppError::config_error(format!(
+        Err(remove_error) => Err(AppError::Io(std::io::Error::other(format!(
             "failed to write {}: {}; also failed to remove the partial file: {}",
             path.display(),
             write_error,
             remove_error
-        ))),
+        )))),
     }
 }
 
