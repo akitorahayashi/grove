@@ -1,28 +1,41 @@
 use std::fmt::Arguments;
 use std::io::{self, IsTerminal, Write};
 
+use anstream::AutoStream;
 use anstream::ColorChoice;
+use anstream::adapter::strip_str;
 
 pub(in crate::cli) struct Output<'a> {
     stdout: &'a mut dyn Write,
     stderr: &'a mut dyn Write,
     stdout_is_terminal: bool,
-    stderr_is_terminal: bool,
+    stdout_choice: ColorChoice,
+    stderr_choice: ColorChoice,
 }
 
 impl<'a> Output<'a> {
     pub(in crate::cli) fn terminal(stdout: &'a mut dyn Write, stderr: &'a mut dyn Write) -> Self {
+        // anstream resolves the color decision for each real stream, honoring
+        // the standard color environment variables, the global choice, and
+        // terminal detection, so grove does not reimplement that stack.
         Self {
             stdout,
             stderr,
             stdout_is_terminal: io::stdout().is_terminal(),
-            stderr_is_terminal: io::stderr().is_terminal(),
+            stdout_choice: AutoStream::choice(&io::stdout()),
+            stderr_choice: AutoStream::choice(&io::stderr()),
         }
     }
 
     #[cfg(test)]
     pub(in crate::cli) fn captured(stdout: &'a mut dyn Write, stderr: &'a mut dyn Write) -> Self {
-        Self { stdout, stderr, stdout_is_terminal: false, stderr_is_terminal: false }
+        Self {
+            stdout,
+            stderr,
+            stdout_is_terminal: false,
+            stdout_choice: ColorChoice::Never,
+            stderr_choice: ColorChoice::Never,
+        }
     }
 
     pub(in crate::cli) fn stdout_is_terminal(&self) -> bool {
@@ -30,60 +43,25 @@ impl<'a> Output<'a> {
     }
 
     pub(in crate::cli) fn stdout(&mut self, arguments: Arguments<'_>) -> io::Result<()> {
-        write_adapted(self.stdout, self.stdout_is_terminal, arguments)
+        write_adapted(self.stdout, self.stdout_choice, arguments)
     }
 
     pub(in crate::cli) fn stderr(&mut self, arguments: Arguments<'_>) -> io::Result<()> {
-        write_adapted(self.stderr, self.stderr_is_terminal, arguments)
+        write_adapted(self.stderr, self.stderr_choice, arguments)
     }
 }
 
 fn write_adapted(
     writer: &mut dyn Write,
-    is_terminal: bool,
+    choice: ColorChoice,
     arguments: Arguments<'_>,
 ) -> io::Result<()> {
-    let color = if std::env::var_os("NO_COLOR").is_some() {
-        false
-    } else if std::env::var_os("CLICOLOR_FORCE").is_some_and(|value| value != "0") {
-        true
-    } else if std::env::var_os("CLICOLOR").is_some_and(|value| value == "0") {
-        false
-    } else {
-        match ColorChoice::global() {
-            ColorChoice::Always | ColorChoice::AlwaysAnsi => true,
-            ColorChoice::Never => false,
-            ColorChoice::Auto => is_terminal,
-        }
-    };
-    if color {
+    if matches!(choice, ColorChoice::Always | ColorChoice::AlwaysAnsi) {
         writer.write_fmt(arguments)
     } else {
         let rendered = arguments.to_string();
-        writer.write_all(strip_ansi(&rendered).as_bytes())
+        writer.write_all(strip_str(&rendered).to_string().as_bytes())
     }
-}
-
-fn strip_ansi(value: &str) -> String {
-    let bytes = value.as_bytes();
-    let mut output = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] == 0x1b && bytes.get(index + 1) == Some(&b'[') {
-            index += 2;
-            while index < bytes.len() {
-                let byte = bytes[index];
-                index += 1;
-                if (0x40..=0x7e).contains(&byte) {
-                    break;
-                }
-            }
-        } else {
-            output.push(bytes[index]);
-            index += 1;
-        }
-    }
-    String::from_utf8(output).expect("removing ASCII escape sequences preserves UTF-8")
 }
 
 pub(in crate::cli) fn terminal_text(value: &str) -> String {
