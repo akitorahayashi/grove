@@ -6,7 +6,7 @@ use owo_colors::OwoColorize;
 
 use crate::AppError;
 use crate::app::api;
-use crate::app::cache::CacheEntryInfo;
+use crate::cache::EntryInfo;
 
 use crate::cli::Completion;
 use crate::cli::output::Output;
@@ -61,7 +61,7 @@ fn run_list(output: &mut Output<'_>) -> Result<Completion, AppError> {
     Ok(Completion::Success)
 }
 
-fn updated(entry: &CacheEntryInfo) -> String {
+fn updated(entry: &EntryInfo) -> String {
     match entry.modified().and_then(format_age) {
         Some(age) => format!("{age} ago"),
         None => "-".to_string(),

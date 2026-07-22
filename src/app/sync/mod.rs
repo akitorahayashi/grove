@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use crate::AppError;
 use crate::app::AppContext;
-use crate::app::cache::CacheStore;
+use crate::cache::Store;
 use crate::config;
 use crate::git::GitClient;
 use crate::phases::{self, DiscardEvents, EventProgress, EventSink, Task as PhaseTask};
@@ -92,7 +92,7 @@ pub(crate) fn execute_with_events(
     events: &impl EventSink<Phase>,
 ) -> Result<Report, AppError> {
     ctx.git().verify_available()?;
-    let cache = CacheStore::from_env()?;
+    let cache = Store::from_env()?;
     let config = config::load(config_path)?;
     let repositories = select_repositories(config.repositories(), targets)?;
     let parallelism = std::thread::available_parallelism()?.get();
@@ -169,7 +169,7 @@ fn check_phase(
 
 fn prepare_phase<'a>(
     git: &impl GitClient,
-    cache: &CacheStore,
+    cache: &Store,
     tasks: &[prepare::Task<'a>],
     entries: &mut [Option<Entry>],
     parallelism: usize,
@@ -229,7 +229,7 @@ fn update_phase(
 /// since seeding reads only the object store. Each distinct URL is seeded once.
 fn seed_phase(
     git: &impl GitClient,
-    cache: &CacheStore,
+    cache: &Store,
     repositories: &[&RepositoryDefinition],
     indices: &[usize],
     entries: &mut [Option<Entry>],
@@ -267,7 +267,7 @@ fn seed_phase(
 
 fn seed_repository(
     git: &impl GitClient,
-    cache: &CacheStore,
+    cache: &Store,
     task: &SeedTask<'_>,
     events: &impl EventSink<Phase>,
 ) -> Result<SeedOutcome, AppError> {
