@@ -16,7 +16,7 @@ mod report;
 mod update;
 mod zoxide;
 
-pub(crate) use crate::inspection::BlockedReasonDetails;
+pub(crate) use crate::app::entry::BlockedReasonDetails;
 pub use crate::phases::Summary as PhaseSummary;
 pub use report::{
     BlockedReason, Outcome, PhaseSummaries, Plan, Report, SkippedReason, ZoxideEntry,

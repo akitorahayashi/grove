@@ -17,7 +17,7 @@ mod update;
 
 use task::Task;
 
-pub(crate) use crate::inspection::BlockedReasonDetails;
+pub(crate) use crate::app::entry::BlockedReasonDetails;
 pub use crate::phases::Summary as PhaseSummary;
 pub use report::{BlockedReason, Outcome, PhaseSummaries, Plan, Report, SkippedReason};
 

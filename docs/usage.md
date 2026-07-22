@@ -178,8 +178,11 @@ The supported Rust API is the crate-root facade: `cli`, `clone`, `refresh`,
 and `refresh(config, targets, RefreshOptions)`. `SyncOptions` carries the
 dry-run and zoxide-registration flags, so library callers reach the same zoxide
 report as the CLI. `clone(url, destination)` clones a single URL through the
-cache and returns a `CloneReport` carrying the resulting `CacheOutcome`. `cli`
-returns an `ExitCode` and does not terminate its host process.
+cache and returns a `CloneReport` carrying the resulting `CacheOutcome`. Sync
+and refresh report entries expose the structured blocked-reason detail through
+`blocked_details()`, returning `BlockedReasonDetails` such as a remote-URL
+mismatch's actual and expected values, so callers reproduce the CLI diagnostics.
+`cli` returns an `ExitCode` and does not terminate its host process.
 
 ```rust
 let report = grove::validate(Some("/workspace/grove.toml".into()))?;

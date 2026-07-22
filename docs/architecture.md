@@ -118,9 +118,10 @@ termination boundary. Output write failures propagate, and a closed stdout pipe
 has non-panicking handling.
 
 `app` owns the use cases, their default dependency wiring, and the report entry
-that sync and refresh share, generic over each use case's outcome vocabulary. It
-holds one module per subcommand and a facade that delegates to each without
-embedding command logic. Sync has check, clone/fetch preparation, update,
+that sync and refresh share, generic over each use case's outcome vocabulary and
+carrying the structured blocked-reason detail a caller renders beyond the
+message. It holds one module per subcommand and a facade that delegates to each
+without embedding command logic. Sync has check, clone/fetch preparation, update,
 seeding, and optional zoxide phases. Refresh has check, fetch, and
 default-branch refresh phases. Status inspects repositories serially, or, with
 `--fetch`, through bounded parallel workers keyed by Git common directory.
@@ -143,8 +144,7 @@ channel disconnects become application errors.
 
 `inspection` owns repository readiness probing and the canonical diagnostics for
 the conditions the use cases share, so their reason vocabularies map from one
-probe and their shared messages cannot drift. It also owns the structured
-blocked-reason detail a report entry carries beyond its message.
+probe and their shared messages cannot drift.
 
 `config` discovers the root file, resolves one include level, decodes TOML, and
 validates the complete catalog without invoking Git or zoxide. It rejects schema
@@ -178,9 +178,10 @@ and uses one final snapshot to classify successful adds.
 ## Public facade
 
 `src/lib.rs` exports `cli`, `clone`, `refresh`, `status`, `sync`, and
-`validate`. It also exports the reports, outcomes, and `AppError` needed to
-consume those calls. Owner modules, process clients, dependency traits, the
-phase engine, the cache store, and repository inspection remain private.
+`validate`. It also exports the reports, their blocked-reason details, outcomes,
+and `AppError` needed to consume those calls. Owner modules, process clients,
+dependency traits, the phase engine, the cache store, and repository inspection
+remain private.
 
 ## Data flow
 
