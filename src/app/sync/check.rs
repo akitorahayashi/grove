@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use crate::AppError;
-use crate::app::inspection::{self, Readiness};
 use crate::git::GitClient;
+use crate::inspection::{self, Readiness};
 use crate::repositories::RepositoryDefinition;
 
 use super::{BlockedReason, Entry, Outcome, Plan, SkippedReason};

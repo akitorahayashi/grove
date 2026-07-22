@@ -14,11 +14,11 @@ mod fetch;
 mod report;
 mod update;
 
-pub(crate) use crate::app::report::BlockedReasonDetails;
+pub(crate) use crate::inspection::BlockedReasonDetails;
 pub use crate::phases::Summary as PhaseSummary;
 pub use report::{BlockedReason, Outcome, PhaseSummaries, Plan, Report, SkippedReason};
 
-pub type Entry = crate::app::report::Entry<Outcome>;
+pub type Entry = crate::app::entry::Entry<Outcome>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {

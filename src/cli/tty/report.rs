@@ -5,7 +5,7 @@ use std::time::Duration;
 use owo_colors::OwoColorize;
 
 use crate::app::cache::CacheOutcome;
-use crate::app::report::BlockedReasonDetails;
+use crate::inspection::BlockedReasonDetails;
 use crate::repositories::redact_urls_for_display;
 
 use crate::cli::output::{Output, terminal_text};

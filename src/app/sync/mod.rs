@@ -16,14 +16,14 @@ mod report;
 mod update;
 mod zoxide;
 
-pub(crate) use crate::app::report::BlockedReasonDetails;
+pub(crate) use crate::inspection::BlockedReasonDetails;
 pub use crate::phases::Summary as PhaseSummary;
 pub use report::{
     BlockedReason, Outcome, PhaseSummaries, Plan, Report, SkippedReason, ZoxideEntry,
     ZoxideOutcome, ZoxideReport,
 };
 
-pub type Entry = crate::app::report::Entry<Outcome>;
+pub type Entry = crate::app::entry::Entry<Outcome>;
 
 /// An existing repository eligible to seed the clone cache from its objects.
 struct SeedTask<'a> {

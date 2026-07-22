@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use crate::app::inspection;
-use crate::app::report::Entry;
+use crate::app::entry::Entry;
+use crate::inspection;
 use crate::phases::Summary as PhaseSummary;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
