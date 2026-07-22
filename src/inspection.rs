@@ -6,7 +6,7 @@
 //! per-use-case reason enums from drifting apart.
 
 use crate::AppError;
-use crate::git::{GitClient, urls_match};
+use crate::git::{RepositoryProbe, urls_match};
 use crate::repositories::RepositoryDefinition;
 
 /// A repository's operability at an existing path, independent of any use
@@ -23,7 +23,7 @@ pub(crate) enum Readiness {
 }
 
 pub(crate) fn inspect(
-    git: &impl GitClient,
+    git: &impl RepositoryProbe,
     repository: &RepositoryDefinition,
 ) -> Result<Readiness, AppError> {
     if !repository.path().is_dir() || !git.is_work_tree(repository.path())? {
@@ -65,7 +65,7 @@ pub(crate) enum BranchReadiness {
 }
 
 pub(crate) fn branch_readiness(
-    git: &impl GitClient,
+    git: &impl RepositoryProbe,
     repository: &RepositoryDefinition,
     branch: &str,
 ) -> Result<BranchReadiness, AppError> {

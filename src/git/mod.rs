@@ -7,8 +7,10 @@ mod progress;
 mod remote;
 mod update;
 
-pub use client::{GitClient, GitProgressSink, NoopGitProgressSink};
-// The trait's divergence return type, re-exported for GitClient test doubles.
+pub use client::{
+    CacheEntry, DefaultBranch, GitClient, GitProgressSink, NoopGitProgressSink, RepositoryProbe,
+};
+// The probe trait's divergence return type, re-exported for its test doubles.
 #[cfg(test)]
 pub use client::BranchDivergence;
 pub use command::CommandGitClient;

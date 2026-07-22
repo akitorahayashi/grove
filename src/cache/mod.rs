@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use crate::AppError;
-use crate::git::{GitClient, GitProgressSink};
+use crate::git::{CacheEntry, GitProgressSink};
 use crate::repositories::{
     BranchName, RemoteUrl, ResolutionError, redact_urls_for_display, resolve_operational_path,
 };
@@ -80,7 +80,7 @@ impl Store {
     /// destination is rejected (the `gv clone` contract).
     pub(crate) fn place(
         &self,
-        git: &impl GitClient,
+        git: &impl CacheEntry,
         url: &RemoteUrl,
         destination: &Path,
         grove_root: Option<&Path>,
@@ -115,7 +115,7 @@ impl Store {
     /// whether a new entry was created.
     pub(crate) fn seed_from_local(
         &self,
-        git: &impl GitClient,
+        git: &impl CacheEntry,
         url: &RemoteUrl,
         source: &Path,
         progress: &mut dyn GitProgressSink,
@@ -200,7 +200,7 @@ impl Store {
 
     fn ensure_entry(
         &self,
-        git: &impl GitClient,
+        git: &impl CacheEntry,
         url: &RemoteUrl,
         container: &Path,
         bare: &Path,
@@ -245,7 +245,7 @@ impl Store {
 
     fn build_entry(
         &self,
-        git: &impl GitClient,
+        git: &impl CacheEntry,
         url: &RemoteUrl,
         container: &Path,
         wanted: Option<&str>,
