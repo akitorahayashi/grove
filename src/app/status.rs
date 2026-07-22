@@ -241,7 +241,7 @@ fn status_for_repository(
         return Ok(StatusEntry::from_repository(
             repository,
             None,
-            StatusCondition::Invalid("destination exists but is not a Git repository".to_string()),
+            StatusCondition::Invalid(inspection::destination_not_git_repository().to_string()),
             None,
             None,
         ));
