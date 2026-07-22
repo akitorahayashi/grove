@@ -62,8 +62,8 @@ pub(in crate::cli) enum Completion {
 
 /// Entry point for the CLI.
 pub fn run() -> ExitCode {
-    let mut stdout = io::stdout().lock();
-    let mut stderr = io::stderr().lock();
+    let mut stdout = io::stdout();
+    let mut stderr = io::stderr();
     let mut output = Output::terminal(&mut stdout, &mut stderr);
     run_with_args(std::env::args_os(), &mut output)
 }

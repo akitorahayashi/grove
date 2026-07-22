@@ -271,6 +271,7 @@ dependencies = [
  "assert_cmd",
  "clap",
  "indicatif",
+ "libc",
  "owo-colors",
  "predicates",
  "serde",
