@@ -6,8 +6,10 @@
 their own validation, orchestration, and external-boundary behavior; generic
 utility or process layers are absent. `app` holds one module per subcommand;
 the mechanisms and vocabularies those use cases share live as top-level concept
-owners beneath them. Dependencies flow one way: `cli` depends on `app`, `app`
-depends on the shared domains, and those depend on `git` and `repositories`.
+owners beneath them. `cli` drives the use cases through `app` and renders the
+vocabulary the shared domains expose — phase progress events, cache outcomes,
+and readiness diagnostics — so both `cli` and `app` depend on those domains.
+Dependencies stay acyclic and flow downward to `git` and `repositories`.
 
 ## Source layout
 
