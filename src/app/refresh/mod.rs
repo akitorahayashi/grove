@@ -12,7 +12,10 @@ use crate::repositories::{RepositoryDefinition, select_repositories};
 mod check;
 mod fetch;
 mod report;
+mod task;
 mod update;
+
+use task::Task;
 
 pub(crate) use crate::inspection::BlockedReasonDetails;
 pub use crate::phases::Summary as PhaseSummary;
@@ -74,7 +77,7 @@ pub(crate) fn execute_with_events(
         match decision {
             check::Decision::Entry(entry) => entries[index] = Some(entry),
             check::Decision::Fetch { common_directory, default_branch } => {
-                fetches.push(fetch::Task::new(index, repository, common_directory, default_branch));
+                fetches.push(Task::new(index, repository, common_directory, default_branch));
             }
         }
     }
@@ -106,11 +109,11 @@ fn check_phase(
 
 fn fetch_phase<'a>(
     git: &impl GitClient,
-    tasks: &[fetch::Task<'a>],
+    tasks: &[Task<'a>],
     entries: &mut [Option<Entry>],
     parallelism: usize,
     events: &impl EventSink<Phase>,
-) -> Result<(Vec<update::Task<'a>>, PhaseSummary), AppError> {
+) -> Result<(Vec<Task<'a>>, PhaseSummary), AppError> {
     let (completions, summary) = phases::run_workers(
         events,
         Phase::Fetching,
@@ -132,7 +135,7 @@ fn fetch_phase<'a>(
 
 fn refresh_phase(
     git: &impl GitClient,
-    tasks: &[update::Task<'_>],
+    tasks: &[Task<'_>],
     entries: &mut [Option<Entry>],
     parallelism: usize,
     events: &impl EventSink<Phase>,
@@ -161,9 +164,9 @@ fn refresh_phase(
 }
 
 fn refreshable_tasks<'a, 'b>(
-    tasks: &'b [update::Task<'a>],
+    tasks: &'b [Task<'a>],
     entries: &mut [Option<Entry>],
-) -> Vec<&'b update::Task<'a>> {
+) -> Vec<&'b Task<'a>> {
     let mut counts = HashMap::<(PathBuf, String), usize>::new();
     for task in tasks {
         let key = (task.resource().to_path_buf(), task.default_branch().to_string());
