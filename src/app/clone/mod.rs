@@ -59,7 +59,7 @@ pub(crate) fn execute_with_events(
     events: &impl EventSink<Phase>,
 ) -> Result<Report, AppError> {
     ctx.git().verify_available()?;
-    let cache = ctx.cache();
+    let cache = ctx.cache()?;
     let url = RemoteUrl::new(url)?;
     let destination = resolve_destination(&url, destination)?;
     let name = display_name(&destination);

@@ -92,7 +92,7 @@ pub(crate) fn execute_with_events(
     events: &impl EventSink<Phase>,
 ) -> Result<Report, AppError> {
     ctx.git().verify_available()?;
-    let cache = ctx.cache();
+    let cache = ctx.cache()?;
     let config = config::load(config_path)?;
     let repositories = select_repositories(config.repositories(), targets)?;
     let parallelism = std::thread::available_parallelism()?.get();
