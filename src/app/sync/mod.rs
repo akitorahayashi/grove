@@ -285,7 +285,7 @@ fn seed_repository(
 /// A genuine internal error propagates and aborts the run, matching the prepare
 /// phase's error taxonomy; any other seeding failure becomes a note on the entry.
 fn demote_seed_failure(index: usize, error: AppError) -> Result<SeedOutcome, AppError> {
-    if matches!(error, AppError::Internal(_)) {
+    if error.is_internal() {
         Err(error)
     } else {
         Ok(SeedOutcome { index, warning: Some(error.to_string()) })

@@ -53,4 +53,12 @@ impl AppError {
     pub(crate) fn internal(message: impl Into<String>) -> Self {
         Self::Internal(message.into())
     }
+
+    /// Whether this error is an internal application failure that must abort a
+    /// run rather than be demoted to a per-repository outcome. Owning this
+    /// decision here keeps the demotion policy from being re-encoded at each
+    /// use-case call site.
+    pub(crate) fn is_internal(&self) -> bool {
+        matches!(self, AppError::Internal(_))
+    }
 }

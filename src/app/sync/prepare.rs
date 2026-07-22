@@ -77,7 +77,7 @@ pub(super) fn repository<'a>(
                     ),
                     prepared: true,
                 },
-                Err(err) if matches!(err, crate::AppError::Internal(_)) => return Err(err),
+                Err(err) if err.is_internal() => return Err(err),
                 Err(err) => Completion::Entry {
                     index: *index,
                     entry: Entry::new(
@@ -96,7 +96,7 @@ pub(super) fn repository<'a>(
                     common_directory.clone(),
                     default_branch.clone(),
                 )),
-                Err(err) if matches!(err, crate::AppError::Internal(_)) => return Err(err),
+                Err(err) if err.is_internal() => return Err(err),
                 Err(err) => Completion::Entry {
                     index: *index,
                     entry: Entry::new(

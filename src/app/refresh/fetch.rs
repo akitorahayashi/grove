@@ -60,7 +60,7 @@ pub(super) fn repository<'a>(
             task.common_directory.clone(),
             task.default_branch.clone(),
         )),
-        Err(error) if matches!(error, crate::AppError::Internal(_)) => return Err(error),
+        Err(error) if error.is_internal() => return Err(error),
         Err(error) => Completion::Entry {
             index: task.index,
             entry: Entry::new(
