@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 use crate::AppError;
 use crate::app::AppContext;
 use crate::app::inspection::{self, BranchReadiness};
-use crate::app::workers;
 use crate::config;
 use crate::git::{GitClient, NoopGitProgressSink, urls_match};
+use crate::phases::workers;
 use crate::repositories::RepositoryDefinition;
 use crate::repositories::select_repositories;
 

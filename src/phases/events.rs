@@ -8,12 +8,12 @@ use crate::git::{GitProgress, GitProgressSink};
 use crate::repositories::RepositoryDefinition;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct PhaseSummary {
+pub struct Summary {
     count: usize,
     elapsed: Duration,
 }
 
-impl PhaseSummary {
+impl Summary {
     pub(crate) fn new(count: usize, elapsed: Duration) -> Self {
         Self { count, elapsed }
     }
@@ -33,7 +33,7 @@ pub(crate) enum Event<P> {
     RepositoryStarted { repository: String, phase: P },
     GitProgress { repository: String, progress: GitProgress },
     RepositoryFinished { repository: String, phase: P },
-    PhaseCompleted { phase: P, summary: PhaseSummary },
+    PhaseCompleted { phase: P, summary: Summary },
     PhaseFailed { phase: P },
 }
 

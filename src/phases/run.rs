@@ -8,18 +8,19 @@ use std::path::Path;
 use std::time::Instant;
 
 use crate::AppError;
-use crate::app::events::{Event, EventSink, PhaseSummary};
-use crate::app::workers;
 use crate::repositories::RepositoryDefinition;
+
+use super::events::{Event, EventSink, Summary};
+use super::workers;
 
 /// A unit of parallel repository work: which repository it concerns and which
 /// Git resource (common directory) serializes it against sibling worktrees.
-pub(crate) trait PhaseTask {
+pub(crate) trait Task {
     fn repository(&self) -> &RepositoryDefinition;
     fn resource(&self) -> &Path;
 }
 
-impl<T: PhaseTask> PhaseTask for &T {
+impl<T: Task> Task for &T {
     fn repository(&self) -> &RepositoryDefinition {
         (**self).repository()
     }
@@ -29,13 +30,13 @@ impl<T: PhaseTask> PhaseTask for &T {
     }
 }
 
-pub(crate) fn run_check_phase<P, D>(
+pub(crate) fn run_check<P, D>(
     events: &impl EventSink<P>,
     phase: P,
     repositories: &[&RepositoryDefinition],
     parallelism: usize,
     check: impl Fn(&RepositoryDefinition) -> Result<D, AppError> + Sync,
-) -> Result<(Vec<D>, PhaseSummary), AppError>
+) -> Result<(Vec<D>, Summary), AppError>
 where
     P: Copy + Send + Sync,
     D: Send,
@@ -61,26 +62,26 @@ where
         }
     }
 
-    let summary = PhaseSummary::new(decisions.len(), elapsed);
+    let summary = Summary::new(decisions.len(), elapsed);
     events.emit(Event::PhaseCompleted { phase, summary })?;
     Ok((decisions, summary))
 }
 
-pub(crate) fn run_worker_phase<P, T, R>(
+pub(crate) fn run_workers<P, T, R>(
     events: &impl EventSink<P>,
     phase: P,
     tasks: &[T],
     parallelism: usize,
     action: impl Fn(&T) -> Result<R, AppError> + Sync,
     changed: impl Fn(&R) -> bool,
-) -> Result<(Vec<R>, PhaseSummary), AppError>
+) -> Result<(Vec<R>, Summary), AppError>
 where
     P: Copy + Send + Sync,
-    T: PhaseTask + Sync,
+    T: Task + Sync,
     R: Send,
 {
     if tasks.is_empty() {
-        return Ok((Vec::new(), PhaseSummary::default()));
+        return Ok((Vec::new(), Summary::default()));
     }
 
     events.emit(Event::PhaseStarted { phase, total: tasks.len() })?;
@@ -100,7 +101,7 @@ where
     let elapsed = started.elapsed();
 
     let count = results.iter().filter(|result| changed(result)).count();
-    let summary = PhaseSummary::new(count, elapsed);
+    let summary = Summary::new(count, elapsed);
     events.emit(Event::PhaseCompleted { phase, summary })?;
     Ok((results, summary))
 }

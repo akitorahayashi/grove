@@ -5,6 +5,7 @@ mod cli;
 mod config;
 mod error;
 mod git;
+mod phases;
 mod repositories;
 mod zoxide;
 

@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use crate::app::cache::CacheOutcome;
-use crate::app::events::PhaseSummary;
 use crate::app::inspection;
 use crate::app::report::Entry;
+use crate::phases::Summary as PhaseSummary;
 use crate::repositories::RepositoryDefinition;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

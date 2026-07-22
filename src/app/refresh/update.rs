@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use crate::AppError;
-use crate::app::phases::PhaseTask;
 use crate::git::{GitClient, GitRefreshOutcome, GitUpdateBlock};
+use crate::phases::Task as PhaseTask;
 use crate::repositories::RepositoryDefinition;
 
 use super::check::refresh_block_reason;

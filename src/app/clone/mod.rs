@@ -7,11 +7,11 @@ use std::time::{Duration, Instant};
 use crate::AppError;
 use crate::app::AppContext;
 use crate::app::cache::{CacheOutcome, CacheStore};
-use crate::app::events::{DiscardEvents, Event, EventSink};
 use crate::git::{GitClient, GitProgress, GitProgressSink};
+use crate::phases::{DiscardEvents, Event, EventSink};
 use crate::repositories::RemoteUrl;
 
-pub use crate::app::events::PhaseSummary;
+pub use crate::phases::Summary as PhaseSummary;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {

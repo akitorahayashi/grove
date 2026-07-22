@@ -3,9 +3,9 @@
 use std::path::PathBuf;
 
 use crate::AppError;
-use crate::app::events::EventSink;
 use crate::app::{AppContext, cache, clone, init, refresh, status, sync, validate};
 use crate::git::CommandGitClient;
+use crate::phases::EventSink;
 
 fn default_context() -> AppContext<CommandGitClient> {
     AppContext::default()
