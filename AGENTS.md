@@ -8,51 +8,27 @@ repository state, and safely fast-forwards existing repositories' default
 branches through the system `git` command. Refresh operations leave successful
 working trees on their default branches.
 
-## Architectural Highlights
+## Documentation
 
-- Top-level owners: `cli/` for interface adaptation, `app/` for use-case
-  orchestration, `cache/` for the local clone cache, `phases/` for phase-
-  structured parallel execution, `inspection.rs` for repository readiness
-  diagnosis, `config/` for `grove.toml`, `repositories/` for managed repository
-  domain data, `git/` for the system Git boundary, and `error.rs` for
-  application-wide errors.
-- `src/cli/` owns parsing, terminal-safe output, progress, and command
-  completion for every subcommand.
-- `src/app/` owns the use-case facade, dependency wiring, the report entry
-  shared by sync and refresh, and one module per subcommand (init, refresh,
-  status, sync, validate, clone, and cache).
-- `src/cache/` owns the local clone cache: entry layout, URL keying, locking,
-  placement, and seeding, shared by the sync, clone, and cache use cases.
-- `src/phases/` owns phase-structured bounded-parallel execution and its
-  progress events, shared by the sync, refresh, status, and clone use cases.
-- `src/inspection.rs` owns repository readiness probing and the canonical
-  diagnostics for the conditions the use cases share.
-- `src/config/` owns discovery, include resolution, and validation.
-- `src/repositories/` owns validated names, branch names, redacted URLs,
-  operational paths, definitions, and target selection.
-- `src/git/` owns strict Git probes and non-destructive mutation through the
-  system `git` command.
-- `src/zoxide/` owns optional zoxide capability checks and registration
-  commands.
-- `src/lib.rs` exposes only the root use-case facade and required result/error
-  types. Process clients and orchestration internals are private.
+- [Architecture](docs/architecture.md) — source layout, module boundaries, naming conventions, data flow
+- [Configuration](docs/config.md) — `grove.toml` schema, path resolution, includes, validation rules
+- [Usage](docs/usage.md) — CLI command behavior and the library API
+- [Testing](docs/testing.md) — test layout, coverage, CI
 
-## Naming Conventions
-
-- Structs and enums: `PascalCase`.
-- Functions and variables: `snake_case`.
-- Modules: `snake_case`.
+Top-level owners: `cli/` for interface adaptation, `app/` for use-case
+orchestration, `cache/` for the local clone cache, `phases/` for phase-
+structured parallel execution, `inspection.rs` for repository readiness
+diagnosis, `config/` for `grove.toml`, `repositories/` for managed repository
+domain data, `git/` for the system Git boundary, and `error.rs` for
+application-wide errors.
 
 ## Verify Commands
 
-- Format: `cargo fmt --check`
-- Lint: `cargo clippy --all-targets --all-features -- -D warnings`
-- Test: `cargo test --all-targets --all-features`
+```bash
+just fix
+just check
+just test
+```
 
-## Testing Strategy
-
-- Unit tests live beside the modules they verify.
-- Integration tests live in `tests/`, with `tests/cli.rs` for CLI boundary
-  behavior and `tests/library.rs` for public library boundary behavior.
-- Shared integration fixtures live in `tests/harness/test_context.rs`.
-- CI runs build, linting, and tests.
+Run `fix` before `check`; `check` does not modify files. See
+[testing](docs/testing.md) for what each recipe wraps, coverage, and CI.
