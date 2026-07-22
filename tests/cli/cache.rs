@@ -30,7 +30,7 @@ fn cache_list_shows_entry_after_clone() {
 }
 
 #[test]
-fn cache_clear_removes_all_entries() {
+fn cache_clean_removes_all_entries() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
 
@@ -38,7 +38,7 @@ fn cache_clear_removes_all_entries() {
 
     ctx.cli()
         .arg("cache")
-        .arg("clear")
+        .arg("clean")
         .assert()
         .success()
         .stdout(predicate::str::contains("Removed 1 cache entry"));
@@ -52,7 +52,7 @@ fn cache_clear_removes_all_entries() {
 }
 
 #[test]
-fn cache_clear_by_name_removes_matching_entry() {
+fn cache_clean_by_name_removes_matching_entry() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
     let config = ctx.write_config(&format!(
@@ -72,7 +72,7 @@ url = "{}"
         .arg("--config")
         .arg(&config)
         .arg("cache")
-        .arg("clear")
+        .arg("clean")
         .arg("blog")
         .assert()
         .success()
@@ -80,7 +80,7 @@ url = "{}"
 }
 
 #[test]
-fn cache_clear_unknown_name_fails() {
+fn cache_clean_unknown_name_fails() {
     let ctx = TestContext::new();
     let config = ctx.write_config("version = 1\n");
 
@@ -88,7 +88,7 @@ fn cache_clear_unknown_name_fails() {
         .arg("--config")
         .arg(&config)
         .arg("cache")
-        .arg("clear")
+        .arg("clean")
         .arg("missing")
         .assert()
         .failure()

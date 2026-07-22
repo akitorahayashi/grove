@@ -51,13 +51,13 @@ pub(crate) fn cache_list() -> Result<Vec<cache::CacheEntryInfo>, AppError> {
     cache::CacheStore::from_env()?.list()
 }
 
-pub(crate) fn cache_clear(
+pub(crate) fn cache_clean(
     config_path: Option<PathBuf>,
     targets: Vec<String>,
-) -> Result<cache::CacheClearReport, AppError> {
+) -> Result<cache::CacheCleanReport, AppError> {
     let store = cache::CacheStore::from_env()?;
     if targets.is_empty() {
-        return Ok(cache::CacheClearReport::new(store.clear_all()?, Vec::new()));
+        return Ok(cache::CacheCleanReport::new(store.clean_all()?, Vec::new()));
     }
 
     let config = crate::config::load(config_path.as_deref())?;
@@ -71,7 +71,7 @@ pub(crate) fn cache_clear(
             absent.push(repository.display_path().to_string());
         }
     }
-    Ok(cache::CacheClearReport::new(removed, absent))
+    Ok(cache::CacheCleanReport::new(removed, absent))
 }
 
 pub(crate) fn init(directory: PathBuf) -> Result<init::Report, AppError> {
