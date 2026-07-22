@@ -559,6 +559,7 @@ fn run_with_progress(
     loop {
         let read = match stderr.read(&mut buffer) {
             Ok(read) => read,
+            Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
             Err(err) => {
                 if processing_error.is_none() {
                     processing_error =

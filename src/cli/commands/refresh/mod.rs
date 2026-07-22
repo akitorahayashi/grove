@@ -8,16 +8,16 @@ use crate::AppError;
 use crate::app::api;
 use crate::app::refresh::{Outcome, Phase, PhaseSummary, RefreshOptions, Report};
 
-use super::Completion;
-use super::output::{Output, terminal_text};
-use super::repository_progress::{ProgressPhase, run_with_progress};
-use super::terminal_report::{
+use crate::cli::Completion;
+use crate::cli::output::{Output, terminal_text};
+use crate::cli::tty::progress::{ProgressPhase, run_with_progress};
+use crate::cli::tty::report::{
     print_blocked_details, print_count, print_count_with_elapsed, print_phase, safe_message,
     write_line,
 };
 
 #[derive(Args)]
-pub(super) struct RefreshCommand {
+pub(in crate::cli) struct RefreshCommand {
     #[arg(value_name = "repo")]
     repositories: Vec<String>,
 
@@ -25,7 +25,7 @@ pub(super) struct RefreshCommand {
     dry_run: bool,
 }
 
-pub(super) fn run(
+pub(in crate::cli) fn run(
     config: Option<PathBuf>,
     command: RefreshCommand,
     output: &mut Output<'_>,

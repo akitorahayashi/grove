@@ -3,7 +3,7 @@ use std::io::{self, IsTerminal, Write};
 
 use anstream::ColorChoice;
 
-pub(super) struct Output<'a> {
+pub(in crate::cli) struct Output<'a> {
     stdout: &'a mut dyn Write,
     stderr: &'a mut dyn Write,
     stdout_is_terminal: bool,
@@ -11,7 +11,7 @@ pub(super) struct Output<'a> {
 }
 
 impl<'a> Output<'a> {
-    pub(super) fn terminal(stdout: &'a mut dyn Write, stderr: &'a mut dyn Write) -> Self {
+    pub(in crate::cli) fn terminal(stdout: &'a mut dyn Write, stderr: &'a mut dyn Write) -> Self {
         Self {
             stdout,
             stderr,
@@ -21,19 +21,19 @@ impl<'a> Output<'a> {
     }
 
     #[cfg(test)]
-    pub(super) fn captured(stdout: &'a mut dyn Write, stderr: &'a mut dyn Write) -> Self {
+    pub(in crate::cli) fn captured(stdout: &'a mut dyn Write, stderr: &'a mut dyn Write) -> Self {
         Self { stdout, stderr, stdout_is_terminal: false, stderr_is_terminal: false }
     }
 
-    pub(super) fn stdout_is_terminal(&self) -> bool {
+    pub(in crate::cli) fn stdout_is_terminal(&self) -> bool {
         self.stdout_is_terminal
     }
 
-    pub(super) fn stdout(&mut self, arguments: Arguments<'_>) -> io::Result<()> {
+    pub(in crate::cli) fn stdout(&mut self, arguments: Arguments<'_>) -> io::Result<()> {
         write_adapted(self.stdout, self.stdout_is_terminal, arguments)
     }
 
-    pub(super) fn stderr(&mut self, arguments: Arguments<'_>) -> io::Result<()> {
+    pub(in crate::cli) fn stderr(&mut self, arguments: Arguments<'_>) -> io::Result<()> {
         write_adapted(self.stderr, self.stderr_is_terminal, arguments)
     }
 }
@@ -86,7 +86,7 @@ fn strip_ansi(value: &str) -> String {
     String::from_utf8(output).expect("removing ASCII escape sequences preserves UTF-8")
 }
 
-pub(super) fn terminal_text(value: &str) -> String {
+pub(in crate::cli) fn terminal_text(value: &str) -> String {
     value
         .chars()
         .flat_map(|character| {
@@ -99,7 +99,7 @@ pub(super) fn terminal_text(value: &str) -> String {
         .collect()
 }
 
-pub(super) fn terminal_multiline_text(value: &str) -> String {
+pub(in crate::cli) fn terminal_multiline_text(value: &str) -> String {
     value
         .split_inclusive('\n')
         .map(|line| {

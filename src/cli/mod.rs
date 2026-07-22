@@ -1,15 +1,8 @@
 //! CLI adapter.
 
-mod cache;
-mod clone;
-mod init;
+mod commands;
 mod output;
-mod refresh;
-mod repository_progress;
-mod status;
-mod sync;
-mod terminal_report;
-mod validate;
+mod tty;
 
 use std::ffi::OsString;
 use std::io;
@@ -37,40 +30,40 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     #[command(visible_alias = "c", about = "Inspect and clean the local clone cache")]
-    Cache(cache::CacheCommand),
+    Cache(commands::cache::CacheCommand),
     #[command(
         visible_alias = "cl",
         about = "Clone a repository through the local cache, without grove.toml"
     )]
-    Clone(clone::CloneCommand),
+    Clone(commands::clone::CloneCommand),
     #[command(visible_alias = "i", about = "Create grove.toml in the current directory")]
-    Init(init::InitCommand),
+    Init(commands::init::InitCommand),
     #[command(
         visible_alias = "rf",
         about = "Update existing repositories and switch to their default branches"
     )]
-    Refresh(refresh::RefreshCommand),
+    Refresh(commands::refresh::RefreshCommand),
     #[command(
         visible_alias = "s",
         about = "Clone missing repositories and safely update existing repositories"
     )]
-    Sync(sync::SyncCommand),
+    Sync(commands::sync::SyncCommand),
     #[command(visible_aliases = ["st", "ts"], about = "Show managed repository status")]
-    Status(status::StatusCommand),
+    Status(commands::status::StatusCommand),
     #[command(visible_alias = "vl", about = "Validate grove.toml without inspecting repositories")]
-    Validate(validate::ValidateCommand),
+    Validate(commands::validate::ValidateCommand),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Completion {
+pub(in crate::cli) enum Completion {
     Success,
     Failure,
 }
 
 /// Entry point for the CLI.
 pub fn run() -> ExitCode {
-    let mut stdout = io::stdout().lock();
-    let mut stderr = io::stderr().lock();
+    let mut stdout = io::stdout();
+    let mut stderr = io::stderr();
     let mut output = Output::terminal(&mut stdout, &mut stderr);
     run_with_args(std::env::args_os(), &mut output)
 }
@@ -82,13 +75,13 @@ fn run_with_args(args: impl IntoIterator<Item = OsString>, output: &mut Output<'
     };
 
     let result = match cli.command {
-        Commands::Cache(command) => cache::run(cli.config, command, output),
-        Commands::Clone(command) => clone::run(cli.config, command, output),
-        Commands::Init(command) => init::run(cli.config, command, output),
-        Commands::Refresh(command) => refresh::run(cli.config, command, output),
-        Commands::Sync(command) => sync::run(cli.config, command, output),
-        Commands::Status(command) => status::run(cli.config, command, output),
-        Commands::Validate(command) => validate::run(cli.config, command, output),
+        Commands::Cache(command) => commands::cache::run(cli.config, command, output),
+        Commands::Clone(command) => commands::clone::run(cli.config, command, output),
+        Commands::Init(command) => commands::init::run(cli.config, command, output),
+        Commands::Refresh(command) => commands::refresh::run(cli.config, command, output),
+        Commands::Sync(command) => commands::sync::run(cli.config, command, output),
+        Commands::Status(command) => commands::status::run(cli.config, command, output),
+        Commands::Validate(command) => commands::validate::run(cli.config, command, output),
     };
 
     match result {

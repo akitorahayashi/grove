@@ -1,4 +1,3 @@
-use std::io;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
@@ -9,12 +8,13 @@ use crate::AppError;
 use crate::app::api;
 use crate::app::cache::CacheEntryInfo;
 
-use super::Completion;
-use super::output::Output;
-use super::terminal_report::safe_message;
+use crate::cli::Completion;
+use crate::cli::output::Output;
+use crate::cli::tty::report::safe_message;
+use crate::cli::tty::table::{Cell, Paint, Table};
 
 #[derive(Args)]
-pub(super) struct CacheCommand {
+pub(in crate::cli) struct CacheCommand {
     #[command(subcommand)]
     command: CacheSubcommand,
 }
@@ -36,7 +36,7 @@ struct CleanCommand {
     repositories: Vec<String>,
 }
 
-pub(super) fn run(
+pub(in crate::cli) fn run(
     config: Option<PathBuf>,
     command: CacheCommand,
     output: &mut Output<'_>,
@@ -49,23 +49,23 @@ pub(super) fn run(
 
 fn run_list(output: &mut Output<'_>) -> Result<Completion, AppError> {
     let entries = api::cache_list()?;
-    if entries.is_empty() {
-        output.stdout(format_args!("No cached repositories\n"))?;
-        return Ok(Completion::Success);
-    }
-
+    let mut table = Table::new(["URL", "SIZE", "UPDATED"]);
     for entry in &entries {
-        print_entry(entry, output)?;
+        table.push_row(vec![
+            Cell::new(safe_message(entry.url()), Paint::Bold),
+            Cell::new(format_size(entry.size_bytes()), Paint::Dimmed),
+            Cell::new(updated(entry), Paint::Dimmed),
+        ]);
     }
+    table.render(output)?;
     Ok(Completion::Success)
 }
 
-fn print_entry(entry: &CacheEntryInfo, output: &mut Output<'_>) -> io::Result<()> {
-    let detail = match entry.modified().and_then(format_age) {
-        Some(age) => format!("{}, updated {age} ago", format_size(entry.size_bytes())),
-        None => format_size(entry.size_bytes()),
-    };
-    output.stdout(format_args!(" {} {}\n", safe_message(entry.url()).bold(), detail.dimmed()))
+fn updated(entry: &CacheEntryInfo) -> String {
+    match entry.modified().and_then(format_age) {
+        Some(age) => format!("{age} ago"),
+        None => "-".to_string(),
+    }
 }
 
 fn run_clean(

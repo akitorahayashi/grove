@@ -6,14 +6,14 @@ use crate::AppError;
 use crate::app::api;
 use crate::app::validate::Report;
 
-use super::Completion;
-use super::output::{Output, terminal_text};
-use super::terminal_report::repositories;
+use crate::cli::Completion;
+use crate::cli::output::{Output, terminal_text};
+use crate::cli::tty::report::repositories;
 
 #[derive(Args)]
-pub(super) struct ValidateCommand {}
+pub(in crate::cli) struct ValidateCommand {}
 
-pub(super) fn run(
+pub(in crate::cli) fn run(
     config: Option<PathBuf>,
     _command: ValidateCommand,
     output: &mut Output<'_>,
