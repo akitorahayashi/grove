@@ -194,11 +194,9 @@ CLI or root facade
   -> terminal-safe CLI rendering or library caller
 ```
 
-## Platform and automation
+## Conventions
 
-Linux and macOS are the complete supported platform set. Windows has no runtime,
-test, CI, or release support. CI obtains Rust 1.90.0 and its components from
-`rust-toolchain.toml`, while mise owns pinned development tools. GitHub Actions
-are selected by immutable commit identifiers and release permissions are scoped
-to release jobs. Releases contain four binaries and no checksum, signature, or
-attestation assets.
+Structs and enums use `PascalCase`; functions, variables, and modules use
+`snake_case`. Platform support and release composition are documented in
+[usage](usage.md); toolchain sourcing and CI policy are documented in
+[Contributing](../CONTRIBUTING.md).
