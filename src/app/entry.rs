@@ -1,12 +1,8 @@
 //! Report scaffolding shared by the sync and refresh use cases. The outcome
 //! vocabularies differ per use case, so the entry is generic over them.
 
+use crate::inspection::BlockedReasonDetails;
 use crate::repositories::RepositoryDefinition;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum BlockedReasonDetails {
-    RemoteUrlMismatch { actual: String, expected: String },
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry<O> {

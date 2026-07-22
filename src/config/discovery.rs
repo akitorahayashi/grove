@@ -11,17 +11,10 @@ pub(super) fn resolve_config_path(explicit_config: Option<&Path>) -> Result<Path
             .map_err(|err| AppError::config_error(format!("{}: {err}", path.display())));
     }
 
-    let mut current = std::env::current_dir()?;
-    loop {
-        let candidate = current.join(CONFIG_FILE_NAME);
-        if candidate.is_file() {
-            return candidate.canonicalize().map_err(AppError::from);
-        }
-
-        if !current.pop() {
-            return Err(AppError::config_error(
-                "grove.toml was not found in the current directory or its parents",
-            ));
-        }
+    let candidate = std::env::current_dir()?.join(CONFIG_FILE_NAME);
+    if candidate.is_file() {
+        return candidate.canonicalize().map_err(AppError::from);
     }
+
+    Err(AppError::config_error("grove.toml was not found in the current directory"))
 }

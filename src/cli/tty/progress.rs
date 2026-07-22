@@ -7,8 +7,8 @@ use std::time::Duration;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 
 use crate::AppError;
-use crate::app::events::{Event, PhaseSummary};
 use crate::git::GitProgress;
+use crate::phases::{Event, Summary};
 
 use crate::cli::output::{Output, terminal_text};
 
@@ -174,7 +174,7 @@ fn numeric_style(name_width: usize) -> ProgressStyle {
 
 struct Completion<P> {
     phase: P,
-    summary: PhaseSummary,
+    summary: Summary,
 }
 
 struct Display<P: ProgressPhase> {
@@ -218,7 +218,7 @@ pub(in crate::cli) fn run_with_progress<P, R>(
     output: &mut Output<'_>,
     thread_label: &str,
     execute: impl FnOnce(Sender<Event<P>>) -> Result<R, AppError> + Send,
-    print_completion: impl Fn(P, PhaseSummary, &mut Output<'_>) -> io::Result<()>,
+    print_completion: impl Fn(P, Summary, &mut Output<'_>) -> io::Result<()>,
 ) -> Result<R, AppError>
 where
     P: ProgressPhase + Send,

@@ -79,6 +79,13 @@ pub(crate) fn branch_readiness(
     Ok(BranchReadiness::Divergence { ahead: divergence.ahead(), behind: divergence.behind() })
 }
 
+/// The structured counterpart of a diagnostic that a report entry carries
+/// beyond its message string, so the CLI can render the offending values.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BlockedReasonDetails {
+    RemoteUrlMismatch { actual: String, expected: String },
+}
+
 pub(crate) fn destination_not_git_repository() -> &'static str {
     "destination exists but is not a Git repository"
 }

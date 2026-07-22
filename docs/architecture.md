@@ -4,7 +4,12 @@
 
 `grove` manages repositories declared in `grove.toml`. Concept owners contain
 their own validation, orchestration, and external-boundary behavior; generic
-utility or process layers are absent.
+utility or process layers are absent. `app` holds one module per subcommand;
+the mechanisms and vocabularies those use cases share live as top-level concept
+owners beneath them. `cli` drives the use cases through `app` and renders the
+vocabulary the shared domains expose — phase progress events, cache outcomes,
+and readiness diagnostics — so both `cli` and `app` depend on those domains.
+Dependencies stay acyclic and flow downward to `git` and `repositories`.
 
 ## Source layout
 
@@ -43,11 +48,8 @@ src/
     clone/
       mod.rs
     context.rs
-    events.rs
+    entry.rs
     init.rs
-    inspection.rs
-    phases.rs
-    report.rs
     refresh/
       check.rs
       fetch.rs
@@ -55,7 +57,6 @@ src/
       report.rs
       update.rs
     status.rs
-    validate.rs
     sync/
       check.rs
       mod.rs
@@ -63,6 +64,14 @@ src/
       report.rs
       update.rs
       zoxide.rs
+    validate.rs
+  cache/
+    mod.rs
+  inspection.rs
+  phases/
+    events.rs
+    mod.rs
+    run.rs
     workers.rs
   config/
     discovery.rs
@@ -108,23 +117,34 @@ crate-root `cli` function returns `ExitCode`; `main` is the sole process
 termination boundary. Output write failures propagate, and a closed stdout pipe
 has non-panicking handling.
 
-`app` owns the five use cases and default dependency wiring. Sync has check,
-clone/fetch preparation, update, and optional zoxide phases. Refresh has check,
-fetch, and default-branch refresh phases. Status inspects repositories serially,
-or, with `--fetch`, through the same bounded parallel workers keyed by Git common
-directory. Results retain selection order.
-Worker execution is bounded by the selected work, available parallelism, and a
-ceiling of eight. Shared Git common directories are serialized, and refresh
-blocks selected linked worktrees that would finish on the same default branch.
-Worker panic and channel disconnects become application errors. Progress events
-and the phase skeleton are shared: `events` owns the phase-generic event, sink,
-and progress adapter, and `phases` owns the check and worker phase envelopes.
-Each use case supplies its own phase marker, per-repository action, and change
-predicate. `inspection` owns repository readiness probing and the canonical
-diagnostics for the conditions the use cases share, so their reason vocabularies
-map from one probe and their shared messages cannot drift. `report` owns the
-report entry, generic over each use case's outcome vocabulary, and the shared
-blocked-reason detail.
+`app` owns the use cases, their default dependency wiring, and the report entry
+that sync and refresh share, generic over each use case's outcome vocabulary. It
+holds one module per subcommand and a facade that delegates to each without
+embedding command logic. Sync has check, clone/fetch preparation, update,
+seeding, and optional zoxide phases. Refresh has check, fetch, and
+default-branch refresh phases. Status inspects repositories serially, or, with
+`--fetch`, through bounded parallel workers keyed by Git common directory.
+Results retain selection order. Refresh blocks selected linked worktrees that
+would finish on the same default branch. The cache use case lists and removes
+cache entries.
+
+`cache` owns the local clone cache: a bare, single-branch entry per verbatim
+remote URL, with entry layout, URL keying, per-entry locking, placement that
+borrows objects through `--reference --dissociate`, and seeding from an existing
+local clone. The sync, clone, and cache use cases share it.
+
+`phases` owns phase-structured bounded-parallel execution. `events` owns the
+phase-generic event, sink, and progress adapter; `run` owns the check and worker
+phase envelopes; `workers` owns the bounded worker pool. Each use case supplies
+its own phase marker, per-repository action, and change predicate. Worker
+execution is bounded by the selected work, available parallelism, and a ceiling
+of eight. Work sharing a Git common directory is serialized. Worker panics and
+channel disconnects become application errors.
+
+`inspection` owns repository readiness probing and the canonical diagnostics for
+the conditions the use cases share, so their reason vocabularies map from one
+probe and their shared messages cannot drift. It also owns the structured
+blocked-reason detail a report entry carries beyond its message.
 
 `config` discovers the root file, resolves one include level, decodes TOML, and
 validates the complete catalog without invoking Git or zoxide. It rejects schema
@@ -146,7 +166,7 @@ separately from the primary update result. Refresh leaves successful worktrees
 on the default branch and reports update failures after a successful switch with
 the previous branch preserved.
 
-The clone boundary revalidates the destination's existing ancestor immediately
+Cache placement revalidates the destination's existing ancestor immediately
 before creating directories and invoking Git. A filesystem actor can still
 replace components between validation and mutation; the standard filesystem
 API provides no portable atomic confinement primitive for this residual race.
@@ -157,10 +177,10 @@ and uses one final snapshot to classify successful adds.
 
 ## Public facade
 
-`src/lib.rs` exports `cli`, `refresh`, `status`, `sync`, and `validate`. It also
-exports the reports, outcomes, and `AppError` needed to consume those calls.
-Owner modules, process clients, dependency traits, events, and workers remain
-private.
+`src/lib.rs` exports `cli`, `clone`, `refresh`, `status`, `sync`, and
+`validate`. It also exports the reports, outcomes, and `AppError` needed to
+consume those calls. Owner modules, process clients, dependency traits, the
+phase engine, the cache store, and repository inspection remain private.
 
 ## Data flow
 

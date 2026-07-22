@@ -4,10 +4,9 @@ use std::time::Instant;
 
 use crate::AppError;
 use crate::app::AppContext;
-use crate::app::events::{DiscardEvents, EventSink};
-use crate::app::phases::{self, PhaseTask};
 use crate::config;
 use crate::git::GitClient;
+use crate::phases::{self, DiscardEvents, EventSink, Task as PhaseTask};
 use crate::repositories::{RepositoryDefinition, select_repositories};
 
 mod check;
@@ -15,11 +14,11 @@ mod fetch;
 mod report;
 mod update;
 
-pub use crate::app::events::PhaseSummary;
-pub(crate) use crate::app::report::BlockedReasonDetails;
+pub(crate) use crate::inspection::BlockedReasonDetails;
+pub use crate::phases::Summary as PhaseSummary;
 pub use report::{BlockedReason, Outcome, PhaseSummaries, Plan, Report, SkippedReason};
 
-pub type Entry = crate::app::report::Entry<Outcome>;
+pub type Entry = crate::app::entry::Entry<Outcome>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
@@ -100,7 +99,7 @@ fn check_phase(
     dry_run: bool,
     events: &impl EventSink<Phase>,
 ) -> Result<(Vec<check::Decision>, PhaseSummary), AppError> {
-    phases::run_check_phase(events, Phase::Checking, repositories, parallelism, |repository| {
+    phases::run_check(events, Phase::Checking, repositories, parallelism, |repository| {
         check::repository(git, repository, dry_run)
     })
 }
@@ -112,7 +111,7 @@ fn fetch_phase<'a>(
     parallelism: usize,
     events: &impl EventSink<Phase>,
 ) -> Result<(Vec<update::Task<'a>>, PhaseSummary), AppError> {
-    let (completions, summary) = phases::run_worker_phase(
+    let (completions, summary) = phases::run_workers(
         events,
         Phase::Fetching,
         tasks,
@@ -139,7 +138,7 @@ fn refresh_phase(
     events: &impl EventSink<Phase>,
 ) -> Result<PhaseSummary, AppError> {
     let tasks = refreshable_tasks(tasks, entries);
-    let (outcomes, summary) = phases::run_worker_phase(
+    let (outcomes, summary) = phases::run_workers(
         events,
         Phase::Refreshing,
         &tasks,

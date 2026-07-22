@@ -10,14 +10,23 @@ working trees on their default branches.
 
 ## Architectural Highlights
 
-- Top-level owners: `cli/` for interface adaptation, `app/` for orchestration,
-  `config/` for `grove.toml`, `repositories/` for managed repository domain
-  data, `git/` for the system Git boundary, and `error.rs` for
+- Top-level owners: `cli/` for interface adaptation, `app/` for use-case
+  orchestration, `cache/` for the local clone cache, `phases/` for phase-
+  structured parallel execution, `inspection.rs` for repository readiness
+  diagnosis, `config/` for `grove.toml`, `repositories/` for managed repository
+  domain data, `git/` for the system Git boundary, and `error.rs` for
   application-wide errors.
 - `src/cli/` owns parsing, terminal-safe output, progress, and command
   completion for every subcommand.
-- `src/app/` owns init, refresh, status, sync, and validation orchestration and
-  dependency wiring.
+- `src/app/` owns the use-case facade, dependency wiring, the report entry
+  shared by sync and refresh, and one module per subcommand (init, refresh,
+  status, sync, validate, clone, and cache).
+- `src/cache/` owns the local clone cache: entry layout, URL keying, locking,
+  placement, and seeding, shared by the sync, clone, and cache use cases.
+- `src/phases/` owns phase-structured bounded-parallel execution and its
+  progress events, shared by the sync, refresh, status, and clone use cases.
+- `src/inspection.rs` owns repository readiness probing and the canonical
+  diagnostics for the conditions the use cases share.
 - `src/config/` owns discovery, include resolution, and validation.
 - `src/repositories/` owns validated names, branch names, redacted URLs,
   operational paths, definitions, and target selection.

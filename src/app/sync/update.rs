@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use crate::AppError;
-use crate::app::inspection::{self, BranchReadiness};
-use crate::app::phases::PhaseTask;
 use crate::git::{GitClient, GitUpdateBlock, GitUpdateOutcome, Restoration};
+use crate::inspection::{self, BranchReadiness};
+use crate::phases::Task as PhaseTask;
 use crate::repositories::RepositoryDefinition;
 
 use super::{BlockedReason, Entry, Outcome};

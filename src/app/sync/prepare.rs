@@ -1,9 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use crate::app::cache::CacheStore;
-use crate::app::events::{EventProgress, EventSink};
-use crate::app::phases::PhaseTask;
+use crate::cache::Store;
 use crate::git::GitClient;
+use crate::phases::{EventProgress, EventSink, Task as PhaseTask};
 use crate::repositories::RepositoryDefinition;
 
 use super::update;
@@ -53,7 +52,7 @@ impl Completion<'_> {
 
 pub(super) fn repository<'a>(
     git: &impl GitClient,
-    cache: &CacheStore,
+    cache: &Store,
     task: &Task<'a>,
     events: &impl EventSink<Phase>,
 ) -> Result<Completion<'a>, crate::AppError> {

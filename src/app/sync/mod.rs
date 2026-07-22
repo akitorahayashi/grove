@@ -4,11 +4,10 @@ use std::time::Instant;
 
 use crate::AppError;
 use crate::app::AppContext;
-use crate::app::cache::CacheStore;
-use crate::app::events::{DiscardEvents, EventProgress, EventSink};
-use crate::app::phases::{self, PhaseTask};
+use crate::cache::Store;
 use crate::config;
 use crate::git::GitClient;
+use crate::phases::{self, DiscardEvents, EventProgress, EventSink, Task as PhaseTask};
 use crate::repositories::{RepositoryDefinition, select_repositories};
 
 mod check;
@@ -17,14 +16,14 @@ mod report;
 mod update;
 mod zoxide;
 
-pub use crate::app::events::PhaseSummary;
-pub(crate) use crate::app::report::BlockedReasonDetails;
+pub(crate) use crate::inspection::BlockedReasonDetails;
+pub use crate::phases::Summary as PhaseSummary;
 pub use report::{
     BlockedReason, Outcome, PhaseSummaries, Plan, Report, SkippedReason, ZoxideEntry,
     ZoxideOutcome, ZoxideReport,
 };
 
-pub type Entry = crate::app::report::Entry<Outcome>;
+pub type Entry = crate::app::entry::Entry<Outcome>;
 
 /// An existing repository eligible to seed the clone cache from its objects.
 struct SeedTask<'a> {
@@ -93,7 +92,7 @@ pub(crate) fn execute_with_events(
     events: &impl EventSink<Phase>,
 ) -> Result<Report, AppError> {
     ctx.git().verify_available()?;
-    let cache = CacheStore::from_env()?;
+    let cache = Store::from_env()?;
     let config = config::load(config_path)?;
     let repositories = select_repositories(config.repositories(), targets)?;
     let parallelism = std::thread::available_parallelism()?.get();
@@ -163,20 +162,20 @@ fn check_phase(
     dry_run: bool,
     events: &impl EventSink<Phase>,
 ) -> Result<(Vec<check::Decision>, PhaseSummary), AppError> {
-    phases::run_check_phase(events, Phase::Checking, repositories, parallelism, |repository| {
+    phases::run_check(events, Phase::Checking, repositories, parallelism, |repository| {
         check::repository(git, repository, dry_run)
     })
 }
 
 fn prepare_phase<'a>(
     git: &impl GitClient,
-    cache: &CacheStore,
+    cache: &Store,
     tasks: &[prepare::Task<'a>],
     entries: &mut [Option<Entry>],
     parallelism: usize,
     events: &impl EventSink<Phase>,
 ) -> Result<(Vec<update::Task<'a>>, PhaseSummary), AppError> {
-    let (completions, summary) = phases::run_worker_phase(
+    let (completions, summary) = phases::run_workers(
         events,
         Phase::Preparing,
         tasks,
@@ -202,7 +201,7 @@ fn update_phase(
     parallelism: usize,
     events: &impl EventSink<Phase>,
 ) -> Result<PhaseSummary, AppError> {
-    let (outcomes, summary) = phases::run_worker_phase(
+    let (outcomes, summary) = phases::run_workers(
         events,
         Phase::Updating,
         tasks,
@@ -230,7 +229,7 @@ fn update_phase(
 /// since seeding reads only the object store. Each distinct URL is seeded once.
 fn seed_phase(
     git: &impl GitClient,
-    cache: &CacheStore,
+    cache: &Store,
     repositories: &[&RepositoryDefinition],
     indices: &[usize],
     entries: &mut [Option<Entry>],
@@ -247,7 +246,7 @@ fn seed_phase(
         .map(|&index| SeedTask { index, repository: repositories[index] })
         .collect::<Vec<_>>();
 
-    let (outcomes, _summary) = phases::run_worker_phase(
+    let (outcomes, _summary) = phases::run_workers(
         events,
         Phase::Seeding,
         &tasks,
@@ -268,7 +267,7 @@ fn seed_phase(
 
 fn seed_repository(
     git: &impl GitClient,
-    cache: &CacheStore,
+    cache: &Store,
     task: &SeedTask<'_>,
     events: &impl EventSink<Phase>,
 ) -> Result<SeedOutcome, AppError> {

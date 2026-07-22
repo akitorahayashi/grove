@@ -1,8 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use crate::app::events::{EventProgress, EventSink};
-use crate::app::phases::PhaseTask;
 use crate::git::GitClient;
+use crate::phases::{EventProgress, EventSink, Task as PhaseTask};
 use crate::repositories::RepositoryDefinition;
 
 use super::update;
