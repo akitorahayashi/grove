@@ -36,7 +36,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    #[command(visible_alias = "c", about = "Inspect and clear the local clone cache")]
+    #[command(visible_alias = "c", about = "Inspect and clean the local clone cache")]
     Cache(cache::CacheCommand),
     #[command(
         visible_alias = "cl",

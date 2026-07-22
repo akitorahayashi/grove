@@ -53,14 +53,14 @@ impl CacheEntryInfo {
     }
 }
 
-/// The result of `gv cache clear`.
+/// The result of `gv cache clean`.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub(crate) struct CacheClearReport {
+pub(crate) struct CacheCleanReport {
     removed: usize,
     absent: Vec<String>,
 }
 
-impl CacheClearReport {
+impl CacheCleanReport {
     pub(crate) fn new(removed: usize, absent: Vec<String>) -> Self {
         Self { removed, absent }
     }
@@ -190,7 +190,7 @@ impl CacheStore {
     }
 
     /// Remove every cache entry, returning how many were removed.
-    pub(crate) fn clear_all(&self) -> Result<usize, AppError> {
+    pub(crate) fn clean_all(&self) -> Result<usize, AppError> {
         let mut removed = 0;
         if !self.root.exists() {
             return Ok(0);

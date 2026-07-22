@@ -27,13 +27,13 @@ gv clone git@github.com:company/frontend.git
 gv clone git@github.com:company/frontend.git frontend
 
 gv cache list
-gv cache clear
-gv cache clear frontend
+gv cache clean
+gv cache clean frontend
 ```
 
 `gv clone`, with the alias `gv cl`, and `gv cache`, with the alias `gv c`, expose the
 local clone cache from the command line. `gv cache list`, with the alias `gv c ls`,
-and `gv cache clear`, with the alias `gv c clr`, operate on cache entries.
+and `gv cache clean`, with the alias `gv c cln`, operate on cache entries.
 
 ## Configuration
 
@@ -203,7 +203,7 @@ and `--config` is not accepted. It is a cache-accelerated `git clone`, not a
 reimplementation of every `git clone` option.
 
 `gv cache list` reports cached repositories with size and last-update age. `gv
-cache clear` removes every entry; `gv cache clear <repo>...` removes the entries
+cache clean` removes every entry; `gv cache clean <repo>...` removes the entries
 backing the named configured repositories.
 
 ## Requirements

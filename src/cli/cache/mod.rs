@@ -23,15 +23,15 @@ pub(super) struct CacheCommand {
 enum CacheSubcommand {
     #[command(visible_alias = "ls", about = "List cached repositories")]
     List(ListCommand),
-    #[command(visible_alias = "clr", about = "Remove cached repositories, or those named")]
-    Clear(ClearCommand),
+    #[command(visible_alias = "cln", about = "Remove cached repositories, or those named")]
+    Clean(CleanCommand),
 }
 
 #[derive(Args)]
 struct ListCommand;
 
 #[derive(Args)]
-struct ClearCommand {
+struct CleanCommand {
     #[arg(value_name = "repo")]
     repositories: Vec<String>,
 }
@@ -43,7 +43,7 @@ pub(super) fn run(
 ) -> Result<Completion, AppError> {
     match command.command {
         CacheSubcommand::List(_) => run_list(output),
-        CacheSubcommand::Clear(clear) => run_clear(config, clear.repositories, output),
+        CacheSubcommand::Clean(clean) => run_clean(config, clean.repositories, output),
     }
 }
 
@@ -68,12 +68,12 @@ fn print_entry(entry: &CacheEntryInfo, output: &mut Output<'_>) -> io::Result<()
     output.stdout(format_args!(" {} {}\n", safe_message(entry.url()).bold(), detail.dimmed()))
 }
 
-fn run_clear(
+fn run_clean(
     config: Option<PathBuf>,
     repositories: Vec<String>,
     output: &mut Output<'_>,
 ) -> Result<Completion, AppError> {
-    let report = api::cache_clear(config, repositories)?;
+    let report = api::cache_clean(config, repositories)?;
     let removed = report.removed();
     let noun = if removed == 1 { "entry" } else { "entries" };
     output.stdout(format_args!("Removed {removed} cache {noun}\n"))?;
