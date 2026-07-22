@@ -6,6 +6,13 @@
 
 ```bash
 gv init
+```
+
+Edit `grove.toml`: uncomment one `[repos.<name>]` block (or add your own) and
+replace its `REPLACE_WITH_*` placeholders. See
+[configuration](docs/config.md) for the schema.
+
+```bash
 gv validate
 gv sync
 gv status

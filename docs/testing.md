@@ -55,5 +55,5 @@ CI runs four reusable workflows orchestrated by `ci-workflows.yml`:
 - Test — `just test` on an Ubuntu and macOS matrix.
 - Coverage — `just coverage` on Ubuntu only, with `RUST_TEST_THREADS=1`.
 
-External GitHub Actions are pinned to reviewed commit identifiers; see
-[Contributing](../CONTRIBUTING.md) for the update policy.
+GitHub Actions pinning policy is documented in
+[Contributing](../CONTRIBUTING.md).

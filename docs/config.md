@@ -58,11 +58,12 @@ configuration files.
 complete catalog without inspecting repository working trees or requiring
 network access. See [usage](usage.md) for the command's CLI invocation.
 
-A `grove.toml` is rejected when it:
+Rejected configurations include malformed TOML, unknown fields, and wrong
+field types, plus:
 
-- declares an unsupported `version`
-- declares duplicate or nested includes
-- contains an invalid repository name or branch ref
-- declares duplicate or nested repository identities
-- uses an absolute path, or a path outside the canonical grove root, for a
+- an unsupported or missing `version`
+- a missing, empty, or invalid repository name, URL, or branch ref
+- duplicate or nested repository identities
+- an absolute path, or a path outside the canonical grove root, for a
   repository's `path`
+- an absolute, nonexistent, duplicate, or nested include path

@@ -28,7 +28,9 @@ See [testing](docs/testing.md) for test layout and conventions.
 
 ## Automation
 
-External GitHub Actions are pinned to reviewed commit identifiers with version
-comments; action updates review both the commit and its release notes. Write
-permissions are scoped to the release jobs that need them; other jobs default
-to read-only. CI stages are documented in [testing](docs/testing.md).
+Third-party GitHub Actions are pinned to reviewed commit identifiers with
+version comments. Actions owned by `akitorahayashi` use reviewed release or
+major tags instead of commit pins. Action updates review both the pinned
+identifier and its release notes. Write permissions are scoped to the release
+jobs that need them; other jobs default to read-only. CI stages are
+documented in [testing](docs/testing.md).
