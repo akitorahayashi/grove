@@ -4,11 +4,12 @@ use std::path::PathBuf;
 
 use crate::AppError;
 use crate::app::{AppContext, cache, clone, init, refresh, status, sync, validate};
+use crate::cache::Store;
 use crate::git::CommandGitClient;
 use crate::phases::EventSink;
 
-fn default_context() -> AppContext<CommandGitClient> {
-    AppContext::default()
+fn default_context() -> Result<AppContext<CommandGitClient>, AppError> {
+    Ok(AppContext::new(CommandGitClient::default(), Store::from_env()?))
 }
 
 pub fn status(
@@ -16,7 +17,7 @@ pub fn status(
     targets: Vec<String>,
     fetch: bool,
 ) -> Result<status::StatusReport, AppError> {
-    let ctx = default_context();
+    let ctx = default_context()?;
     status::execute(&ctx, config_path.as_deref(), &targets, fetch)
 }
 
@@ -25,7 +26,7 @@ pub fn sync(
     targets: Vec<String>,
     options: sync::SyncOptions,
 ) -> Result<sync::Report, AppError> {
-    let ctx = default_context();
+    let ctx = default_context()?;
     sync::execute_with_options(&ctx, config_path.as_deref(), &targets, options)
 }
 
@@ -34,7 +35,7 @@ pub fn refresh(
     targets: Vec<String>,
     options: refresh::RefreshOptions,
 ) -> Result<refresh::Report, AppError> {
-    let ctx = default_context();
+    let ctx = default_context()?;
     refresh::execute_with_options(&ctx, config_path.as_deref(), &targets, options)
 }
 
@@ -43,19 +44,21 @@ pub fn validate(config_path: Option<PathBuf>) -> Result<validate::Report, AppErr
 }
 
 pub fn clone(url: String, destination: Option<PathBuf>) -> Result<clone::Report, AppError> {
-    let ctx = default_context();
+    let ctx = default_context()?;
     clone::execute(&ctx, &url, destination)
 }
 
 pub(crate) fn cache_list() -> Result<Vec<crate::cache::EntryInfo>, AppError> {
-    cache::list()
+    let ctx = default_context()?;
+    cache::list(ctx.cache())
 }
 
 pub(crate) fn cache_clean(
     config_path: Option<PathBuf>,
     targets: Vec<String>,
 ) -> Result<cache::CleanReport, AppError> {
-    cache::clean(config_path.as_deref(), &targets)
+    let ctx = default_context()?;
+    cache::clean(ctx.cache(), config_path.as_deref(), &targets)
 }
 
 pub(crate) fn init(directory: PathBuf) -> Result<init::Report, AppError> {
@@ -68,7 +71,7 @@ pub(crate) fn refresh_with_events(
     options: refresh::RefreshOptions,
     events: &impl EventSink<refresh::Phase>,
 ) -> Result<refresh::Report, AppError> {
-    let ctx = default_context();
+    let ctx = default_context()?;
     refresh::execute_with_events(&ctx, config_path.as_deref(), &targets, options, events)
 }
 
@@ -78,7 +81,7 @@ pub(crate) fn sync_with_events(
     options: sync::SyncOptions,
     events: &impl EventSink<sync::Phase>,
 ) -> Result<sync::Report, AppError> {
-    let ctx = default_context();
+    let ctx = default_context()?;
     sync::execute_with_events(&ctx, config_path.as_deref(), &targets, options, events)
 }
 
@@ -87,6 +90,6 @@ pub(crate) fn clone_with_events(
     destination: Option<PathBuf>,
     events: &impl EventSink<clone::Phase>,
 ) -> Result<clone::Report, AppError> {
-    let ctx = default_context();
+    let ctx = default_context()?;
     clone::execute_with_events(&ctx, &url, destination, events)
 }

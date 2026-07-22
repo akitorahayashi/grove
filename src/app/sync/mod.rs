@@ -92,7 +92,7 @@ pub(crate) fn execute_with_events(
     events: &impl EventSink<Phase>,
 ) -> Result<Report, AppError> {
     ctx.git().verify_available()?;
-    let cache = Store::from_env()?;
+    let cache = ctx.cache();
     let config = config::load(config_path)?;
     let repositories = select_repositories(config.repositories(), targets)?;
     let parallelism = std::thread::available_parallelism()?.get();
@@ -127,14 +127,14 @@ pub(crate) fn execute_with_events(
     }
 
     let (updates, prepared) =
-        prepare_phase(ctx.git(), &cache, &preparations, &mut entries, parallelism, events)?;
+        prepare_phase(ctx.git(), cache, &preparations, &mut entries, parallelism, events)?;
     let updated = update_phase(ctx.git(), &updates, &mut entries, parallelism, events)?;
 
     // Repositories that reached the update phase fetched successfully, so their
     // remote is reachable and can be seeded; this covers cleanly updated,
     // up-to-date, and diverged repositories alike.
     seed_indices.extend(updates.iter().map(update::Task::index));
-    seed_phase(ctx.git(), &cache, &repositories, &seed_indices, &mut entries, parallelism, events)?;
+    seed_phase(ctx.git(), cache, &repositories, &seed_indices, &mut entries, parallelism, events)?;
 
     let entries = entries
         .into_iter()

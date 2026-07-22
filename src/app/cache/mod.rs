@@ -31,18 +31,18 @@ impl CleanReport {
     }
 }
 
-pub(crate) fn list() -> Result<Vec<EntryInfo>, AppError> {
-    Store::from_env()?.list()
+pub(crate) fn list(store: &Store) -> Result<Vec<EntryInfo>, AppError> {
+    store.list()
 }
 
 /// Remove cache entries. With no targets, every entry is removed; otherwise
 /// only the selected repositories' entries are, and repositories without an
 /// entry are reported as absent rather than treated as failures.
 pub(crate) fn clean(
+    store: &Store,
     config_path: Option<&Path>,
     targets: &[String],
 ) -> Result<CleanReport, AppError> {
-    let store = Store::from_env()?;
     if targets.is_empty() {
         return Ok(CleanReport::new(store.clean_all()?, Vec::new()));
     }
