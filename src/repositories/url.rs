@@ -25,7 +25,7 @@ impl RemoteUrl {
 
 impl fmt::Display for RemoteUrl {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&redact_urls_for_display(&self.0))
+        formatter.write_str(&redact_url(&self.0))
     }
 }
 
@@ -57,10 +57,26 @@ pub(crate) fn redact_urls_for_display(value: &str) -> String {
 }
 
 fn find_url_start(value: &str) -> Option<usize> {
-    ["https://", "http://", "ssh://", "ftp://"]
-        .into_iter()
-        .filter_map(|scheme| value.find(scheme))
-        .min()
+    let bytes = value.as_bytes();
+    for (scheme_end, _) in value.match_indices("://") {
+        let mut start = scheme_end;
+        while start > 0 && is_scheme_character(bytes[start - 1]) {
+            start -= 1;
+        }
+        if start < scheme_end && bytes[start].is_ascii_alphabetic() {
+            return Some(start);
+        }
+    }
+    None
+}
+
+fn is_scheme_character(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'.')
+}
+
+fn redact_url(value: &str) -> String {
+    let escaped = escape_control_characters(value);
+    redact_secret_query_parameters(&redact_authority_userinfo(&escaped))
 }
 
 fn escape_control_characters(value: &str) -> String {
@@ -125,7 +141,7 @@ fn redact_secret_query_parameters(value: &str) -> String {
 }
 
 fn is_secret_query_key(key: &str) -> bool {
-    let normalized = key.to_ascii_lowercase();
+    let normalized = decode_query_key(key).to_ascii_lowercase();
     normalized.contains("token")
         || normalized.contains("password")
         || normalized.contains("passwd")
@@ -134,6 +150,37 @@ fn is_secret_query_key(key: &str) -> bool {
         || normalized == "key"
         || normalized.ends_with("_key")
         || normalized.ends_with("-key")
+}
+
+fn decode_query_key(key: &str) -> String {
+    let bytes = key.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%'
+            && let Some(value) = bytes
+                .get(index + 1)
+                .and_then(|high| hex_value(*high))
+                .zip(bytes.get(index + 2).and_then(|low| hex_value(*low)))
+                .map(|(high, low)| high << 4 | low)
+        {
+            decoded.push(value);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -165,5 +212,66 @@ mod tests {
         assert!(!displayed.contains("secret"));
         assert!(!displayed.contains("value"));
         assert!(!displayed.chars().any(char::is_control));
+    }
+
+    #[test]
+    fn recognizes_generic_case_insensitive_uri_schemes() {
+        for (input, expected) in [
+            (
+                "fatal: HTTPS://user:secret@example.com/repo.git",
+                "HTTPS://[redacted]@example.com/repo.git",
+            ),
+            (
+                "fatal: git://user:secret@example.com/repo.git",
+                "git://[redacted]@example.com/repo.git",
+            ),
+            (
+                "fatal: file://user:secret@example.com/repo.git",
+                "file://[redacted]@example.com/repo.git",
+            ),
+            (
+                "fatal: custom+ssh://user:secret@example.com/repo.git",
+                "custom+ssh://[redacted]@example.com/repo.git",
+            ),
+        ] {
+            let displayed = redact_urls_for_display(input);
+            assert!(displayed.contains(expected), "{displayed}");
+            assert!(!displayed.contains("secret"), "{displayed}");
+        }
+    }
+
+    #[test]
+    fn recognizes_encoded_secret_query_keys_without_rewriting_keys() {
+        let displayed = redact_urls_for_display(
+            "HTTPS://example.com/repo?access%5Ftoken=value&%50ASSWORD=secret&branch=main",
+        );
+
+        assert_eq!(
+            displayed,
+            "HTTPS://example.com/repo?access%5Ftoken=[redacted]&%50ASSWORD=[redacted]&branch=main"
+        );
+    }
+
+    #[test]
+    fn preserves_surrounding_diagnostic_punctuation() {
+        let displayed = redact_urls_for_display(
+            "failed (HTTPS://user:secret@example.com/repo.git?token=value), retry",
+        );
+
+        assert_eq!(
+            displayed,
+            "failed (HTTPS://[redacted]@example.com/repo.git?token=[redacted]), retry"
+        );
+    }
+
+    #[test]
+    fn preserves_scp_like_urls_while_redacting_their_secret_queries() {
+        let url =
+            RemoteUrl::new("git@example.com:org/repo.git?access_token=secret&branch=main").unwrap();
+
+        assert_eq!(
+            url.to_string(),
+            "git@example.com:org/repo.git?access_token=[redacted]&branch=main"
+        );
     }
 }

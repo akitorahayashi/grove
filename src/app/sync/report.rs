@@ -79,6 +79,7 @@ pub struct PhaseSummaries {
     checked: PhaseSummary,
     prepared: PhaseSummary,
     updated: PhaseSummary,
+    seeded: PhaseSummary,
 }
 
 impl PhaseSummaries {
@@ -86,8 +87,9 @@ impl PhaseSummaries {
         checked: PhaseSummary,
         prepared: PhaseSummary,
         updated: PhaseSummary,
+        seeded: PhaseSummary,
     ) -> Self {
-        Self { checked, prepared, updated }
+        Self { checked, prepared, updated, seeded }
     }
 
     pub fn checked(self) -> PhaseSummary {
@@ -100,6 +102,10 @@ impl PhaseSummaries {
 
     pub fn updated(self) -> PhaseSummary {
         self.updated
+    }
+
+    pub fn seeded(self) -> PhaseSummary {
+        self.seeded
     }
 }
 

@@ -1193,7 +1193,7 @@ fn sync_redacts_credentials_echoed_by_fetch_failure() {
     ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
     let path = install_git_wrapper(
         &ctx,
-        "if [ \"$1\" = fetch ]; then echo 'fatal: https://user:credential@example.com/repo.git?token=secret-value' >&2; exit 42; fi",
+        "if [ \"$1\" = fetch ]; then echo 'fatal: GIT+SSH://user:credential@example.com/repo.git?%54OKEN=secret-value' >&2; exit 42; fi",
     );
 
     ctx.cli()
@@ -1204,7 +1204,7 @@ fn sync_redacts_credentials_echoed_by_fetch_failure() {
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "https://[redacted]@example.com/repo.git?token=[redacted]",
+            "GIT+SSH://[redacted]@example.com/repo.git?%54OKEN=[redacted]",
         ))
         .stderr(predicate::str::contains("credential").not())
         .stderr(predicate::str::contains("secret-value").not());

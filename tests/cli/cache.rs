@@ -47,6 +47,35 @@ fn cache_list_emits_color_when_forced() {
 }
 
 #[test]
+fn cache_list_redacts_generic_schemes_and_encoded_secret_keys() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    ctx.cli().arg("clone").arg(remote.url()).arg("cloned").assert().success();
+    let entry = std::fs::read_dir(ctx.cache_root())
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| path.join("url").is_file())
+        .unwrap();
+    std::fs::write(
+        entry.join("url"),
+        "GIT+SSH://user:credential@example.com/repo.git?access%5Ftoken=secret-value",
+    )
+    .unwrap();
+
+    ctx.cli()
+        .arg("cache")
+        .arg("list")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "GIT+SSH://[redacted]@example.com/repo.git?access%5Ftoken=[redacted]",
+        ))
+        .stdout(predicate::str::contains("credential").not())
+        .stdout(predicate::str::contains("secret-value").not());
+}
+
+#[test]
 fn cache_clean_removes_all_entries() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");

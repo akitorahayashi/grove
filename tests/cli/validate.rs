@@ -93,7 +93,7 @@ fn validate_redacts_credentials_from_malformed_toml_errors() {
 version = 1
 
 [repos.blog]
-url = "https://user:credential@example.com/repo.git
+url = "GIT+SSH://user:credential@example.com/repo.git?access%5Ftoken=secret-value
 "#,
     );
 
@@ -105,8 +105,11 @@ url = "https://user:credential@example.com/repo.git
         .failure()
         .stdout(predicate::str::is_empty())
         .stderr(predicate::str::contains("invalid TOML"))
-        .stderr(predicate::str::contains("https://[redacted]@example.com/repo.git"))
-        .stderr(predicate::str::contains("credential").not());
+        .stderr(predicate::str::contains(
+            "GIT+SSH://[redacted]@example.com/repo.git?access%5Ftoken=[redacted]",
+        ))
+        .stderr(predicate::str::contains("credential").not())
+        .stderr(predicate::str::contains("secret-value").not());
 }
 
 #[test]

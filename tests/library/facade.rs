@@ -34,6 +34,8 @@ fn root_facade_exposes_supported_use_cases_and_reports() {
         grove::SyncEntry::blocked_details;
     let _: fn(&grove::RefreshEntry) -> Option<&grove::BlockedReasonDetails> =
         grove::RefreshEntry::blocked_details;
+    let _: fn(grove::SyncPhaseSummaries) -> grove::SyncPhaseSummary =
+        grove::SyncPhaseSummaries::seeded;
     let mismatch = grove::BlockedReasonDetails::RemoteUrlMismatch {
         actual: "https://example.com/actual.git".to_string(),
         expected: "https://example.com/expected.git".to_string(),
