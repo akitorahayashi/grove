@@ -89,6 +89,7 @@ pub(super) fn repository<'a>(
             },
         ),
         Task::Fetch { index, repository, common_directory, default_branch } => {
+            let _lock = git.lock_repository(common_directory)?;
             Ok(match git.fetch(repository.path(), &mut progress) {
                 Ok(()) => Completion::Update(update::Task::new(
                     *index,

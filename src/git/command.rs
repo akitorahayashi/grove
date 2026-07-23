@@ -6,8 +6,9 @@ use std::process::{Command, Output, Stdio};
 
 use super::{
     BranchReferences, BranchTracking, CacheEntry, DefaultBranch, GitProgressSink,
-    GitRefreshOutcome, GitUpdate, GitUpdateBlock, GitUpdateOutcome, RepositoryProbe, Restoration,
-    WorktreeStatus, default_branch, parse_git_progress, tracking, worktree,
+    GitRefreshOutcome, GitUpdate, GitUpdateBlock, GitUpdateOutcome, RepositoryLock,
+    RepositoryProbe, Restoration, WorktreeStatus, default_branch, parse_git_progress, tracking,
+    worktree,
 };
 use crate::AppError;
 use crate::repositories::redact_urls_for_display;
@@ -155,6 +156,10 @@ impl RepositoryProbe for CommandGitClient {
             )));
         }
         Ok(())
+    }
+
+    fn lock_repository(&self, common_directory: &Path) -> Result<RepositoryLock, AppError> {
+        RepositoryLock::acquire(common_directory)
     }
 
     fn fetch(&self, repository: &Path, progress: &mut dyn GitProgressSink) -> Result<(), AppError> {
@@ -308,6 +313,8 @@ impl DefaultBranch for CommandGitClient {
         repository: &Path,
         branch: &str,
     ) -> Result<GitUpdateOutcome, AppError> {
+        let common_directory = self.common_directory(repository)?;
+        let _lock = self.lock_repository(&common_directory)?;
         let preparation = match self.prepare_default_branch(repository, branch)? {
             Ok(preparation) => preparation,
             Err(block) => return Ok(GitUpdateOutcome::Blocked(block)),
@@ -333,6 +340,8 @@ impl DefaultBranch for CommandGitClient {
         repository: &Path,
         branch: &str,
     ) -> Result<GitRefreshOutcome, AppError> {
+        let common_directory = self.common_directory(repository)?;
+        let _lock = self.lock_repository(&common_directory)?;
         let preparation = match self.prepare_default_branch(repository, branch)? {
             Ok(preparation) => preparation,
             Err(block) => return Ok(GitRefreshOutcome::Blocked(block)),
@@ -455,12 +464,19 @@ impl CommandGitClient {
         }
 
         let revisions = self.branch_revisions(repository, &branch)?;
-        let before = revisions.local().ok_or_else(|| {
-            missing_update_reference(repository, &branch, "local default-branch reference")
-        })?;
-        let after = revisions.remote().ok_or_else(|| {
-            missing_update_reference(repository, &branch, "remote default-branch reference")
-        })?;
+        let Some(before) = revisions.local() else {
+            return Ok(Err(GitUpdateBlock::MissingLocalBranch));
+        };
+        let Some(after) = revisions.remote() else {
+            return Ok(Err(GitUpdateBlock::MissingRemoteBranch));
+        };
+        let (ahead, behind) = self.divergence_counts(repository, &branch)?;
+        if ahead > 0 && behind > 0 {
+            return Ok(Err(GitUpdateBlock::Diverged));
+        }
+        if ahead > 0 {
+            return Ok(Err(GitUpdateBlock::AheadOfOrigin));
+        }
         Ok(Ok(DefaultBranchPreparation {
             current_branch,
             update: GitUpdate::new(before.to_string(), after.to_string()),
@@ -565,17 +581,6 @@ fn malformed_output(repository: &Path, args: &[&str], output: &str) -> AppError 
         "Git returned malformed output".to_string()
     };
     AppError::git_command_failed(format_probe(repository, args), description)
-}
-
-fn missing_update_reference(repository: &Path, branch: &BranchName, description: &str) -> AppError {
-    let format = "--format=%(refname)%09%(objectname:short)";
-    let local = format!("refs/heads/{branch}");
-    let remote = format!("refs/remotes/origin/{branch}");
-    let args = ["for-each-ref", format, &local, &remote];
-    AppError::git_command_failed(
-        format_probe(repository, &args),
-        format!("Git returned no {description}"),
-    )
 }
 
 fn parse_git_version(output: &str) -> Option<(u32, u32, u32)> {
@@ -716,6 +721,7 @@ fn format_probe(repository: &Path, args: &[&str]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::fs::{OpenOptions, TryLockError};
     use std::path::Path;
     use std::process::Command;
 
@@ -728,6 +734,22 @@ mod tests {
         Restoration,
     };
     use crate::repositories::{BranchName, RemoteUrl};
+
+    #[test]
+    fn repository_locks_coordinate_independent_file_handles() {
+        let root = TempDir::new().unwrap();
+        let client = CommandGitClient::default();
+        let held = client.lock_repository(root.path()).unwrap();
+        let competing = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(root.path().join("grove-operation.lock"))
+            .unwrap();
+
+        assert!(matches!(competing.try_lock(), Err(TryLockError::WouldBlock)));
+        drop(held);
+        competing.try_lock().unwrap();
+    }
 
     #[test]
     fn linked_worktrees_resolve_to_the_same_common_directory() {
@@ -912,16 +934,15 @@ mod tests {
     }
 
     #[test]
-    fn update_reports_a_missing_reference_as_an_update_failure() {
+    fn update_blocks_a_missing_remote_reference() {
         let root = TempDir::new().unwrap();
         let repository = root.path().join("repo");
         initialize_committed_repository(&repository);
 
-        let result = CommandGitClient::default().update_default_branch(&repository, "main");
+        let result =
+            CommandGitClient::default().update_default_branch(&repository, "main").unwrap();
 
-        assert!(result.is_err_and(|error| {
-            error.to_string().contains("Git returned no remote default-branch reference")
-        }));
+        assert_eq!(result, GitUpdateOutcome::Blocked(GitUpdateBlock::MissingRemoteBranch));
     }
 
     #[test]
@@ -1012,7 +1033,7 @@ mod tests {
     }
 
     #[test]
-    fn merge_failure_restores_original_branch_and_preserves_default_branch() {
+    fn update_blocks_a_diverged_branch_before_switching() {
         let root = TempDir::new().unwrap();
         let repository = create_updatable_repository(root.path());
         run_git(&repository, &["switch", "main"]);
@@ -1025,10 +1046,7 @@ mod tests {
         let outcome =
             CommandGitClient::default().update_default_branch(&repository, "main").unwrap();
 
-        assert!(matches!(
-            outcome,
-            GitUpdateOutcome::Failed { restoration: Restoration::Restored, .. }
-        ));
+        assert_eq!(outcome, GitUpdateOutcome::Blocked(GitUpdateBlock::Diverged));
         assert_eq!(git_stdout(&repository, &["branch", "--show-current"]), "feature");
         assert_eq!(git_stdout(&repository, &["rev-parse", "main"]), before);
     }

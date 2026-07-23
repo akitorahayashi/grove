@@ -257,6 +257,13 @@ fn status_for_repository(
         ));
     }
 
+    let _lock = if fetch {
+        let common_directory = git.common_directory(repository.path())?;
+        Some(git.lock_repository(&common_directory)?)
+    } else {
+        None
+    };
+
     if fetch {
         let mut progress = NoopGitProgressSink;
         if let Err(err) = git.fetch(repository.path(), &mut progress) {

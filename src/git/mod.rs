@@ -9,6 +9,7 @@ mod tracking;
 mod update;
 mod worktree;
 
+pub(crate) use client::RepositoryLock;
 pub use client::{
     CacheEntry, DefaultBranch, GitClient, GitProgressSink, NoopGitProgressSink, RepositoryProbe,
 };

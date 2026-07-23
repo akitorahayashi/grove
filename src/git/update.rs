@@ -9,6 +9,10 @@ pub struct GitUpdate {
 pub enum GitUpdateBlock {
     DetachedHead,
     DirtyWorkingTree,
+    MissingLocalBranch,
+    MissingRemoteBranch,
+    Diverged,
+    AheadOfOrigin,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

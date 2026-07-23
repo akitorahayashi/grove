@@ -1,3 +1,4 @@
+use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 
 use crate::AppError;
@@ -8,12 +9,47 @@ use super::{
     WorktreeStatus,
 };
 
+/// An advisory lock for a Git common directory.
+///
+/// Command-backed clients hold an open, exclusively locked file for the
+/// guard's lifetime. Test clients use the default no-op guard unless they need
+/// to model cross-process coordination explicitly.
+pub(crate) struct RepositoryLock {
+    file: Option<File>,
+}
+
+impl RepositoryLock {
+    pub(super) fn acquire(common_directory: &Path) -> Result<Self, AppError> {
+        let path = common_directory.join("grove-operation.lock");
+        let file =
+            OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path)?;
+        file.lock()?;
+        Ok(Self { file: Some(file) })
+    }
+
+    fn noop() -> Self {
+        Self { file: None }
+    }
+}
+
+impl Drop for RepositoryLock {
+    fn drop(&mut self) {
+        if let Some(file) = &self.file {
+            let _ = File::unlock(file);
+        }
+    }
+}
+
 /// Read-only observation of repository and remote state, plus the fetch and
 /// availability checks that refresh what can be observed without advancing a
 /// local branch. This is the whole surface the status and inspection consumers
 /// need, so their doubles implement only this trait.
 pub trait RepositoryProbe: Sync {
     fn verify_available(&self) -> Result<(), AppError>;
+
+    fn lock_repository(&self, _common_directory: &Path) -> Result<RepositoryLock, AppError> {
+        Ok(RepositoryLock::noop())
+    }
 
     fn fetch(&self, repository: &Path, progress: &mut dyn GitProgressSink) -> Result<(), AppError>;
 
