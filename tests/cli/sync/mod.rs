@@ -1,139 +1,11 @@
 use predicates::prelude::*;
 
-use crate::harness::{TestContext, run_git};
+use crate::harness::{TestContext, commit_file, path_with_wrapper, run_git};
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-#[test]
-fn sync_progress_completes_when_stderr_is_a_terminal() {
-    use std::fs::File;
-    use std::io::Read;
-    use std::os::fd::FromRawFd;
-    use std::process::{Command, Stdio};
-    use std::time::{Duration, Instant};
-
-    let ctx = TestContext::new();
-    let remote = ctx.create_remote("blog");
-    let config = ctx.write_config(&format!(
-        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
-        remote.url()
-    ));
-    ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
-
-    let path = install_git_wrapper(
-        &ctx,
-        "if [ \"$1\" = rev-parse ] && [ \"${2:-}\" = --is-inside-work-tree ]; then sleep 0.3; fi",
-    );
-    let mut master = -1;
-    let mut slave = -1;
-    let opened = unsafe {
-        libc::openpty(
-            &mut master,
-            &mut slave,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-        )
-    };
-    assert_eq!(opened, 0, "failed to open pseudo-terminal");
-    let mut master = unsafe { File::from_raw_fd(master) };
-    let slave = unsafe { File::from_raw_fd(slave) };
-    let rendered = std::thread::spawn(move || {
-        let mut output = Vec::new();
-        let mut buffer = [0; 4096];
-        loop {
-            match master.read(&mut buffer) {
-                Ok(0) => break,
-                Ok(read) => output.extend_from_slice(&buffer[..read]),
-                Err(error) if error.raw_os_error() == Some(libc::EIO) => break,
-                Err(error) => panic!("failed to read pseudo-terminal: {error}"),
-            }
-        }
-        output
-    });
-
-    let mut child = Command::new(assert_cmd::cargo::cargo_bin!("gv"))
-        .current_dir(ctx.workspace())
-        .env("XDG_CACHE_HOME", ctx.cache_home())
-        .env("PATH", path)
-        .arg("--config")
-        .arg(config)
-        .arg("sync")
-        .stdout(Stdio::null())
-        .stderr(Stdio::from(slave))
-        .spawn()
-        .expect("failed to run gv");
-
-    let deadline = Instant::now() + Duration::from_secs(10);
-    let status = loop {
-        if let Some(status) = child.try_wait().expect("failed to poll gv") {
-            break status;
-        }
-        if Instant::now() >= deadline {
-            child.kill().expect("failed to kill deadlocked gv");
-            child.wait().expect("failed to reap deadlocked gv");
-            let rendered = rendered.join().expect("pseudo-terminal reader panicked");
-            panic!(
-                "gv did not finish while rendering progress to a terminal:\n{}",
-                String::from_utf8_lossy(&rendered)
-            );
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    };
-
-    let _rendered = rendered.join().expect("pseudo-terminal reader panicked");
-    assert!(status.success(), "gv exited with {status}");
-}
-
-#[test]
-fn sync_dry_run_plans_missing_clone_without_creating_destination() {
-    let ctx = TestContext::new();
-    let remote = ctx.create_remote("blog");
-    let config = ctx.write_config(&format!(
-        r#"
-version = 1
-
-[repos.blog]
-path = "blog"
-url = "{}"
-"#,
-        remote.url()
-    ));
-
-    ctx.cli()
-        .arg("--config")
-        .arg(config)
-        .arg("sync")
-        .arg("--dry-run")
-        .assert()
-        .success()
-        .stdout(predicate::str::is_empty())
-        .stderr(predicate::str::contains("Would clone 1 repository"))
-        .stderr(predicate::str::contains("+ blog"));
-
-    assert!(!ctx.workspace().join("blog").exists());
-}
-
-#[test]
-fn sync_dry_run_never_requires_or_creates_a_cache_root() {
-    let ctx = TestContext::new();
-    let config = ctx.write_config(
-        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"https://example.com/blog.git\"\n",
-    );
-
-    ctx.cli()
-        .env_remove("XDG_CACHE_HOME")
-        .env_remove("HOME")
-        .arg("--config")
-        .arg(config)
-        .arg("sync")
-        .arg("--dry-run")
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("Would clone 1 repository"))
-        .stderr(predicate::str::contains("cache directory").not());
-
-    assert!(!ctx.workspace().join("blog").exists());
-}
+mod cache;
+mod planning;
+mod progress;
+mod zoxide;
 
 #[test]
 fn sync_clones_missing_repository() {
@@ -165,83 +37,6 @@ url = "{}"
         .stderr(predicate::str::contains("⠙").not());
 
     assert!(ctx.workspace().join("blog").join(".git").exists());
-}
-
-#[test]
-fn sync_register_zoxide_adds_cloned_repository() {
-    let ctx = TestContext::new();
-    let remote = ctx.create_remote("blog");
-    let zoxide = FakeZoxide::new(&ctx);
-    let config = ctx.write_config(&format!(
-        r#"
-version = 1
-
-[repos.blog]
-path = "blog"
-url = "{}"
-"#,
-        remote.url()
-    ));
-
-    zoxide
-        .command(ctx.cli())
-        .arg("--config")
-        .arg(config)
-        .arg("sync")
-        .arg("-z")
-        .arg("blog")
-        .assert()
-        .success()
-        .stdout(predicate::str::is_empty())
-        .stderr(predicate::str::contains("Zoxide"))
-        .stderr(predicate::str::contains("+ blog added"));
-
-    let database = std::fs::read_to_string(zoxide.database()).expect("failed to read zoxide db");
-    assert!(
-        database
-            .lines()
-            .any(|line| line == resolved_repository_path(&ctx, "blog").display().to_string())
-    );
-}
-
-#[test]
-fn sync_register_zoxide_reports_existing_entry_without_adding() {
-    let ctx = TestContext::new();
-    let remote = ctx.create_remote("blog");
-    let zoxide = FakeZoxide::new(&ctx);
-    let config = ctx.write_config(&format!(
-        r#"
-version = 1
-
-[repos.blog]
-path = "blog"
-url = "{}"
-"#,
-        remote.url()
-    ));
-    std::fs::create_dir_all(&zoxide.data).expect("failed to create fake zoxide data");
-    std::fs::write(
-        zoxide.database(),
-        format!("{}\n", resolved_repository_path(&ctx, "blog").display()),
-    )
-    .expect("failed to seed zoxide db");
-
-    zoxide
-        .command(ctx.cli())
-        .arg("--config")
-        .arg(config)
-        .arg("sync")
-        .arg("--register-zoxide")
-        .arg("blog")
-        .assert()
-        .success()
-        .stdout(predicate::str::is_empty())
-        .stderr(predicate::str::contains("Zoxide"))
-        .stderr(predicate::str::contains("= blog already registered"))
-        .stderr(predicate::str::contains("+ blog added").not());
-
-    let database = std::fs::read_to_string(zoxide.database()).expect("failed to read zoxide db");
-    assert_eq!(database.lines().count(), 1);
 }
 
 #[test]
@@ -702,8 +497,9 @@ fn sync_reports_completed_update_when_original_branch_restoration_fails() {
     let repository = ctx.workspace().join("blog");
     run_git(&repository, &["switch", "-c", "feature"]);
     remote.add_commit("remote.txt", "remote\n");
-    let path = install_git_wrapper(
+    let path = path_with_wrapper(
         &ctx,
+        "sync-restore",
         "if [ \"$1\" = switch ] && [ \"${3:-}\" = feature ]; then echo restoration-failed >&2; exit 42; fi",
     );
 
@@ -740,8 +536,11 @@ fn sync_reports_merge_failure_and_successful_restoration() {
     let repository = ctx.workspace().join("blog");
     run_git(&repository, &["switch", "-c", "feature"]);
     remote.add_commit("remote.txt", "remote\n");
-    let path =
-        install_git_wrapper(&ctx, "if [ \"$1\" = merge ]; then echo merge-failed >&2; exit 42; fi");
+    let path = path_with_wrapper(
+        &ctx,
+        "sync-merge",
+        "if [ \"$1\" = merge ]; then echo merge-failed >&2; exit 42; fi",
+    );
 
     ctx.cli()
         .env("PATH", path)
@@ -1000,142 +799,6 @@ url = "https://user:credential@example.com/repo.git?password=secret-value"
         .stderr(predicate::str::contains("secret-value").not());
 }
 
-#[cfg(unix)]
-#[test]
-fn sync_seeds_cache_for_existing_uncached_repository() {
-    let ctx = TestContext::new();
-    let remote = ctx.create_remote("blog");
-
-    // A repository already on disk, cloned outside grove, with no cache entry.
-    let destination = ctx.workspace().join("blog");
-    run_git(ctx.workspace(), &["clone", &remote.url(), destination.to_str().unwrap()]);
-    assert_eq!(
-        std::fs::read_dir(ctx.cache_root()).map(|dir| dir.count()).unwrap_or(0),
-        0,
-        "no cache entry exists before sync",
-    );
-
-    let config = ctx.write_config(&format!(
-        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
-        remote.url()
-    ));
-
-    ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
-
-    // Sync seeded the cache from the existing clone.
-    ctx.cli()
-        .arg("cache")
-        .arg("list")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("blog.git"));
-}
-
-#[test]
-fn sync_seeds_cache_from_dirty_existing_repository() {
-    let ctx = TestContext::new();
-    let remote = ctx.create_remote("blog");
-
-    // An existing clone with an uncommitted change, and no cache entry.
-    let destination = ctx.workspace().join("blog");
-    run_git(ctx.workspace(), &["clone", &remote.url(), destination.to_str().unwrap()]);
-    std::fs::write(destination.join("README.md"), "local edit\n").unwrap();
-
-    let config = ctx.write_config(&format!(
-        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
-        remote.url()
-    ));
-
-    // A dirty repository is left untouched (a skip exits non-zero) yet still
-    // seeds the cache from its objects.
-    ctx.cli()
-        .arg("--config")
-        .arg(&config)
-        .arg("sync")
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("dirty working tree"));
-
-    ctx.cli()
-        .arg("cache")
-        .arg("list")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("blog.git"));
-
-    // The uncommitted change was preserved.
-    assert_eq!(std::fs::read_to_string(destination.join("README.md")).unwrap(), "local edit\n");
-}
-
-#[test]
-fn sync_seeds_cache_from_diverged_existing_repository() {
-    let ctx = TestContext::new();
-    let remote = ctx.create_remote("blog");
-
-    // An existing clone with a local-only commit: ahead of origin, so grove
-    // blocks the update. There is no cache entry.
-    let destination = ctx.workspace().join("blog");
-    run_git(ctx.workspace(), &["clone", &remote.url(), destination.to_str().unwrap()]);
-    std::fs::write(destination.join("local.txt"), "local\n").unwrap();
-    run_git(&destination, &["add", "local.txt"]);
-    run_git(
-        &destination,
-        &["-c", "user.name=T", "-c", "user.email=t@e.x", "commit", "-m", "local"],
-    );
-
-    let config = ctx.write_config(&format!(
-        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
-        remote.url()
-    ));
-
-    ctx.cli()
-        .arg("--config")
-        .arg(&config)
-        .arg("sync")
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("ahead of origin"));
-
-    ctx.cli()
-        .arg("cache")
-        .arg("list")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("blog.git"));
-}
-
-#[test]
-fn sync_seeds_cache_from_detached_head_existing_repository() {
-    let ctx = TestContext::new();
-    let remote = ctx.create_remote("blog");
-
-    // An existing clone on a detached HEAD: grove leaves it untouched, but it
-    // still seeds the cache. There is no cache entry.
-    let destination = ctx.workspace().join("blog");
-    run_git(ctx.workspace(), &["clone", &remote.url(), destination.to_str().unwrap()]);
-    run_git(&destination, &["checkout", "--detach"]);
-
-    let config = ctx.write_config(&format!(
-        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
-        remote.url()
-    ));
-
-    ctx.cli()
-        .arg("--config")
-        .arg(&config)
-        .arg("sync")
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("detached HEAD"));
-
-    ctx.cli()
-        .arg("cache")
-        .arg("list")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("blog.git"));
-}
-
 #[test]
 fn sync_redacts_credentials_in_successful_clone_output() {
     use std::os::unix::fs::PermissionsExt;
@@ -1191,8 +854,9 @@ fn sync_redacts_credentials_echoed_by_fetch_failure() {
         remote.url()
     ));
     ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
-    let path = install_git_wrapper(
+    let path = path_with_wrapper(
         &ctx,
+        "sync-fetch",
         "if [ \"$1\" = fetch ]; then echo 'fatal: GIT+SSH://user:credential@example.com/repo.git?%54OKEN=secret-value' >&2; exit 42; fi",
     );
 
@@ -1435,7 +1099,7 @@ fn sync_blocks_ahead_and_diverged_default_branches() {
         remote.url()
     ));
     ahead.cli().arg("--config").arg(&config).arg("sync").assert().success();
-    commit_local(&ahead.workspace().join("blog"), "ahead.txt");
+    commit_file(&ahead.workspace().join("blog"), "ahead.txt");
     ahead
         .cli()
         .arg("--config")
@@ -1461,7 +1125,7 @@ fn sync_blocks_ahead_and_diverged_default_branches() {
         remote.url()
     ));
     diverged.cli().arg("--config").arg(&config).arg("sync").assert().success();
-    commit_local(&diverged.workspace().join("blog"), "local.txt");
+    commit_file(&diverged.workspace().join("blog"), "local.txt");
     remote.add_commit("remote.txt", "remote\n");
     run_git(&diverged.workspace().join("blog"), &["fetch", "origin"]);
     diverged
@@ -1546,33 +1210,4 @@ fn configured_default_branch_overrides_stale_origin_head() {
         .assert()
         .success()
         .stderr(predicate::str::contains("~ blog main"));
-}
-
-fn commit_local(repository: &std::path::Path, file: &str) {
-    std::fs::write(repository.join(file), "local\n").unwrap();
-    run_git(repository, &["add", file]);
-    run_git(
-        repository,
-        &["-c", "user.name=Grove Test", "-c", "user.email=grove@example.com", "commit", "-m", file],
-    );
-}
-
-#[cfg(unix)]
-fn install_git_wrapper(ctx: &TestContext, behavior: &str) -> std::ffi::OsString {
-    use std::os::unix::fs::PermissionsExt;
-
-    let command = std::process::Command::new("sh").args(["-c", "command -v git"]).output().unwrap();
-    let real_git = String::from_utf8_lossy(&command.stdout).trim().to_string();
-    let bin = ctx.root().join("git-wrapper-bin");
-    std::fs::create_dir(&bin).unwrap();
-    let wrapper = bin.join("git");
-    std::fs::write(&wrapper, format!("#!/bin/sh\n{behavior}\nexec \"{real_git}\" \"$@\"\n"))
-        .unwrap();
-    let mut permissions = std::fs::metadata(&wrapper).unwrap().permissions();
-    permissions.set_mode(0o755);
-    std::fs::set_permissions(&wrapper, permissions).unwrap();
-    let mut paths =
-        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect::<Vec<_>>();
-    paths.insert(0, bin);
-    std::env::join_paths(paths).unwrap()
 }

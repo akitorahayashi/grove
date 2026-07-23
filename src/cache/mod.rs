@@ -791,17 +791,23 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let remote = make_remote(&tmp.path().join("origin"), false);
         let cache_root = tmp.path().join("cache");
-        let store = Store::with_root(cache_root);
+        let store = Store::with_root(cache_root.clone());
         let git = CommandGitClient::default();
         let url = url_of(&remote);
 
         store
             .place(&git, &url, &tmp.path().join("a"), None, None, &mut NoopGitProgressSink)
             .unwrap();
-        let created =
-            store.list().unwrap()[0].modified().expect("placement records an update time");
-
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        let marker = single_entry(&cache_root).join("updated");
+        let known_older_time =
+            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1);
+        fs::File::options()
+            .write(true)
+            .open(&marker)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(known_older_time))
+            .unwrap();
+        let created = fs::metadata(&marker).unwrap().modified().unwrap();
 
         store
             .place(&git, &url, &tmp.path().join("b"), None, None, &mut NoopGitProgressSink)

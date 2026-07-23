@@ -45,7 +45,7 @@ just coverage
 
 Runs `cargo tarpaulin` with the llvm engine against a dedicated
 `target/tarpaulin` directory, producing stdout and HTML reports under
-`coverage/`, with a 30 percent floor.
+`coverage/`, with an 86 percent floor.
 
 ## Continuous integration
 
