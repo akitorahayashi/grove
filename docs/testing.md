@@ -11,13 +11,17 @@ binaries plus a shared fixture module:
 
 - `tests/cli.rs` is the crate root for CLI boundary behavior. It pulls in
   `tests/cli/`, one file per subcommand: `cache.rs`, `clone.rs`, `init.rs`,
-  `refresh.rs`, `status.rs`, `sync.rs`, `validate.rs`.
+  `status.rs`, and `validate.rs`, plus responsibility-oriented `refresh/` and
+  `sync/` modules for planning, updates, safety, cache, progress, and zoxide
+  behavior.
 - `tests/library.rs` is the crate root for public library-facade behavior. It
-  pulls in `tests/library/`: `facade.rs`, `unknown_repository_fails.rs`,
-  `validate.rs`.
+  pulls in `tests/library/`: `error_contract.rs`, `facade.rs`,
+  `unknown_repository_fails.rs`, and `validate.rs`.
 - `tests/harness/test_context.rs` provides `TestContext`, shared by both
   binaries: a temporary workspace and cache home, a `gv` command pre-wired to
   them, and Git remote/seed repository setup through `run_git`.
+- `tests/harness/git_process.rs` owns shared local-commit and Git-wrapper
+  fixtures used by failure-path suites.
 
 Filesystem and process tests use temporary directories. Git observation parsers
 are tested against independent machine-readable fixtures. Status concurrency
@@ -59,3 +63,8 @@ CI runs four reusable workflows orchestrated by `ci-workflows.yml`:
 
 GitHub Actions pinning policy is documented in
 [Contributing](../CONTRIBUTING.md).
+
+Tag releases first verify that the `v` tag matches the single workspace package
+version reported by Cargo metadata. The reusable static-check and Linux/macOS
+test workflows must then pass before release preparation, artifact upload, and
+publication become reachable.

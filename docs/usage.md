@@ -50,7 +50,10 @@ working tree or the checked-out branch.
 `gv status --fetch` refreshes remote-tracking state before reporting.
 Repositories are inspected concurrently with at most eight live tasks in both
 modes. Fetching status serializes linked worktrees sharing a Git common
-directory, matching sync and refresh. Report entries preserve selection order.
+directory, matching sync and refresh. Its local repository, origin, and remote
+URL preflight completes before network access, so a missing or mismatched
+origin is never fetched. The common-directory lock remains held through the
+reported post-fetch observations. Report entries preserve selection order.
 
 ## Sync
 
@@ -139,8 +142,10 @@ entry only reduces transfer and never yields an incorrect clone.
 
 On each use the entry is created when absent, refreshed when present, rebuilt
 when unusable, and repointed when a different default branch is requested.
-Within one process, tasks sharing a URL are serialized; concurrent `gv`
-processes operating on the same entry are not coordinated.
+Advisory global and per-entry locks coordinate placement, seeding, listing, and
+cleaning across `gv` processes. The cache root and lock directory are
+owner-only on supported platforms, and interrupted staging directories are
+recovered under the entry lock.
 
 `gv sync` also seeds the cache from repositories already on disk. After the
 update phase, each reachable existing repository whose URL has no entry — one
@@ -185,7 +190,12 @@ cache and returns a `CloneReport` carrying the resulting `CacheOutcome`. Sync
 and refresh report entries expose the structured blocked-reason detail through
 `blocked_details()`, returning `BlockedReasonDetails` such as a remote-URL
 mismatch's actual and expected values, so callers reproduce the CLI diagnostics.
-`cli` returns an `ExitCode` and does not terminate its host process.
+`AppError::kind()` exposes stable categories without exposing the error storage
+layout. Domain accessors retain typed details and underlying causes through
+`std::error::Error::source`; Git and zoxide failures expose process kind,
+command, exit code, and bounded diagnostics. `StatusEntry::absolute_path()` and
+`source_config()` return `&Path`, including non-UTF-8 paths on Unix. `cli`
+returns an `ExitCode` and does not terminate its host process.
 
 ```rust
 let report = grove::validate(Some("/workspace/grove.toml".into()))?;

@@ -89,10 +89,13 @@ src/
     selection.rs
     url.rs
   git/
+    branch_update.rs
+    cache_entry.rs
     client.rs
     command.rs
     default_branch.rs
     mod.rs
+    probe.rs
     progress.rs
     remote.rs
     tracking.rs
@@ -132,9 +135,12 @@ worktrees that would finish on the same default branch. The cache use case lists
 and removes cache entries.
 
 `cache` owns the local clone cache: a bare, single-branch entry per verbatim
-remote URL, with entry layout, URL keying, per-entry locking, placement that
-borrows objects through `--reference --dissociate`, and seeding from an existing
-local clone. The sync, clone, and cache use cases share it.
+remote URL, with entry layout, URL keying, advisory global and per-entry file
+locking, placement that borrows objects through `--reference --dissociate`, and
+seeding from an existing local clone. Placement, seeding, listing, named
+removal, and whole-cache cleaning use one lock order across processes. The
+owner-only cache root contains stable lock files and only real entry
+directories are inspected. The sync, clone, and cache use cases share it.
 
 `phases` owns phase-structured bounded-parallel execution. `events` owns the
 phase-generic event, sink, and progress adapter; `run` owns the check and worker
@@ -161,16 +167,21 @@ appends the nonexistent suffix. In-root aliases resolve to one operational
 identity while retaining the configured display path.
 
 `git` owns Git availability, strict probe grammars, progress parsing, clone and
-fetch execution, and default-branch mutation. Worktree branch and cleanliness
-come from one Porcelain v2 observation. Local and remote default-branch refs come
-from one exact ref observation, while divergence, origin HEAD, remote URL, and
-the Git common directory retain their separate lifetimes. Git 2.23.0 is the
-minimum because updates use `git switch`. Expected absence statuses are declared
-per probe; other failures and malformed output remain errors. Mutation
-re-observes worktree and ref state at its boundary. Sync records restoration
+fetch execution, and default-branch mutation. `command` owns the common process
+runner and bounded progress diagnostics; `probe`, `cache_entry`, and
+`branch_update` own their corresponding command families. Worktree branch and
+cleanliness come from one Porcelain v2 observation. Local and remote
+default-branch refs come from one exact ref observation, while divergence,
+origin HEAD, remote URL, and the Git common directory retain their separate
+lifetimes. Git 2.23.0 is the minimum because updates use `git switch`. Expected
+absence statuses are declared per probe; other failures and malformed output
+remain errors. Fetches and default-branch mutations use an advisory lock in the
+Git common directory. Mutation holds it from the final readiness observation
+through merge and restoration or refresh completion. Sync records restoration
 separately from the primary update result. Refresh leaves successful worktrees
-on the default branch and reports update failures after a successful switch with
-the previous branch preserved.
+on the default branch and reports update failures after a successful switch
+with the previous branch preserved. Git processes outside grove do not
+participate in this advisory protocol and remain able to race grove operations.
 
 Cache placement revalidates the destination's existing ancestor immediately
 before creating directories and invoking Git. A filesystem actor can still
@@ -181,13 +192,21 @@ API provides no portable atomic confinement primitive for this residual race.
 uses an initial database snapshot, adds missing entries with per-path outcomes,
 and uses one final snapshot to classify successful adds.
 
+`error` owns opaque application failures. `AppErrorKind` provides stable
+categories, domain accessors expose typed configuration, cache, argument, Git,
+and zoxide details, and the standard error source chain retains underlying
+parsing, I/O, and process-spawn failures. Process exits expose command, exit
+status, and bounded diagnostics while `Display` remains the human rendering.
+
 ## Public facade
 
 `src/lib.rs` exports `cli`, `clone`, `refresh`, `status`, `sync`, and
 `validate`. It also exports the reports, their blocked-reason details, outcomes,
-and `AppError` needed to consume those calls. Owner modules, process clients,
-dependency traits, the phase engine, the cache store, and repository inspection
-remain private.
+and opaque error vocabulary needed to consume those calls. Status entries retain
+absolute and source-configuration paths as `Path` values while keeping the
+configured display label separate. Owner modules, process clients, dependency
+traits, the phase engine, the cache store, and repository inspection remain
+private.
 
 ## Data flow
 
@@ -196,7 +215,7 @@ CLI or root facade
   -> config discovery, include loading, and validation
   -> repository selection
   -> app use case
-  -> Git and optional zoxide boundaries
+  -> Git, cache filesystem, and optional zoxide boundaries
   -> typed report
   -> terminal-safe CLI rendering or library caller
 ```
