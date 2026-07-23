@@ -25,10 +25,47 @@ impl BranchDivergence {
     }
 }
 
-/// Contract for Git operations owned by grove.
-pub trait GitClient: Sync {
+/// Read-only observation of repository and remote state, plus the fetch and
+/// availability checks that refresh what can be observed without advancing a
+/// local branch. This is the whole surface the status and inspection consumers
+/// need, so their doubles implement only this trait.
+pub trait RepositoryProbe: Sync {
     fn verify_available(&self) -> Result<(), AppError>;
 
+    fn fetch(&self, repository: &Path, progress: &mut dyn GitProgressSink) -> Result<(), AppError>;
+
+    fn common_directory(&self, repository: &Path) -> Result<PathBuf, AppError>;
+
+    fn is_work_tree(&self, repository: &Path) -> Result<bool, AppError>;
+
+    fn current_branch(&self, repository: &Path) -> Result<Option<String>, AppError>;
+
+    fn working_tree_clean(&self, repository: &Path) -> Result<bool, AppError>;
+
+    fn remote_url(&self, repository: &Path) -> Result<Option<RemoteUrl>, AppError>;
+
+    fn default_branch(
+        &self,
+        repository: &Path,
+        configured: Option<&BranchName>,
+    ) -> Result<Option<String>, AppError>;
+
+    fn local_branch_exists(&self, repository: &Path, branch: &str) -> Result<bool, AppError>;
+
+    fn remote_branch_exists(&self, repository: &Path, branch: &str) -> Result<bool, AppError>;
+
+    fn branch_divergence(
+        &self,
+        repository: &Path,
+        branch: &str,
+    ) -> Result<BranchDivergence, AppError>;
+
+    fn short_revision(&self, repository: &Path, reference: &str) -> Result<String, AppError>;
+}
+
+/// Creation and maintenance of the bare, single-branch cache entries and the
+/// reference-based placement of working clones from them.
+pub trait CacheEntry: Sync {
     /// Create a bare, single-branch cache entry at `entry`. When `branch` is
     /// `Some`, that branch is tracked; otherwise the remote HEAD branch is.
     /// When `reference` is `Some`, objects are borrowed from that local
@@ -72,37 +109,10 @@ pub trait GitClient: Sync {
         reference: &Path,
         progress: &mut dyn GitProgressSink,
     ) -> Result<(), AppError>;
+}
 
-    fn fetch(&self, repository: &Path, progress: &mut dyn GitProgressSink) -> Result<(), AppError>;
-
-    fn common_directory(&self, repository: &Path) -> Result<PathBuf, AppError>;
-
-    fn is_work_tree(&self, repository: &Path) -> Result<bool, AppError>;
-
-    fn current_branch(&self, repository: &Path) -> Result<Option<String>, AppError>;
-
-    fn working_tree_clean(&self, repository: &Path) -> Result<bool, AppError>;
-
-    fn remote_url(&self, repository: &Path) -> Result<Option<RemoteUrl>, AppError>;
-
-    fn default_branch(
-        &self,
-        repository: &Path,
-        configured: Option<&BranchName>,
-    ) -> Result<Option<String>, AppError>;
-
-    fn local_branch_exists(&self, repository: &Path, branch: &str) -> Result<bool, AppError>;
-
-    fn remote_branch_exists(&self, repository: &Path, branch: &str) -> Result<bool, AppError>;
-
-    fn branch_divergence(
-        &self,
-        repository: &Path,
-        branch: &str,
-    ) -> Result<BranchDivergence, AppError>;
-
-    fn short_revision(&self, repository: &Path, reference: &str) -> Result<String, AppError>;
-
+/// Advancing and switching a repository's local default branch.
+pub trait DefaultBranch: Sync {
     fn update_default_branch(
         &self,
         repository: &Path,
@@ -115,6 +125,13 @@ pub trait GitClient: Sync {
         branch: &str,
     ) -> Result<GitRefreshOutcome, AppError>;
 }
+
+/// The full Git surface grove owns, composed from the focused traits. Any type
+/// that implements all three satisfies it, so consumers bound only the traits
+/// they use while use cases that need the whole surface bound this.
+pub trait GitClient: RepositoryProbe + CacheEntry + DefaultBranch {}
+
+impl<T: RepositoryProbe + CacheEntry + DefaultBranch> GitClient for T {}
 
 pub trait GitProgressSink {
     fn progress(&mut self, progress: GitProgress) -> Result<(), AppError>;

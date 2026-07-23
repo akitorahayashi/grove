@@ -8,7 +8,7 @@ use crate::git::CommandGitClient;
 use crate::phases::EventSink;
 
 fn default_context() -> AppContext<CommandGitClient> {
-    AppContext::default()
+    AppContext::new(CommandGitClient::default())
 }
 
 pub fn status(
@@ -48,14 +48,16 @@ pub fn clone(url: String, destination: Option<PathBuf>) -> Result<clone::Report,
 }
 
 pub(crate) fn cache_list() -> Result<Vec<crate::cache::EntryInfo>, AppError> {
-    cache::list()
+    let ctx = default_context();
+    cache::list(ctx.cache()?)
 }
 
 pub(crate) fn cache_clean(
     config_path: Option<PathBuf>,
     targets: Vec<String>,
 ) -> Result<cache::CleanReport, AppError> {
-    cache::clean(config_path.as_deref(), &targets)
+    let ctx = default_context();
+    cache::clean(ctx.cache()?, config_path.as_deref(), &targets)
 }
 
 pub(crate) fn init(directory: PathBuf) -> Result<init::Report, AppError> {

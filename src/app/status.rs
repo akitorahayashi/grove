@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use crate::AppError;
 use crate::app::AppContext;
 use crate::config;
-use crate::git::{GitClient, NoopGitProgressSink, urls_match};
+use crate::git::{GitClient, NoopGitProgressSink, RepositoryProbe, urls_match};
 use crate::inspection::{self, BranchReadiness};
 use crate::phases::workers;
 use crate::repositories::RepositoryDefinition;
@@ -191,7 +191,7 @@ pub fn execute(
 /// keyed by Git common directory, matching sync and refresh, so linked
 /// worktrees sharing a common directory are serialized.
 fn collect_entries(
-    git: &impl GitClient,
+    git: &impl RepositoryProbe,
     repositories: &[&RepositoryDefinition],
     fetch: bool,
     parallelism: usize,
@@ -218,12 +218,12 @@ fn collect_entries(
 // paths; those never fetch (`status_for_repository` reports them Missing or
 // Invalid), so keying them on their own path is the harmless fallback the
 // status --fetch design specifies.
-fn status_resource(git: &impl GitClient, repository: &RepositoryDefinition) -> PathBuf {
+fn status_resource(git: &impl RepositoryProbe, repository: &RepositoryDefinition) -> PathBuf {
     git.common_directory(repository.path()).unwrap_or_else(|_| repository.path().to_path_buf())
 }
 
 fn status_for_repository(
-    git: &impl GitClient,
+    git: &impl RepositoryProbe,
     repository: &RepositoryDefinition,
     fetch: bool,
 ) -> Result<StatusEntry, AppError> {
@@ -241,7 +241,7 @@ fn status_for_repository(
         return Ok(StatusEntry::from_repository(
             repository,
             None,
-            StatusCondition::Invalid("destination exists but is not a Git repository".to_string()),
+            StatusCondition::Invalid(inspection::destination_not_git_repository().to_string()),
             None,
             None,
         ));
@@ -287,7 +287,7 @@ fn status_for_repository(
 }
 
 fn default_branch_status(
-    git: &impl GitClient,
+    git: &impl RepositoryProbe,
     repository: &RepositoryDefinition,
     branch: &str,
 ) -> Result<Option<DefaultBranchStatus>, AppError> {
@@ -307,60 +307,16 @@ mod tests {
     use std::sync::{Arc, Barrier};
 
     use super::{AppError, StatusCondition, collect_entries};
-    use crate::git::{
-        BranchDivergence, GitClient, GitProgressSink, GitRefreshOutcome, GitUpdateOutcome,
-    };
+    use crate::git::{BranchDivergence, GitProgressSink, RepositoryProbe};
     use crate::repositories::{BranchName, RemoteUrl, RepositoryDefinition, RepositoryName};
 
     struct BarrierGit {
         barrier: Arc<Barrier>,
     }
 
-    impl GitClient for BarrierGit {
+    impl RepositoryProbe for BarrierGit {
         fn verify_available(&self) -> Result<(), AppError> {
             Ok(())
-        }
-
-        fn cache_create(
-            &self,
-            _url: &RemoteUrl,
-            _entry: &Path,
-            _branch: Option<&str>,
-            _reference: Option<&Path>,
-            _progress: &mut dyn GitProgressSink,
-        ) -> Result<String, AppError> {
-            unreachable!("status never creates cache entries")
-        }
-
-        fn cache_update(
-            &self,
-            _entry: &Path,
-            _progress: &mut dyn GitProgressSink,
-        ) -> Result<(), AppError> {
-            unreachable!("status never updates cache entries")
-        }
-
-        fn cache_retarget(
-            &self,
-            _entry: &Path,
-            _branch: &str,
-            _progress: &mut dyn GitProgressSink,
-        ) -> Result<(), AppError> {
-            unreachable!("status never retargets cache entries")
-        }
-
-        fn cache_verify(&self, _entry: &Path) -> Result<bool, AppError> {
-            unreachable!("status never verifies cache entries")
-        }
-
-        fn clone_with_reference(
-            &self,
-            _url: &RemoteUrl,
-            _destination: &Path,
-            _reference: &Path,
-            _progress: &mut dyn GitProgressSink,
-        ) -> Result<(), AppError> {
-            unreachable!("status never clones repositories")
         }
 
         fn fetch(
@@ -422,22 +378,6 @@ mod tests {
 
         fn short_revision(&self, _repository: &Path, _reference: &str) -> Result<String, AppError> {
             Ok("0000000".to_string())
-        }
-
-        fn update_default_branch(
-            &self,
-            _repository: &Path,
-            _branch: &str,
-        ) -> Result<GitUpdateOutcome, AppError> {
-            unreachable!("status never updates the default branch")
-        }
-
-        fn refresh_default_branch(
-            &self,
-            _repository: &Path,
-            _branch: &str,
-        ) -> Result<GitRefreshOutcome, AppError> {
-            unreachable!("status never refreshes the default branch")
         }
     }
 

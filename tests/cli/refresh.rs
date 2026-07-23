@@ -24,6 +24,27 @@ fn refresh_missing_repository_fails_without_cloning() {
 }
 
 #[test]
+fn refresh_runs_without_the_cache_environment() {
+    // refresh never touches the clone cache, so with the cache location
+    // unresolvable it must still reach its own diagnosis rather than failing on
+    // the cache environment.
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    let config = single_repository_config(&ctx, "blog", &remote.url(), None);
+
+    ctx.cli()
+        .env_remove("XDG_CACHE_HOME")
+        .env_remove("HOME")
+        .arg("--config")
+        .arg(config)
+        .arg("refresh")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("x blog repository is missing; run gv sync to clone it"))
+        .stderr(predicate::str::contains("cache directory").not());
+}
+
+#[test]
 fn refresh_alias_updates_only_selected_repository_and_stays_on_default_branch() {
     let ctx = TestContext::new();
     let first = ctx.create_remote("first");

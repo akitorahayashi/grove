@@ -1,8 +1,15 @@
 //! Report scaffolding shared by the sync and refresh use cases. The outcome
 //! vocabularies differ per use case, so the entry is generic over them.
 
-use crate::inspection::BlockedReasonDetails;
 use crate::repositories::RepositoryDefinition;
+
+/// The structured counterpart of a diagnostic that a report entry carries
+/// beyond its message string, so a caller can render the offending values. This
+/// is report vocabulary shared by the sync and refresh entries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BlockedReasonDetails {
+    RemoteUrlMismatch { actual: String, expected: String },
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry<O> {
@@ -49,7 +56,7 @@ impl<O> Entry<O> {
         &self.outcome
     }
 
-    pub(crate) fn blocked_details(&self) -> Option<&BlockedReasonDetails> {
+    pub fn blocked_details(&self) -> Option<&BlockedReasonDetails> {
         self.blocked_details.as_ref()
     }
 

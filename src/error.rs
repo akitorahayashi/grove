@@ -9,6 +9,12 @@ pub enum AppError {
     #[error("{0}")]
     ConfigError(String),
 
+    #[error("{0}")]
+    CacheState(String),
+
+    #[error("{0}")]
+    InvalidArguments(String),
+
     #[error("invalid repository name: {0}")]
     InvalidRepositoryName(String),
 
@@ -36,6 +42,14 @@ impl AppError {
         AppError::ConfigError(message.into())
     }
 
+    pub(crate) fn cache_state<S: Into<String>>(message: S) -> Self {
+        AppError::CacheState(message.into())
+    }
+
+    pub(crate) fn invalid_arguments<S: Into<String>>(message: S) -> Self {
+        AppError::InvalidArguments(message.into())
+    }
+
     pub(crate) fn git_command_failed<C: Into<String>, M: Into<String>>(
         command: C,
         message: M,
@@ -52,5 +66,13 @@ impl AppError {
 
     pub(crate) fn internal(message: impl Into<String>) -> Self {
         Self::Internal(message.into())
+    }
+
+    /// Whether this error is an internal application failure that must abort a
+    /// run rather than be demoted to a per-repository outcome. Owning this
+    /// decision here keeps the demotion policy from being re-encoded at each
+    /// use-case call site.
+    pub(crate) fn is_internal(&self) -> bool {
+        matches!(self, AppError::Internal(_))
     }
 }

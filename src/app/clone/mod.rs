@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use crate::AppError;
 use crate::app::AppContext;
-use crate::cache::{Outcome as CacheOutcome, Store};
+use crate::cache::Outcome as CacheOutcome;
 use crate::git::{GitClient, GitProgress, GitProgressSink};
 use crate::phases::{DiscardEvents, Event, EventSink};
 use crate::repositories::RemoteUrl;
@@ -59,7 +59,7 @@ pub(crate) fn execute_with_events(
     events: &impl EventSink<Phase>,
 ) -> Result<Report, AppError> {
     ctx.git().verify_available()?;
-    let cache = Store::from_env()?;
+    let cache = ctx.cache()?;
     let url = RemoteUrl::new(url)?;
     let destination = resolve_destination(&url, destination)?;
     let name = display_name(&destination);
@@ -104,7 +104,7 @@ fn default_destination_name(url: &str) -> Result<String, AppError> {
     let tail = trimmed.rsplit(['/', ':']).next().unwrap_or_default();
     let name = tail.strip_suffix(".git").unwrap_or(tail);
     if name.is_empty() || name == "." || name == ".." {
-        Err(AppError::config_error(
+        Err(AppError::invalid_arguments(
             "cannot infer a destination directory from the URL; specify one explicitly",
         ))
     } else {

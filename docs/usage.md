@@ -29,6 +29,10 @@ gv cache clean
 gv cache clean frontend
 ```
 
+`gv init`, with the alias `gv i`, creates `grove.toml` in the current directory.
+`gv validate`, with the alias `gv vl`, checks `grove.toml` without inspecting
+repositories.
+
 `gv clone`, with the alias `gv cl`, and `gv cache`, with the alias `gv c`, expose the
 local clone cache from the command line. `gv cache list`, with the alias `gv c ls`,
 and `gv cache clean`, with the alias `gv c cln`, operate on cache entries.
@@ -51,8 +55,8 @@ entries preserve selection order in either case.
 
 ## Sync
 
-`gv sync` clones missing repositories and safely updates existing repositories'
-default branches. Missing repositories are cloned through the local clone cache
+`gv sync`, with the alias `gv s`, clones missing repositories and safely updates
+existing repositories' default branches. Missing repositories are cloned through the local clone cache
 (see Clone Cache). Existing repositories are updated through system `git`
 commands, and an existing repository grove could reach whose URL has no cache
 entry seeds one from its local objects (see Clone Cache). Independent repository
@@ -178,8 +182,11 @@ The supported Rust API is the crate-root facade: `cli`, `clone`, `refresh`,
 and `refresh(config, targets, RefreshOptions)`. `SyncOptions` carries the
 dry-run and zoxide-registration flags, so library callers reach the same zoxide
 report as the CLI. `clone(url, destination)` clones a single URL through the
-cache and returns a `CloneReport` carrying the resulting `CacheOutcome`. `cli`
-returns an `ExitCode` and does not terminate its host process.
+cache and returns a `CloneReport` carrying the resulting `CacheOutcome`. Sync
+and refresh report entries expose the structured blocked-reason detail through
+`blocked_details()`, returning `BlockedReasonDetails` such as a remote-URL
+mismatch's actual and expected values, so callers reproduce the CLI diagnostics.
+`cli` returns an `ExitCode` and does not terminate its host process.
 
 ```rust
 let report = grove::validate(Some("/workspace/grove.toml".into()))?;

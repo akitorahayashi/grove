@@ -6,8 +6,8 @@ use std::process::{Command, Output, Stdio};
 
 use super::client::BranchDivergence;
 use super::{
-    GitClient, GitProgressSink, GitRefreshOutcome, GitUpdate, GitUpdateBlock, GitUpdateOutcome,
-    Restoration, default_branch, parse_git_progress,
+    CacheEntry, DefaultBranch, GitProgressSink, GitRefreshOutcome, GitUpdate, GitUpdateBlock,
+    GitUpdateOutcome, RepositoryProbe, Restoration, default_branch, parse_git_progress,
 };
 use crate::AppError;
 use crate::repositories::redact_urls_for_display;
@@ -24,29 +24,7 @@ impl Default for CommandGitClient {
     }
 }
 
-impl GitClient for CommandGitClient {
-    fn verify_available(&self) -> Result<(), AppError> {
-        let mut command = self.command();
-        command.arg("--version");
-        let output = command.output().map_err(|err| AppError::GitUnavailable(err.to_string()))?;
-        if !output.status.success() {
-            return Err(AppError::GitUnavailable(redact_urls_for_display(&command_message(
-                &output,
-            ))));
-        }
-
-        let version = parse_git_version(&stdout(&output)).ok_or_else(|| {
-            AppError::GitUnavailable("could not parse `git --version` output".to_string())
-        })?;
-        if version < (2, 23, 0) {
-            return Err(AppError::GitUnavailable(format!(
-                "Git 2.23.0 or newer is required; found {}.{}.{}",
-                version.0, version.1, version.2
-            )));
-        }
-        Ok(())
-    }
-
+impl CacheEntry for CommandGitClient {
     fn cache_create(
         &self,
         url: &RemoteUrl,
@@ -153,6 +131,30 @@ impl GitClient for CommandGitClient {
             )),
             progress,
         )
+    }
+}
+
+impl RepositoryProbe for CommandGitClient {
+    fn verify_available(&self) -> Result<(), AppError> {
+        let mut command = self.command();
+        command.arg("--version");
+        let output = command.output().map_err(|err| AppError::GitUnavailable(err.to_string()))?;
+        if !output.status.success() {
+            return Err(AppError::GitUnavailable(redact_urls_for_display(&command_message(
+                &output,
+            ))));
+        }
+
+        let version = parse_git_version(&stdout(&output)).ok_or_else(|| {
+            AppError::GitUnavailable("could not parse `git --version` output".to_string())
+        })?;
+        if version < (2, 23, 0) {
+            return Err(AppError::GitUnavailable(format!(
+                "Git 2.23.0 or newer is required; found {}.{}.{}",
+                version.0, version.1, version.2
+            )));
+        }
+        Ok(())
     }
 
     fn fetch(&self, repository: &Path, progress: &mut dyn GitProgressSink) -> Result<(), AppError> {
@@ -308,7 +310,9 @@ impl GitClient for CommandGitClient {
         }
         Ok(value)
     }
+}
 
+impl DefaultBranch for CommandGitClient {
     fn update_default_branch(
         &self,
         repository: &Path,
@@ -651,8 +655,9 @@ mod tests {
 
     use crate::AppError;
     use crate::git::{
-        CommandGitClient, GitClient, GitProgress, GitProgressSink, GitRefreshOutcome,
-        GitUpdateBlock, GitUpdateOutcome, NoopGitProgressSink, Restoration,
+        CacheEntry, CommandGitClient, DefaultBranch, GitProgress, GitProgressSink,
+        GitRefreshOutcome, GitUpdateBlock, GitUpdateOutcome, NoopGitProgressSink, RepositoryProbe,
+        Restoration,
     };
     use crate::repositories::{BranchName, RemoteUrl};
 

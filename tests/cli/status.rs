@@ -355,6 +355,33 @@ url = "git@example.com:blog.git"
 }
 
 #[test]
+fn status_runs_without_the_cache_environment() {
+    // status never touches the clone cache, so it must not require the cache
+    // location to be resolvable from the environment.
+    let ctx = TestContext::new();
+    let config = ctx.write_config(
+        r#"
+version = 1
+
+[repos.blog]
+path = "personal/blog"
+url = "git@example.com:blog.git"
+"#,
+    );
+
+    ctx.cli()
+        .env_remove("XDG_CACHE_HOME")
+        .env_remove("HOME")
+        .arg("--config")
+        .arg(config)
+        .arg("status")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("missing"))
+        .stderr(predicate::str::contains("cache directory").not());
+}
+
+#[test]
 fn status_reports_missing_git_before_inspection() {
     let ctx = TestContext::new();
     let config = ctx.write_config("version = 1\n");
