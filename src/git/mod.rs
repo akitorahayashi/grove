@@ -1,8 +1,11 @@
 //! Boundary for invoking the system git command.
 
+mod branch_update;
+mod cache_entry;
 mod client;
 mod command;
 mod default_branch;
+mod probe;
 mod progress;
 mod remote;
 mod tracking;
