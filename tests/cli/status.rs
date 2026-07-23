@@ -56,6 +56,58 @@ url = "{}"
         .stdout(predicate::str::contains("behind 1"));
 }
 
+#[cfg(unix)]
+#[test]
+fn status_fetch_observes_worktree_changes_made_after_fetch() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("frontend");
+    let config = ctx.write_config(&format!(
+        r#"
+version = 1
+
+[repos.frontend]
+path = "frontend"
+url = "{}"
+"#,
+        remote.url()
+    ));
+    ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
+
+    let real_git =
+        std::process::Command::new("sh").args(["-c", "command -v git"]).output().unwrap();
+    assert!(real_git.status.success());
+    let real_git = String::from_utf8_lossy(&real_git.stdout).trim().to_string();
+    let bin = ctx.root().join("git-bin");
+    std::fs::create_dir(&bin).unwrap();
+    let wrapper = bin.join("git");
+    std::fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\n\"{real_git}\" \"$@\"\nstatus=$?\nif [ \"$1\" = fetch ] && [ \"$status\" -eq 0 ]; then\n  printf 'changed after fetch\\n' > changed-after-fetch.txt\nfi\nexit \"$status\"\n"
+        ),
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&wrapper).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&wrapper, permissions).unwrap();
+    let mut paths = vec![bin];
+    paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()));
+    let path = std::env::join_paths(paths).unwrap();
+
+    ctx.cli()
+        .env("PATH", path)
+        .arg("--config")
+        .arg(config)
+        .arg("status")
+        .arg("--fetch")
+        .arg("frontend")
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match(r"(?m)^  State:\s+dirty$").unwrap());
+}
+
 #[test]
 fn status_fetch_reports_missing_repositories_alongside_fetched_ones() {
     let ctx = TestContext::new();
@@ -92,6 +144,51 @@ url = "git@example.com:backend.git"
         .stdout(predicate::str::contains("behind 1"))
         .stdout(predicate::str::contains("backend"))
         .stdout(predicate::str::contains("missing"));
+}
+
+#[test]
+fn status_reports_linked_worktrees_in_configuration_order() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("shared");
+    let initial_config = ctx.write_config(&format!(
+        "version = 1\n[repos.primary]\npath = \"primary\"\nurl = \"{}\"\n",
+        remote.url()
+    ));
+    ctx.cli().arg("--config").arg(&initial_config).arg("sync").assert().success();
+
+    let primary = ctx.workspace().join("primary");
+    let linked = ctx.workspace().join("linked");
+    run_git(&primary, &["worktree", "add", "-b", "feature-linked", linked.to_str().unwrap()]);
+    let config = ctx.write_config(&format!(
+        r#"
+version = 1
+
+[repos.primary]
+path = "primary"
+url = "{}"
+
+[repos.linked]
+path = "linked"
+url = "{}"
+"#,
+        remote.url(),
+        remote.url()
+    ));
+
+    let output = ctx
+        .cli()
+        .arg("--config")
+        .arg(config)
+        .arg("status")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let output = String::from_utf8(output).unwrap();
+
+    assert!(output.find("primary").unwrap() < output.find("linked").unwrap());
+    assert_eq!(output.matches("clean").count(), 2);
 }
 
 #[test]
@@ -201,6 +298,31 @@ url = "https://user:ghp_expected@example.com/org/repo.git?password=expected_secr
         .stdout(predicate::str::contains("actual_token").not())
         .stdout(predicate::str::contains("ghp_expected").not())
         .stdout(predicate::str::contains("expected_secret").not());
+}
+
+#[test]
+fn status_remote_mismatch_takes_precedence_over_dirty_worktree() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    let initial_config = ctx.write_config(&format!(
+        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
+        remote.url()
+    ));
+    ctx.cli().arg("--config").arg(&initial_config).arg("sync").assert().success();
+    std::fs::write(ctx.workspace().join("blog/draft.txt"), "dirty\n").unwrap();
+    let mismatched_config = ctx.write_config(
+        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"git@example.com:other.git\"\n",
+    );
+
+    ctx.cli()
+        .arg("--config")
+        .arg(mismatched_config)
+        .arg("status")
+        .arg("blog")
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match(r"(?m)^  State:\s+remote-mismatch$").unwrap())
+        .stdout(predicate::str::is_match(r"(?m)^  State:\s+dirty$").unwrap().not());
 }
 
 #[test]

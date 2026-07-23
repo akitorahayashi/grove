@@ -19,8 +19,10 @@ binaries plus a shared fixture module:
   binaries: a temporary workspace and cache home, a `gv` command pre-wired to
   them, and Git remote/seed repository setup through `run_git`.
 
-Filesystem and process tests use temporary directories. Concurrency tests use
-synchronization primitives rather than elapsed-time assumptions.
+Filesystem and process tests use temporary directories. Git observation parsers
+are tested against independent machine-readable fixtures. Status concurrency
+tests use synchronization primitives rather than elapsed-time assumptions and
+assert the externally visible ordering rather than Git invocation counts.
 
 ## Verify commands
 

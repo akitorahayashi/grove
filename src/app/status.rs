@@ -181,14 +181,14 @@ pub fn execute(
     ctx.git().verify_available()?;
     let config = config::load(config_path)?;
     let repositories = select_repositories(config.repositories(), targets)?;
-    let parallelism = if fetch { std::thread::available_parallelism()?.get() } else { 1 };
+    let parallelism = std::thread::available_parallelism()?.get();
 
     Ok(StatusReport::new(collect_entries(ctx.git(), &repositories, fetch, parallelism)?))
 }
 
 /// Collect one status entry per repository, preserving selection order. The
-/// no-fetch path stays serial; `--fetch` runs through bounded parallel workers
-/// keyed by Git common directory, matching sync and refresh, so linked
+/// no-fetch path uses bounded parallel workers; `--fetch` additionally keys
+/// workers by Git common directory, matching sync and refresh, so linked
 /// worktrees sharing a common directory are serialized.
 fn collect_entries(
     git: &impl RepositoryProbe,
@@ -197,10 +197,10 @@ fn collect_entries(
     parallelism: usize,
 ) -> Result<Vec<StatusEntry>, AppError> {
     if !fetch {
-        return repositories
-            .iter()
-            .map(|repository| status_for_repository(git, repository, fetch))
-            .collect();
+        let results = workers::map(repositories, parallelism, |repository| {
+            status_for_repository(git, repository, fetch)
+        })?;
+        return results.into_iter().collect();
     }
 
     let results = workers::map_keyed(
@@ -237,7 +237,17 @@ fn status_for_repository(
         ));
     }
 
-    if !repository.path().is_dir() || !git.is_work_tree(repository.path())? {
+    if !repository.path().is_dir() {
+        return Ok(StatusEntry::from_repository(
+            repository,
+            None,
+            StatusCondition::Invalid(inspection::destination_not_git_repository().to_string()),
+            None,
+            None,
+        ));
+    }
+
+    if fetch && !git.is_work_tree(repository.path())? {
         return Ok(StatusEntry::from_repository(
             repository,
             None,
@@ -260,8 +270,16 @@ fn status_for_repository(
         }
     }
 
-    let branch = git.current_branch(repository.path())?;
-    let clean = git.working_tree_clean(repository.path())?;
+    let Some(worktree) = git.worktree_status(repository.path())? else {
+        return Ok(StatusEntry::from_repository(
+            repository,
+            None,
+            StatusCondition::Invalid(inspection::destination_not_git_repository().to_string()),
+            None,
+            None,
+        ));
+    };
+    let branch = worktree.branch().map(str::to_string);
     let remote_mismatch = git.remote_url(repository.path())?.and_then(|actual| {
         if urls_match(&actual, repository.url()) {
             None
@@ -277,7 +295,7 @@ fn status_for_repository(
     };
     let condition = if remote_mismatch.is_some() {
         StatusCondition::RemoteMismatch
-    } else if clean {
+    } else if worktree.is_clean() {
         StatusCondition::Clean
     } else {
         StatusCondition::Dirty
@@ -307,11 +325,14 @@ mod tests {
     use std::sync::{Arc, Barrier};
 
     use super::{AppError, StatusCondition, collect_entries};
-    use crate::git::{BranchDivergence, GitProgressSink, RepositoryProbe};
+    use crate::git::{
+        BranchReferences, BranchTracking, GitProgressSink, RepositoryProbe, WorktreeStatus,
+    };
     use crate::repositories::{BranchName, RemoteUrl, RepositoryDefinition, RepositoryName};
 
     struct BarrierGit {
-        barrier: Arc<Barrier>,
+        fetch_barrier: Option<Arc<Barrier>>,
+        worktree_barrier: Option<Arc<Barrier>>,
     }
 
     impl RepositoryProbe for BarrierGit {
@@ -324,7 +345,9 @@ mod tests {
             _repository: &Path,
             _progress: &mut dyn GitProgressSink,
         ) -> Result<(), AppError> {
-            self.barrier.wait();
+            if let Some(barrier) = &self.fetch_barrier {
+                barrier.wait();
+            }
             Ok(())
         }
 
@@ -336,12 +359,11 @@ mod tests {
             Ok(true)
         }
 
-        fn current_branch(&self, _repository: &Path) -> Result<Option<String>, AppError> {
-            Ok(Some("main".to_string()))
-        }
-
-        fn working_tree_clean(&self, _repository: &Path) -> Result<bool, AppError> {
-            Ok(true)
+        fn worktree_status(&self, _repository: &Path) -> Result<Option<WorktreeStatus>, AppError> {
+            if let Some(barrier) = &self.worktree_barrier {
+                barrier.wait();
+            }
+            Ok(Some(WorktreeStatus::new(Some("main".to_string()), true)))
         }
 
         fn remote_url(&self, _repository: &Path) -> Result<Option<RemoteUrl>, AppError> {
@@ -356,28 +378,20 @@ mod tests {
             Ok(Some("main".to_string()))
         }
 
-        fn local_branch_exists(&self, _repository: &Path, _branch: &str) -> Result<bool, AppError> {
-            Ok(true)
-        }
-
-        fn remote_branch_exists(
+        fn branch_tracking(
             &self,
             _repository: &Path,
-            _branch: &str,
-        ) -> Result<bool, AppError> {
-            Ok(true)
+            _branch: &BranchName,
+        ) -> Result<BranchTracking, AppError> {
+            Ok(BranchTracking::Divergence { ahead: 0, behind: 0 })
         }
 
-        fn branch_divergence(
+        fn branch_references(
             &self,
             _repository: &Path,
-            _branch: &str,
-        ) -> Result<BranchDivergence, AppError> {
-            Ok(BranchDivergence::new(0, 0))
-        }
-
-        fn short_revision(&self, _repository: &Path, _reference: &str) -> Result<String, AppError> {
-            Ok("0000000".to_string())
+            _branch: &BranchName,
+        ) -> Result<BranchReferences, AppError> {
+            Ok(BranchReferences::Present)
         }
     }
 
@@ -406,8 +420,42 @@ mod tests {
         // barrier that never fills; concurrent execution lets all `count`
         // fetches arrive together and proceed. Each repository has a distinct
         // common directory, so none serialize against another.
-        let git = BarrierGit { barrier: Arc::new(Barrier::new(count)) };
+        let git = BarrierGit {
+            fetch_barrier: Some(Arc::new(Barrier::new(count))),
+            worktree_barrier: None,
+        };
         let entries = collect_entries(&git, &repositories, true, count).unwrap();
+
+        assert_eq!(entries.len(), count);
+        assert!(entries.iter().all(|entry| matches!(entry.condition(), StatusCondition::Clean)));
+    }
+
+    #[test]
+    fn status_runs_independent_repositories_concurrently() {
+        let root = tempfile::tempdir().unwrap();
+        let count = 4;
+        let definitions = (0..count)
+            .map(|index| {
+                let path = root.path().join(format!("repo{index}"));
+                std::fs::create_dir_all(&path).unwrap();
+                RepositoryDefinition::new(
+                    RepositoryName::new(&format!("repo{index}")).unwrap(),
+                    path,
+                    format!("repo{index}"),
+                    RemoteUrl::new("https://example.com/repo.git").unwrap(),
+                    None,
+                    root.path().join("grove.toml"),
+                    root.path().to_path_buf(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let repositories = definitions.iter().collect::<Vec<_>>();
+        let git = BarrierGit {
+            fetch_barrier: None,
+            worktree_barrier: Some(Arc::new(Barrier::new(count))),
+        };
+
+        let entries = collect_entries(&git, &repositories, false, count).unwrap();
 
         assert_eq!(entries.len(), count);
         assert!(entries.iter().all(|entry| matches!(entry.condition(), StatusCondition::Clean)));
