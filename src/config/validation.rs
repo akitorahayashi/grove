@@ -223,6 +223,7 @@ mod tests {
         let result =
             resolve_repository_path(base, "../../outside", root, Path::new("grove.toml"), "repo");
 
-        assert!(matches!(result, Err(AppError::ConfigError(_))));
+        let error = result.expect_err("path outside the root should fail");
+        assert_eq!(error.kind(), crate::AppErrorKind::Configuration);
     }
 }

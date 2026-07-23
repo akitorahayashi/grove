@@ -11,7 +11,7 @@ impl RepositoryName {
         if Self::is_valid(name) {
             Ok(Self(name.to_string()))
         } else {
-            Err(AppError::InvalidRepositoryName(name.to_string()))
+            Err(AppError::invalid_repository_name(name))
         }
     }
 

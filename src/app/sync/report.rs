@@ -7,12 +7,14 @@ use crate::phases::Summary as PhaseSummary;
 use crate::repositories::RepositoryDefinition;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Plan {
     Clone { url: String },
     Fetch { branch: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SkippedReason {
     DirtyWorkingTree,
 }
@@ -26,6 +28,7 @@ impl SkippedReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum BlockedReason {
     DestinationNotGitRepository,
     MissingOrigin,
@@ -64,6 +67,7 @@ impl BlockedReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Outcome {
     Planned(Plan),
     Cloned { url: String, cache: CacheOutcome },
@@ -207,6 +211,7 @@ impl Report {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ZoxideOutcome {
     WouldRegister,
     Added,

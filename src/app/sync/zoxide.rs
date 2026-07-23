@@ -145,12 +145,7 @@ fn zoxide_path(path: &Path, resolve_symlinks: bool) -> std::io::Result<PathBuf> 
 }
 
 fn failure_message(err: AppError) -> String {
-    match err {
-        AppError::ZoxideCommandFailed { message, .. } | AppError::ZoxideUnavailable(message) => {
-            message
-        }
-        other => other.to_string(),
-    }
+    err.zoxide_error().map_or_else(|| err.to_string(), |error| error.diagnostic().to_string())
 }
 
 #[cfg(test)]

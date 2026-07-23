@@ -28,9 +28,9 @@ impl StatusReport {
 pub struct StatusEntry {
     name: String,
     display_path: String,
-    absolute_path: String,
+    absolute_path: PathBuf,
     url: String,
-    source_config: String,
+    source_config: PathBuf,
     branch: Option<String>,
     condition: StatusCondition,
     default_branch: Option<DefaultBranchStatus>,
@@ -48,9 +48,9 @@ impl StatusEntry {
         Self {
             name: repository.name().as_str().to_string(),
             display_path: repository.display_path().to_string(),
-            absolute_path: repository.path().display().to_string(),
+            absolute_path: repository.path().to_path_buf(),
             url: repository.url().to_string(),
-            source_config: repository.source_config().display().to_string(),
+            source_config: repository.source_config().to_path_buf(),
             branch,
             condition,
             default_branch,
@@ -66,7 +66,7 @@ impl StatusEntry {
         &self.display_path
     }
 
-    pub fn absolute_path(&self) -> &str {
+    pub fn absolute_path(&self) -> &Path {
         &self.absolute_path
     }
 
@@ -74,7 +74,7 @@ impl StatusEntry {
         &self.url
     }
 
-    pub fn source_config(&self) -> &str {
+    pub fn source_config(&self) -> &Path {
         &self.source_config
     }
 
@@ -116,6 +116,7 @@ impl DefaultBranchStatus {
 }
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum BranchTrackingStatus {
     Divergence { ahead: u32, behind: u32 },
     MissingLocalBranch,
@@ -123,6 +124,7 @@ pub enum BranchTrackingStatus {
 }
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum StatusCondition {
     Missing,
     Invalid(String),
@@ -388,13 +390,38 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::{Arc, Barrier};
 
-    use super::{AppError, StatusCondition, collect_entries};
+    use super::{AppError, StatusCondition, StatusEntry, collect_entries};
     use crate::git::{BranchTracking, GitProgressSink, RepositoryProbe, WorktreeStatus};
     use crate::repositories::{BranchName, RemoteUrl, RepositoryDefinition, RepositoryName};
 
     struct BarrierGit {
         fetch_barrier: Option<Arc<Barrier>>,
         worktree_barrier: Option<Arc<Barrier>>,
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn status_entry_preserves_non_utf8_paths() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::{OsStrExt, OsStringExt};
+
+        let path = PathBuf::from(OsString::from_vec(b"/tmp/repository-\xff".to_vec()));
+        let source = PathBuf::from(OsString::from_vec(b"/tmp/config-\xfe.toml".to_vec()));
+        let repository = RepositoryDefinition::new(
+            RepositoryName::new("repository").unwrap(),
+            path.clone(),
+            "repository".to_string(),
+            RemoteUrl::new("https://example.com/repository.git").unwrap(),
+            None,
+            source.clone(),
+            PathBuf::from("/tmp"),
+        );
+
+        let entry =
+            StatusEntry::from_repository(&repository, None, StatusCondition::Missing, None, None);
+
+        assert_eq!(entry.absolute_path().as_os_str().as_bytes(), path.as_os_str().as_bytes());
+        assert_eq!(entry.source_config().as_os_str().as_bytes(), source.as_os_str().as_bytes());
     }
 
     impl RepositoryProbe for BarrierGit {

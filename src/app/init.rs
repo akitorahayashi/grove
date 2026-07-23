@@ -43,7 +43,7 @@ fn remove_partial_file(path: &Path, write_error: &std::io::Error) -> Result<(), 
     match fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(remove_error) if remove_error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(remove_error) => Err(AppError::Io(std::io::Error::other(format!(
+        Err(remove_error) => Err(AppError::from(std::io::Error::other(format!(
             "failed to write {}: {}; also failed to remove the partial file: {}",
             path.display(),
             write_error,
@@ -93,9 +93,7 @@ mod tests {
 
         let error = execute(directory.path()).expect_err("init should refuse existing config");
 
-        assert!(
-            matches!(error, crate::AppError::Io(error) if error.kind() == io::ErrorKind::AlreadyExists)
-        );
+        assert_eq!(error.io_error().map(io::Error::kind), Some(io::ErrorKind::AlreadyExists));
         assert_eq!(fs::read_to_string(path).expect("failed to read config"), "existing\n");
     }
 
@@ -108,9 +106,7 @@ mod tests {
         let error =
             write_template(FailingWriter, &path, b"version = 1\n").expect_err("write should fail");
 
-        assert!(
-            matches!(error, crate::AppError::Io(error) if error.kind() == io::ErrorKind::WriteZero)
-        );
+        assert_eq!(error.io_error().map(io::Error::kind), Some(io::ErrorKind::WriteZero));
         assert!(!path.exists());
     }
 

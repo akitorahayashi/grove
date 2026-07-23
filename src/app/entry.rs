@@ -7,6 +7,7 @@ use crate::repositories::RepositoryDefinition;
 /// beyond its message string, so a caller can render the offending values. This
 /// is report vocabulary shared by the sync and refresh entries.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum BlockedReasonDetails {
     RemoteUrlMismatch { actual: String, expected: String },
 }

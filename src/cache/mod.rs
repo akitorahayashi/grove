@@ -18,6 +18,7 @@ use crate::repositories::{
 
 /// What happened to the cache entry backing a placement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Outcome {
     /// No entry existed; a new one was created.
     Miss,
@@ -502,7 +503,6 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{LOCK_DIRECTORY, LockMode, Outcome, Store, entry_directory_name, temporary_path};
-    use crate::AppError;
     use crate::git::{CommandGitClient, NoopGitProgressSink};
     use crate::repositories::{BranchName, RemoteUrl};
 
@@ -745,7 +745,7 @@ mod tests {
         let error = store
             .place(&git, &url, &tmp.path().join("b"), None, None, &mut NoopGitProgressSink)
             .unwrap_err();
-        assert!(!matches!(error, AppError::Internal(_)));
+        assert!(!error.is_internal());
     }
 
     #[test]

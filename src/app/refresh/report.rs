@@ -20,6 +20,7 @@ impl Plan {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SkippedReason {
     DirtyWorkingTree,
 }
@@ -33,6 +34,7 @@ impl SkippedReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum BlockedReason {
     MissingRepository,
     DestinationNotGitRepository,
@@ -75,6 +77,7 @@ impl BlockedReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Outcome {
     Planned(Plan),
     Refreshed { branch: String, before: String, after: String, previous_branch: Option<String> },

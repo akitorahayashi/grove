@@ -19,6 +19,10 @@ fn root_facade_exposes_supported_use_cases_and_reports() {
     let _: fn(String, Option<PathBuf>) -> Result<grove::CloneReport, grove::AppError> =
         grove::clone;
     let _: fn() -> std::process::ExitCode = grove::cli;
+    let _: fn(&grove::AppError) -> grove::AppErrorKind = grove::AppError::kind;
+    let _: fn(&grove::GitError) -> grove::ProcessErrorKind = grove::GitError::kind;
+    let _: fn(&grove::GitError) -> Option<&str> = grove::GitError::command;
+    let _: fn(&grove::GitError) -> Option<i32> = grove::GitError::exit_code;
 
     let refresh_options = grove::RefreshOptions::new(true);
     assert!(refresh_options.dry_run());

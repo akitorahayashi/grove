@@ -15,18 +15,19 @@ impl RepositoryProbe for CommandGitClient {
     fn verify_available(&self) -> Result<(), AppError> {
         let mut command = self.command();
         command.arg("--version");
-        let output = command.output().map_err(|err| AppError::GitUnavailable(err.to_string()))?;
+        let output = command.output().map_err(AppError::git_unavailable_source)?;
         if !output.status.success() {
-            return Err(AppError::GitUnavailable(redact_urls_for_display(&command_message(
-                &output,
-            ))));
+            return Err(AppError::git_unavailable_status(
+                "git --version",
+                redact_urls_for_display(&command_message(&output)),
+                output.status.code(),
+            ));
         }
 
-        let version = parse_git_version(&stdout(&output)).ok_or_else(|| {
-            AppError::GitUnavailable("could not parse `git --version` output".to_string())
-        })?;
+        let version = parse_git_version(&stdout(&output))
+            .ok_or_else(|| AppError::git_unavailable("could not parse `git --version` output"))?;
         if version < (2, 23, 0) {
-            return Err(AppError::GitUnavailable(format!(
+            return Err(AppError::git_unavailable(format!(
                 "Git 2.23.0 or newer is required; found {}.{}.{}",
                 version.0, version.1, version.2
             )));
@@ -246,9 +247,10 @@ fn required_line(repository: &Path, args: &[&str], output: &Output) -> Result<St
 }
 
 fn probe_failure(repository: &Path, args: &[&str], output: &Output) -> AppError {
-    AppError::git_command_failed(
+    AppError::git_command_failed_status(
         format_probe(repository, args),
         redact_urls_for_display(&command_message(output)),
+        output.status.code(),
     )
 }
 

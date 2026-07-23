@@ -56,22 +56,23 @@ impl CommandGitClient {
     pub(super) fn git_probe(&self, repository: &Path, args: &[&str]) -> Result<Output, AppError> {
         let mut command = self.command();
         command.current_dir(repository).env("LC_ALL", "C").args(args);
-        command.output().map_err(|err| {
-            AppError::git_command_failed(format_probe(repository, args), err.to_string())
-        })
+        command
+            .output()
+            .map_err(|err| AppError::git_command_failed_source(format_probe(repository, args), err))
     }
 }
 
 fn run_required(mut command: Command, display: String) -> Result<Output, AppError> {
     let output = command
         .output()
-        .map_err(|err| AppError::git_command_failed(display.clone(), err.to_string()))?;
+        .map_err(|err| AppError::git_command_failed_source(display.clone(), err))?;
     if output.status.success() {
         Ok(output)
     } else {
-        Err(AppError::git_command_failed(
+        Err(AppError::git_command_failed_status(
             display,
             redact_urls_for_display(&command_message(&output)),
+            output.status.code(),
         ))
     }
 }
@@ -82,9 +83,8 @@ pub(super) fn run_with_progress(
     progress: &mut dyn GitProgressSink,
 ) -> Result<(), AppError> {
     command.stdout(Stdio::null()).stderr(Stdio::piped());
-    let mut child = command
-        .spawn()
-        .map_err(|err| AppError::git_command_failed(display.clone(), err.to_string()))?;
+    let mut child =
+        command.spawn().map_err(|err| AppError::git_command_failed_source(display.clone(), err))?;
     let mut stderr = match child.stderr.take() {
         Some(stderr) => stderr,
         None => {
@@ -107,7 +107,7 @@ pub(super) fn run_with_progress(
             Err(err) => {
                 if processing_error.is_none() {
                     processing_error =
-                        Some(AppError::git_command_failed(display.clone(), err.to_string()));
+                        Some(AppError::git_command_failed_source(display.clone(), err));
                 }
                 break;
             }
@@ -152,7 +152,7 @@ pub(super) fn run_with_progress(
     let status = child.wait().map_err(|err| {
         processing_error
             .take()
-            .unwrap_or_else(|| AppError::git_command_failed(display.clone(), err.to_string()))
+            .unwrap_or_else(|| AppError::git_command_failed_source(display.clone(), err))
     })?;
     if let Some(error) = processing_error {
         return Err(error);
@@ -160,7 +160,11 @@ pub(super) fn run_with_progress(
     if status.success() {
         Ok(())
     } else {
-        Err(AppError::git_command_failed(display, redact_urls_for_display(&diagnostics.render())))
+        Err(AppError::git_command_failed_status(
+            display,
+            redact_urls_for_display(&diagnostics.render()),
+            status.code(),
+        ))
     }
 }
 
@@ -276,7 +280,7 @@ mod tests {
             "diagnostic length was {} bytes",
             message.len()
         );
-        assert!(message.contains("[Git diagnostic output truncated]"));
+        assert!(message.contains("[Git diagnostic output truncated]"), "{message}");
         assert!(message.contains("final HTTPS://[redacted]@example.com/repo.git?token=[redacted]"));
         assert!(!message.contains("diagnostic-0000-"));
         assert!(!message.contains("secret"));
