@@ -49,11 +49,10 @@ pub(in crate::cli) fn run(
 
 fn run_list(output: &mut Output<'_>) -> Result<Completion, AppError> {
     let entries = api::cache_list()?;
-    let mut table = Table::new(["URL", "SIZE", "UPDATED"]);
+    let mut table = Table::new(["URL", "UPDATED"]);
     for entry in &entries {
         table.push_row(vec![
             Cell::new(safe_message(entry.url()), Paint::Bold),
-            Cell::new(format_size(entry.size_bytes()), Paint::Dimmed),
             Cell::new(updated(entry), Paint::Dimmed),
         ]);
     }
@@ -85,21 +84,6 @@ fn run_clean(
         ))?;
     }
     Ok(Completion::Success)
-}
-
-fn format_size(bytes: u64) -> String {
-    const UNITS: [&str; 4] = ["B", "KiB", "MiB", "GiB"];
-    let mut size = bytes as f64;
-    let mut unit = 0;
-    while size >= 1024.0 && unit < UNITS.len() - 1 {
-        size /= 1024.0;
-        unit += 1;
-    }
-    if unit == 0 {
-        format!("{bytes} {}", UNITS[unit])
-    } else {
-        format!("{size:.1} {}", UNITS[unit])
-    }
 }
 
 fn format_age(modified: SystemTime) -> Option<String> {

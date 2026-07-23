@@ -34,17 +34,12 @@ pub enum Outcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct EntryInfo {
     url: String,
-    size_bytes: u64,
     modified: Option<SystemTime>,
 }
 
 impl EntryInfo {
     pub(crate) fn url(&self) -> &str {
         &self.url
-    }
-
-    pub(crate) fn size_bytes(&self) -> u64 {
-        self.size_bytes
     }
 
     pub(crate) fn modified(&self) -> Option<SystemTime> {
@@ -154,7 +149,6 @@ impl Store {
             };
             infos.push(EntryInfo {
                 url,
-                size_bytes: directory_size(&container)?,
                 modified: fs::metadata(container.join("updated"))
                     .and_then(|meta| meta.modified())
                     .ok(),
@@ -480,20 +474,6 @@ fn touch_updated(container: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
-fn directory_size(path: &Path) -> Result<u64, AppError> {
-    let mut total = 0;
-    for entry in fs::read_dir(path)? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        if file_type.is_dir() {
-            total += directory_size(&entry.path())?;
-        } else {
-            total += fs::symlink_metadata(entry.path())?.len();
-        }
-    }
-    Ok(total)
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -505,6 +485,31 @@ mod tests {
     use super::{LOCK_DIRECTORY, LockMode, Outcome, Store, entry_directory_name, temporary_path};
     use crate::git::{CommandGitClient, NoopGitProgressSink};
     use crate::repositories::{BranchName, RemoteUrl};
+
+    #[cfg(unix)]
+    #[test]
+    fn list_reads_metadata_without_traversing_repository_contents() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = TempDir::new().unwrap();
+        let container = root.path().join("entry");
+        let inaccessible = container.join("git/objects/deep");
+        fs::create_dir_all(&inaccessible).unwrap();
+        fs::write(container.join("url"), "https://example.com/repository.git").unwrap();
+        fs::write(container.join("updated"), []).unwrap();
+        let mut permissions = fs::metadata(&inaccessible).unwrap().permissions();
+        permissions.set_mode(0o000);
+        fs::set_permissions(&inaccessible, permissions).unwrap();
+
+        let result = Store::with_root(root.path().to_path_buf()).list();
+
+        let mut permissions = fs::metadata(&inaccessible).unwrap().permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&inaccessible, permissions).unwrap();
+        let entries = result.expect("listing should not inspect repository contents");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].url(), "https://example.com/repository.git");
+    }
 
     fn run_git(directory: &Path, args: &[&str]) {
         let output =

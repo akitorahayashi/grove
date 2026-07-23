@@ -157,7 +157,7 @@ with a trailing `.git` removed. An existing non-empty destination is rejected,
 and `--config` is not accepted. It is a cache-accelerated `git clone`, not a
 reimplementation of every `git clone` option.
 
-`gv cache list` reports cached repositories with size and last-update age. `gv
+`gv cache list` reports cached repositories in `URL` and `UPDATED` columns. `gv
 cache clean` removes every entry; `gv cache clean <repo>...` removes the entries
 backing the named configured repositories.
 
