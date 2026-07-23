@@ -47,11 +47,10 @@ state as a table, or as a single-repository detail view when one repository is
 named. Plain `gv status` is read-only; neither it nor `--fetch` changes the
 working tree or the checked-out branch.
 
-`gv status --fetch` refreshes remote-tracking state before reporting. The fetch
-runs independent repositories concurrently with at most eight live tasks, while
-linked worktrees sharing a Git common directory remain serialized, matching sync
-and refresh. Without `--fetch`, repositories are inspected serially. Report
-entries preserve selection order in either case.
+`gv status --fetch` refreshes remote-tracking state before reporting.
+Repositories are inspected concurrently with at most eight live tasks in both
+modes. Fetching status serializes linked worktrees sharing a Git common
+directory, matching sync and refresh. Report entries preserve selection order.
 
 ## Sync
 

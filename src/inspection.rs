@@ -6,8 +6,8 @@
 //! per-use-case reason enums from drifting apart.
 
 use crate::AppError;
-use crate::git::{RepositoryProbe, urls_match};
-use crate::repositories::RepositoryDefinition;
+use crate::git::{BranchTracking, RepositoryProbe, urls_match};
+use crate::repositories::{BranchName, RepositoryDefinition};
 
 /// A repository's operability at an existing path, independent of any use
 /// case's vocabulary. The missing-path decision (clone vs. block) is left to
@@ -40,11 +40,14 @@ pub(crate) fn inspect(
         });
     }
 
-    if git.current_branch(repository.path())?.is_none() {
+    let Some(worktree) = git.worktree_status(repository.path())? else {
+        return Ok(Readiness::NotAWorkTree);
+    };
+    if worktree.branch().is_none() {
         return Ok(Readiness::DetachedHead);
     }
 
-    if !git.working_tree_clean(repository.path())? {
+    if !worktree.is_clean() {
         return Ok(Readiness::DirtyTree);
     }
 
@@ -69,14 +72,14 @@ pub(crate) fn branch_readiness(
     repository: &RepositoryDefinition,
     branch: &str,
 ) -> Result<BranchReadiness, AppError> {
-    if !git.local_branch_exists(repository.path(), branch)? {
-        return Ok(BranchReadiness::MissingLocal);
-    }
-    if !git.remote_branch_exists(repository.path(), branch)? {
-        return Ok(BranchReadiness::MissingRemote);
-    }
-    let divergence = git.branch_divergence(repository.path(), branch)?;
-    Ok(BranchReadiness::Divergence { ahead: divergence.ahead(), behind: divergence.behind() })
+    let branch = BranchName::new(branch)?;
+    Ok(match git.branch_tracking(repository.path(), &branch)? {
+        BranchTracking::MissingLocal => BranchReadiness::MissingLocal,
+        BranchTracking::MissingRemote => BranchReadiness::MissingRemote,
+        BranchTracking::Divergence { ahead, behind } => {
+            BranchReadiness::Divergence { ahead, behind }
+        }
+    })
 }
 
 pub(crate) fn destination_not_git_repository() -> &'static str {

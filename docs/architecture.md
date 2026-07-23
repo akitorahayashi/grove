@@ -95,7 +95,9 @@ src/
     mod.rs
     progress.rs
     remote.rs
+    tracking.rs
     update.rs
+    worktree.rs
   zoxide/
     client.rs
     command.rs
@@ -123,11 +125,11 @@ carrying the structured blocked-reason detail a caller renders beyond the
 message. It holds one module per subcommand and a facade that delegates to each
 without embedding command logic. Sync has check, clone/fetch preparation, update,
 seeding, and optional zoxide phases. Refresh has check, fetch, and
-default-branch refresh phases. Status inspects repositories serially, or, with
-`--fetch`, through bounded parallel workers keyed by Git common directory.
-Results retain selection order. Refresh blocks selected linked worktrees that
-would finish on the same default branch. The cache use case lists and removes
-cache entries.
+default-branch refresh phases. Status inspects repositories through bounded
+parallel workers. Fetching status additionally keys workers by Git common
+directory. Results retain selection order. Refresh blocks selected linked
+worktrees that would finish on the same default branch. The cache use case lists
+and removes cache entries.
 
 `cache` owns the local clone cache: a bare, single-branch entry per verbatim
 remote URL, with entry layout, URL keying, per-entry locking, placement that
@@ -159,9 +161,13 @@ appends the nonexistent suffix. In-root aliases resolve to one operational
 identity while retaining the configured display path.
 
 `git` owns Git availability, strict probe grammars, progress parsing, clone and
-fetch execution, and default-branch mutation. Git 2.23.0 is the minimum because
-updates use `git switch`. Expected absence statuses are declared per probe;
-other failures and malformed output remain errors. Sync records restoration
+fetch execution, and default-branch mutation. Worktree branch and cleanliness
+come from one Porcelain v2 observation. Local and remote default-branch refs come
+from one exact ref observation, while divergence, origin HEAD, remote URL, and
+the Git common directory retain their separate lifetimes. Git 2.23.0 is the
+minimum because updates use `git switch`. Expected absence statuses are declared
+per probe; other failures and malformed output remain errors. Mutation
+re-observes worktree and ref state at its boundary. Sync records restoration
 separately from the primary update result. Refresh leaves successful worktrees
 on the default branch and reports update failures after a successful switch with
 the previous branch preserved.

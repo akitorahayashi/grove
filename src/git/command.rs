@@ -4,10 +4,10 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-use super::client::BranchDivergence;
 use super::{
-    CacheEntry, DefaultBranch, GitProgressSink, GitRefreshOutcome, GitUpdate, GitUpdateBlock,
-    GitUpdateOutcome, RepositoryProbe, Restoration, default_branch, parse_git_progress,
+    BranchReferences, BranchTracking, CacheEntry, DefaultBranch, GitProgressSink,
+    GitRefreshOutcome, GitUpdate, GitUpdateBlock, GitUpdateOutcome, RepositoryProbe, Restoration,
+    WorktreeStatus, default_branch, parse_git_progress, tracking, worktree,
 };
 use crate::AppError;
 use crate::repositories::redact_urls_for_display;
@@ -206,22 +206,28 @@ impl RepositoryProbe for CommandGitClient {
         }
     }
 
-    fn current_branch(&self, repository: &Path) -> Result<Option<String>, AppError> {
-        let args = ["symbolic-ref", "--quiet", "--short", "HEAD"];
+    fn worktree_status(&self, repository: &Path) -> Result<Option<WorktreeStatus>, AppError> {
+        let args = ["status", "--porcelain=v2", "--branch", "--no-ahead-behind"];
         let output = self.git_probe(repository, &args)?;
-        match optional_probe(repository, &args, output, 1)? {
-            Some(output) => {
-                let value = required_line(repository, &args, &output)?;
-                BranchName::new(&value).map_err(|_| malformed_output(repository, &args, &value))?;
-                Ok(Some(value))
+        if !output.status.success() {
+            let message = command_message(&output);
+            if output.status.code() == Some(128)
+                && (message.contains("not a git repository")
+                    || message.contains("this operation must be run in a work tree"))
+            {
+                return Ok(None);
             }
-            None => Ok(None),
+            return Err(probe_failure(repository, &args, &output));
         }
-    }
 
-    fn working_tree_clean(&self, repository: &Path) -> Result<bool, AppError> {
-        let output = self.git_required(repository, &["status", "--porcelain"])?;
-        Ok(stdout(&output).trim().is_empty())
+        let output_text = stdout(&output);
+        let parsed = worktree::parse(&output_text)
+            .ok_or_else(|| malformed_output(repository, &args, &output_text))?;
+        let branch = match parsed.head() {
+            worktree::WorktreeHead::Branch(branch) => Some(branch.clone()),
+            worktree::WorktreeHead::DetachedMarker => self.symbolic_head_branch(repository)?,
+        };
+        Ok(Some(WorktreeStatus::new(branch, parsed.is_clean())))
     }
 
     fn remote_url(&self, repository: &Path) -> Result<Option<RemoteUrl>, AppError> {
@@ -264,51 +270,35 @@ impl RepositoryProbe for CommandGitClient {
         Ok(Some(parsed))
     }
 
-    fn local_branch_exists(&self, repository: &Path, branch: &str) -> Result<bool, AppError> {
-        let reference = format!("refs/heads/{branch}");
-        let args = ["show-ref", "--verify", "--quiet", &reference];
-        let output = self.git_probe(repository, &args)?;
-        Ok(optional_probe(repository, &args, output, 1)?.is_some())
-    }
-
-    fn remote_branch_exists(&self, repository: &Path, branch: &str) -> Result<bool, AppError> {
-        let reference = format!("refs/remotes/origin/{branch}");
-        let args = ["show-ref", "--verify", "--quiet", &reference];
-        let output = self.git_probe(repository, &args)?;
-        Ok(optional_probe(repository, &args, output, 1)?.is_some())
-    }
-
-    fn branch_divergence(
+    fn branch_tracking(
         &self,
         repository: &Path,
-        branch: &str,
-    ) -> Result<BranchDivergence, AppError> {
-        let range = format!("{branch}...origin/{branch}");
-        let args = ["rev-list", "--left-right", "--count", &range];
-        let output = self.git_required(repository, &args)?;
-        let stdout = stdout(&output);
-        let mut parts = stdout.split_whitespace();
-        let parsed = parts.next().zip(parts.next());
-        let Some((ahead, behind)) = parsed else {
-            return Err(malformed_output(repository, &args, &stdout));
-        };
-        if parts.next().is_some() {
-            return Err(malformed_output(repository, &args, &stdout));
+        branch: &BranchName,
+    ) -> Result<BranchTracking, AppError> {
+        let revisions = self.branch_revisions(repository, branch)?;
+        if revisions.local().is_none() {
+            return Ok(BranchTracking::MissingLocal);
         }
-        let ahead =
-            ahead.parse::<u32>().map_err(|_| malformed_output(repository, &args, &stdout))?;
-        let behind =
-            behind.parse::<u32>().map_err(|_| malformed_output(repository, &args, &stdout))?;
-        Ok(BranchDivergence::new(ahead, behind))
+        if revisions.remote().is_none() {
+            return Ok(BranchTracking::MissingRemote);
+        }
+        let (ahead, behind) = self.divergence_counts(repository, branch)?;
+        Ok(BranchTracking::Divergence { ahead, behind })
     }
 
-    fn short_revision(&self, repository: &Path, reference: &str) -> Result<String, AppError> {
-        let output = self.git_required(repository, &["rev-parse", "--short", reference])?;
-        let value = required_line(repository, &["rev-parse", "--short", reference], &output)?;
-        if !value.chars().all(|character| character.is_ascii_hexdigit()) {
-            return Err(malformed_output(repository, &["rev-parse", "--short", reference], &value));
+    fn branch_references(
+        &self,
+        repository: &Path,
+        branch: &BranchName,
+    ) -> Result<BranchReferences, AppError> {
+        let revisions = self.branch_revisions(repository, branch)?;
+        if revisions.local().is_none() {
+            Ok(BranchReferences::MissingLocal)
+        } else if revisions.remote().is_none() {
+            Ok(BranchReferences::MissingRemote)
+        } else {
+            Ok(BranchReferences::Present)
         }
-        Ok(value)
     }
 }
 
@@ -393,21 +383,88 @@ impl CommandGitClient {
         required_line(entry, &args, &output)
     }
 
+    fn symbolic_head_branch(&self, repository: &Path) -> Result<Option<String>, AppError> {
+        let args = ["symbolic-ref", "--quiet", "--short", "HEAD"];
+        let output = self.git_probe(repository, &args)?;
+        match optional_probe(repository, &args, output, 1)? {
+            Some(output) => {
+                let value = required_line(repository, &args, &output)?;
+                BranchName::new(&value).map_err(|_| malformed_output(repository, &args, &value))?;
+                Ok(Some(value))
+            }
+            None => Ok(None),
+        }
+    }
+
+    fn branch_revisions(
+        &self,
+        repository: &Path,
+        branch: &BranchName,
+    ) -> Result<tracking::BranchRevisions, AppError> {
+        let format = "--format=%(refname)%09%(objectname:short)";
+        let local = format!("refs/heads/{branch}");
+        let remote = format!("refs/remotes/origin/{branch}");
+        let args = ["for-each-ref", format, &local, &remote];
+        let output = self.git_required(repository, &args)?;
+        let output_text = stdout(&output);
+        tracking::parse(&output_text, branch)
+            .ok_or_else(|| malformed_output(repository, &args, &output_text))
+    }
+
+    fn divergence_counts(
+        &self,
+        repository: &Path,
+        branch: &BranchName,
+    ) -> Result<(u32, u32), AppError> {
+        let range = format!("{branch}...origin/{branch}");
+        let args = ["rev-list", "--left-right", "--count", &range];
+        let output = self.git_required(repository, &args)?;
+        let output_text = stdout(&output);
+        let mut parts = output_text.split_whitespace();
+        let Some((ahead, behind)) = parts.next().zip(parts.next()) else {
+            return Err(malformed_output(repository, &args, &output_text));
+        };
+        if parts.next().is_some() {
+            return Err(malformed_output(repository, &args, &output_text));
+        }
+        let ahead =
+            ahead.parse::<u32>().map_err(|_| malformed_output(repository, &args, &output_text))?;
+        let behind =
+            behind.parse::<u32>().map_err(|_| malformed_output(repository, &args, &output_text))?;
+        Ok((ahead, behind))
+    }
+
     fn prepare_default_branch(
         &self,
         repository: &Path,
         branch: &str,
     ) -> Result<Result<DefaultBranchPreparation, GitUpdateBlock>, AppError> {
-        let Some(current_branch) = self.current_branch(repository)? else {
+        let branch = BranchName::new(branch)?;
+        let status_args = ["status", "--porcelain=v2", "--branch", "--no-ahead-behind"];
+        let status = self.worktree_status(repository)?.ok_or_else(|| {
+            AppError::git_command_failed(
+                format_probe(repository, &status_args),
+                "destination is not a Git work tree",
+            )
+        })?;
+        let Some(current_branch) = status.branch().map(str::to_string) else {
             return Ok(Err(GitUpdateBlock::DetachedHead));
         };
-        if !self.working_tree_clean(repository)? {
+        if !status.is_clean() {
             return Ok(Err(GitUpdateBlock::DirtyWorkingTree));
         }
 
-        let before = self.short_revision(repository, branch)?;
-        let after = self.short_revision(repository, &format!("origin/{branch}"))?;
-        Ok(Ok(DefaultBranchPreparation { current_branch, update: GitUpdate::new(before, after) }))
+        let revisions = self.branch_revisions(repository, &branch)?;
+        let before = revisions.local().ok_or_else(|| {
+            missing_update_reference(repository, &branch, "local default-branch reference")
+        })?;
+        let after = revisions.remote().ok_or_else(|| {
+            missing_update_reference(repository, &branch, "remote default-branch reference")
+        })?;
+        Ok(Ok(DefaultBranchPreparation {
+            current_branch,
+            update: GitUpdate::new(before.to_string(), after.to_string()),
+        }))
     }
 
     fn switch_default_branch(
@@ -508,6 +565,17 @@ fn malformed_output(repository: &Path, args: &[&str], output: &str) -> AppError 
         "Git returned malformed output".to_string()
     };
     AppError::git_command_failed(format_probe(repository, args), description)
+}
+
+fn missing_update_reference(repository: &Path, branch: &BranchName, description: &str) -> AppError {
+    let format = "--format=%(refname)%09%(objectname:short)";
+    let local = format!("refs/heads/{branch}");
+    let remote = format!("refs/remotes/origin/{branch}");
+    let args = ["for-each-ref", format, &local, &remote];
+    AppError::git_command_failed(
+        format_probe(repository, &args),
+        format!("Git returned no {description}"),
+    )
 }
 
 fn parse_git_version(output: &str) -> Option<(u32, u32, u32)> {
@@ -692,17 +760,16 @@ mod tests {
     }
 
     #[test]
-    fn current_branch_returns_error_for_fatal_probe_failure() {
+    fn worktree_status_returns_error_for_fatal_probe_failure() {
         let root = TempDir::new().unwrap();
         let repository = root.path().join("repo");
         run_git(root.path(), &["init", "-b", "main", repository.to_str().unwrap()]);
         std::fs::write(repository.join(".git").join("config"), "[bad\n").unwrap();
 
-        let result = CommandGitClient::default().current_branch(&repository);
+        let result = CommandGitClient::default().worktree_status(&repository);
 
         assert!(result.is_err_and(|err| {
-            err.to_string().contains("git command failed")
-                && err.to_string().contains("symbolic-ref")
+            err.to_string().contains("git command failed") && err.to_string().contains("status")
         }));
     }
 
@@ -728,9 +795,45 @@ mod tests {
         run_git(&repository, &["checkout", "--detach"]);
         let client = CommandGitClient::default();
 
-        assert_eq!(client.current_branch(&repository).unwrap(), None);
+        assert_eq!(client.worktree_status(&repository).unwrap().unwrap().branch(), None);
         assert_eq!(client.remote_url(&repository).unwrap(), None);
-        assert!(!client.local_branch_exists(&repository, "missing").unwrap());
+        assert_eq!(
+            client.branch_tracking(&repository, &BranchName::new("missing").unwrap()).unwrap(),
+            crate::git::BranchTracking::MissingLocal
+        );
+    }
+
+    #[test]
+    fn worktree_status_distinguishes_detached_head_from_a_branch_named_detached() {
+        let root = TempDir::new().unwrap();
+        let repository = root.path().join("repo");
+        initialize_committed_repository(&repository);
+        let client = CommandGitClient::default();
+
+        run_git(&repository, &["switch", "-c", "(detached)"]);
+        let named = client.worktree_status(&repository).unwrap().unwrap();
+        assert_eq!(named.branch(), Some("(detached)"));
+        assert!(named.is_clean());
+
+        run_git(&repository, &["checkout", "--detach"]);
+        let detached = client.worktree_status(&repository).unwrap().unwrap();
+        assert_eq!(detached.branch(), None);
+    }
+
+    #[test]
+    fn worktree_status_reports_unborn_dirty_and_non_worktree_states() {
+        let root = TempDir::new().unwrap();
+        let repository = root.path().join("repo");
+        run_git(root.path(), &["init", "-b", "main", repository.to_str().unwrap()]);
+        let client = CommandGitClient::default();
+
+        let unborn = client.worktree_status(&repository).unwrap().unwrap();
+        assert_eq!(unborn.branch(), Some("main"));
+        assert!(unborn.is_clean());
+
+        std::fs::write(repository.join("untracked.txt"), "dirty\n").unwrap();
+        assert!(!client.worktree_status(&repository).unwrap().unwrap().is_clean());
+        assert_eq!(client.worktree_status(root.path()).unwrap(), None);
     }
 
     #[test]
@@ -757,8 +860,8 @@ mod tests {
                 root.path(),
                 &format!("if [ \"$1\" = rev-list ]; then\n  echo '{malformed}'\n  exit 0\nfi"),
             );
-            let result =
-                CommandGitClient::with_executable(&wrapper).branch_divergence(&repository, "main");
+            let result = CommandGitClient::with_executable(&wrapper)
+                .branch_tracking(&repository, &BranchName::new("main").unwrap());
             assert!(result.is_err_and(|error| error.to_string().contains("malformed output")));
             std::fs::remove_file(wrapper).unwrap();
         }
@@ -766,15 +869,16 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn short_revision_rejects_empty_output() {
+    fn empty_reference_output_reports_missing_local() {
         let root = TempDir::new().unwrap();
         let repository = root.path().join("repo");
         initialize_committed_repository(&repository);
-        let wrapper = git_wrapper(root.path(), "if [ \"$1\" = rev-parse ]; then\n  exit 0\nfi");
+        let wrapper = git_wrapper(root.path(), "if [ \"$1\" = for-each-ref ]; then\n  exit 0\nfi");
 
-        let result = CommandGitClient::with_executable(wrapper).short_revision(&repository, "main");
+        let result = CommandGitClient::with_executable(wrapper)
+            .branch_tracking(&repository, &BranchName::new("main").unwrap());
 
-        assert!(result.is_err_and(|error| error.to_string().contains("empty output")));
+        assert_eq!(result.unwrap(), crate::git::BranchTracking::MissingLocal);
     }
 
     #[test]
@@ -805,6 +909,19 @@ mod tests {
             client.update_default_branch(&repository, "main").unwrap(),
             GitUpdateOutcome::Blocked(GitUpdateBlock::DetachedHead)
         );
+    }
+
+    #[test]
+    fn update_reports_a_missing_reference_as_an_update_failure() {
+        let root = TempDir::new().unwrap();
+        let repository = root.path().join("repo");
+        initialize_committed_repository(&repository);
+
+        let result = CommandGitClient::default().update_default_branch(&repository, "main");
+
+        assert!(result.is_err_and(|error| {
+            error.to_string().contains("Git returned no remote default-branch reference")
+        }));
     }
 
     #[test]
@@ -964,7 +1081,7 @@ mod tests {
         let repository = create_updatable_repository(root.path());
         let wrapper = git_wrapper(
             root.path(),
-            "if [ \"$1\" = rev-parse ] && [ \"${3:-}\" = main ] && [ \"$(git rev-parse main)\" = \"$(git rev-parse origin/main)\" ]; then\n  echo post-merge-probe-failed >&2\n  exit 42\nfi",
+            "if [ \"$1\" = for-each-ref ] && [ \"$(git rev-parse main)\" = \"$(git rev-parse origin/main)\" ]; then\n  echo post-merge-probe-failed >&2\n  exit 42\nfi",
         );
 
         let outcome = CommandGitClient::with_executable(wrapper)

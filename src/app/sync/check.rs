@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
 use crate::AppError;
-use crate::git::GitClient;
+use crate::git::{BranchReferences, GitClient};
 use crate::inspection::{self, Readiness};
-use crate::repositories::RepositoryDefinition;
+use crate::repositories::{BranchName, RepositoryDefinition};
 
 use super::{BlockedReason, Entry, Outcome, Plan, SkippedReason};
 
@@ -100,11 +100,14 @@ fn default_branch_block_reason(
     repository: &RepositoryDefinition,
     default_branch: &str,
 ) -> Result<Option<BlockedReason>, AppError> {
-    if !git.local_branch_exists(repository.path(), default_branch)? {
-        return Ok(Some(BlockedReason::MissingLocalBranch { branch: default_branch.to_string() }));
+    let branch = BranchName::new(default_branch)?;
+    match git.branch_references(repository.path(), &branch)? {
+        BranchReferences::MissingLocal => {
+            Ok(Some(BlockedReason::MissingLocalBranch { branch: default_branch.to_string() }))
+        }
+        BranchReferences::MissingRemote => {
+            Ok(Some(BlockedReason::MissingRemoteBranch { branch: default_branch.to_string() }))
+        }
+        BranchReferences::Present => Ok(None),
     }
-    if !git.remote_branch_exists(repository.path(), default_branch)? {
-        return Ok(Some(BlockedReason::MissingRemoteBranch { branch: default_branch.to_string() }));
-    }
-    Ok(None)
 }
