@@ -325,6 +325,101 @@ fn status_remote_mismatch_takes_precedence_over_dirty_worktree() {
         .stdout(predicate::str::is_match(r"(?m)^  State:\s+dirty$").unwrap().not());
 }
 
+#[cfg(unix)]
+#[test]
+fn status_fetch_never_contacts_a_mismatched_remote() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    let initial_config = ctx.write_config(&format!(
+        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
+        remote.url()
+    ));
+    ctx.cli().arg("--config").arg(&initial_config).arg("sync").assert().success();
+    let repository = ctx.workspace().join("blog");
+    run_git(&repository, &["remote", "set-url", "origin", "https://example.com/actual.git"]);
+    let config = ctx.write_config(
+        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"https://example.com/expected.git\"\n",
+    );
+    let marker = ctx.root().join("fetch-ran");
+    let path = install_git_wrapper(
+        &ctx,
+        "if [ \"$1\" = fetch ]; then : > \"$GROVE_FETCH_MARKER\"; exit 91; fi",
+    );
+
+    ctx.cli()
+        .env("PATH", path)
+        .env("GROVE_FETCH_MARKER", &marker)
+        .arg("--config")
+        .arg(config)
+        .arg("status")
+        .arg("--fetch")
+        .arg("blog")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("remote-mismatch"))
+        .stdout(predicate::str::contains("fetch-failed").not());
+    assert!(!marker.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn status_fetch_reports_missing_origin_without_fetching() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    let config = ctx.write_config(&format!(
+        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
+        remote.url()
+    ));
+    ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
+    run_git(&ctx.workspace().join("blog"), &["remote", "remove", "origin"]);
+    let marker = ctx.root().join("fetch-ran");
+    let path = install_git_wrapper(
+        &ctx,
+        "if [ \"$1\" = fetch ]; then : > \"$GROVE_FETCH_MARKER\"; exit 91; fi",
+    );
+
+    ctx.cli()
+        .env("PATH", path)
+        .env("GROVE_FETCH_MARKER", &marker)
+        .arg("--config")
+        .arg(config)
+        .arg("status")
+        .arg("--fetch")
+        .arg("blog")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("remote origin is missing"))
+        .stdout(predicate::str::contains("fetch-failed").not());
+    assert!(!marker.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn status_fetch_surfaces_common_directory_failures() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    let config = ctx.write_config(&format!(
+        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
+        remote.url()
+    ));
+    ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
+    let path = install_git_wrapper(
+        &ctx,
+        "if [ \"$1\" = rev-parse ] && [ \"$2\" = --git-common-dir ]; then echo common-directory-failed >&2; exit 42; fi",
+    );
+
+    ctx.cli()
+        .env("PATH", path)
+        .arg("--config")
+        .arg(config)
+        .arg("status")
+        .arg("--fetch")
+        .arg("blog")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("common-directory-failed"));
+}
+
 #[test]
 fn status_target_reports_missing_local_default_branch() {
     let ctx = TestContext::new();
@@ -408,6 +503,8 @@ url = "{}"
 
     ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
     run_git(&ctx.workspace().join("blog"), &["remote", "set-url", "origin", "/does/not/exist"]);
+    let config =
+        ctx.write_config("version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"/does/not/exist\"\n");
 
     ctx.cli()
         .arg("--config")
@@ -516,4 +613,24 @@ fn status_reports_missing_git_before_inspection() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("git is not available"));
+}
+
+#[cfg(unix)]
+fn install_git_wrapper(ctx: &TestContext, behavior: &str) -> std::ffi::OsString {
+    use std::os::unix::fs::PermissionsExt;
+
+    let output = std::process::Command::new("sh").args(["-c", "command -v git"]).output().unwrap();
+    assert!(output.status.success());
+    let real_git = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let bin = ctx.root().join("status-git-bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let wrapper = bin.join("git");
+    std::fs::write(&wrapper, format!("#!/bin/sh\n{behavior}\nexec \"{real_git}\" \"$@\"\n"))
+        .unwrap();
+    let mut permissions = std::fs::metadata(&wrapper).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&wrapper, permissions).unwrap();
+    let mut paths = vec![bin];
+    paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()));
+    std::env::join_paths(paths).unwrap()
 }

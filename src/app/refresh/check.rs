@@ -5,11 +5,12 @@ use crate::git::GitClient;
 use crate::inspection::{self, BranchReadiness, Readiness};
 use crate::repositories::RepositoryDefinition;
 
-use super::{BlockedReason, BlockedReasonDetails, Entry, Outcome, Plan, SkippedReason};
+use super::{BlockedReason, BlockedReasonDetails, Entry, Outcome, SkippedReason};
 
 pub(super) enum Decision {
     Entry(Entry),
     Fetch { common_directory: PathBuf, default_branch: String },
+    DryRun { common_directory: PathBuf, default_branch: String },
 }
 
 pub(super) fn repository(
@@ -50,10 +51,10 @@ pub(super) fn repository(
         if let Some(reason) = refresh_block_reason(git, repository, &default_branch)? {
             return Ok(Decision::Entry(Entry::new(repository, Outcome::Blocked { reason })));
         }
-        return Ok(Decision::Entry(Entry::new(
-            repository,
-            Outcome::Planned(Plan::new(default_branch)),
-        )));
+        return Ok(Decision::DryRun {
+            common_directory: git.common_directory(repository.path())?,
+            default_branch,
+        });
     }
 
     let common_directory = git.common_directory(repository.path())?;

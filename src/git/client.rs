@@ -4,10 +4,7 @@ use std::path::{Path, PathBuf};
 use crate::AppError;
 use crate::repositories::{BranchName, RemoteUrl};
 
-use super::{
-    BranchReferences, BranchTracking, GitProgress, GitRefreshOutcome, GitUpdateOutcome,
-    WorktreeStatus,
-};
+use super::{BranchTracking, GitProgress, GitRefreshOutcome, GitUpdateOutcome, WorktreeStatus};
 
 /// An advisory lock for a Git common directory.
 ///
@@ -72,12 +69,6 @@ pub trait RepositoryProbe: Sync {
         repository: &Path,
         branch: &BranchName,
     ) -> Result<BranchTracking, AppError>;
-
-    fn branch_references(
-        &self,
-        repository: &Path,
-        branch: &BranchName,
-    ) -> Result<BranchReferences, AppError>;
 }
 
 /// Creation and maintenance of the bare, single-branch cache entries and the

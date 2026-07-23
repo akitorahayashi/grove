@@ -16,6 +16,6 @@ pub use client::{
 pub use command::CommandGitClient;
 pub use progress::{GitProgress, parse_git_progress};
 pub use remote::urls_match;
-pub use tracking::{BranchReferences, BranchTracking};
+pub use tracking::BranchTracking;
 pub use update::{GitRefreshOutcome, GitUpdate, GitUpdateBlock, GitUpdateOutcome, Restoration};
 pub use worktree::WorktreeStatus;

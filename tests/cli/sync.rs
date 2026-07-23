@@ -114,6 +114,28 @@ url = "{}"
 }
 
 #[test]
+fn sync_dry_run_never_requires_or_creates_a_cache_root() {
+    let ctx = TestContext::new();
+    let config = ctx.write_config(
+        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"https://example.com/blog.git\"\n",
+    );
+
+    ctx.cli()
+        .env_remove("XDG_CACHE_HOME")
+        .env_remove("HOME")
+        .arg("--config")
+        .arg(config)
+        .arg("sync")
+        .arg("--dry-run")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Would clone 1 repository"))
+        .stderr(predicate::str::contains("cache directory").not());
+
+    assert!(!ctx.workspace().join("blog").exists());
+}
+
+#[test]
 fn sync_clones_missing_repository() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
@@ -1417,6 +1439,15 @@ fn sync_blocks_ahead_and_diverged_default_branches() {
     ahead
         .cli()
         .arg("--config")
+        .arg(&config)
+        .arg("sync")
+        .arg("--dry-run")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("main is ahead of origin/main"));
+    ahead
+        .cli()
+        .arg("--config")
         .arg(config)
         .arg("sync")
         .assert()
@@ -1432,6 +1463,16 @@ fn sync_blocks_ahead_and_diverged_default_branches() {
     diverged.cli().arg("--config").arg(&config).arg("sync").assert().success();
     commit_local(&diverged.workspace().join("blog"), "local.txt");
     remote.add_commit("remote.txt", "remote\n");
+    run_git(&diverged.workspace().join("blog"), &["fetch", "origin"]);
+    diverged
+        .cli()
+        .arg("--config")
+        .arg(&config)
+        .arg("sync")
+        .arg("--dry-run")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("main has diverged from origin/main"));
     diverged
         .cli()
         .arg("--config")

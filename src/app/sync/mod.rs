@@ -92,7 +92,6 @@ pub(crate) fn execute_with_events(
     events: &impl EventSink<Phase>,
 ) -> Result<Report, AppError> {
     ctx.git().verify_available()?;
-    let cache = ctx.cache()?;
     let config = config::load(config_path)?;
     let repositories = select_repositories(config.repositories(), targets)?;
     let parallelism = std::thread::available_parallelism()?.get();
@@ -126,6 +125,8 @@ pub(crate) fn execute_with_events(
         }
     }
 
+    let needs_cache = !options.dry_run() && (!preparations.is_empty() || !seed_indices.is_empty());
+    let cache = needs_cache.then(|| ctx.cache()).transpose()?;
     let (updates, prepared) =
         prepare_phase(ctx.git(), cache, &preparations, &mut entries, parallelism, events)?;
     let updated = update_phase(ctx.git(), &updates, &mut entries, parallelism, events)?;
@@ -134,7 +135,17 @@ pub(crate) fn execute_with_events(
     // remote is reachable and can be seeded; this covers cleanly updated,
     // up-to-date, and diverged repositories alike.
     seed_indices.extend(updates.iter().map(update::Task::index));
-    seed_phase(ctx.git(), cache, &repositories, &seed_indices, &mut entries, parallelism, events)?;
+    if let Some(cache) = cache {
+        seed_phase(
+            ctx.git(),
+            cache,
+            &repositories,
+            &seed_indices,
+            &mut entries,
+            parallelism,
+            events,
+        )?;
+    }
 
     let entries = entries
         .into_iter()
@@ -169,7 +180,7 @@ fn check_phase(
 
 fn prepare_phase<'a>(
     git: &impl GitClient,
-    cache: &Store,
+    cache: Option<&Store>,
     tasks: &[prepare::Task<'a>],
     entries: &mut [Option<Entry>],
     parallelism: usize,

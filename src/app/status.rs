@@ -198,34 +198,131 @@ fn collect_entries(
 ) -> Result<Vec<StatusEntry>, AppError> {
     if !fetch {
         let results = workers::map(repositories, parallelism, |repository| {
-            status_for_repository(git, repository, fetch)
+            status_for_repository(git, repository)
         })?;
         return results.into_iter().collect();
     }
 
-    let results = workers::map_keyed(
-        repositories,
+    let preflights =
+        workers::map(repositories, parallelism, |repository| fetch_preflight(git, repository))?;
+    let mut entries = std::iter::repeat_with(|| None).take(repositories.len()).collect::<Vec<_>>();
+    let mut tasks = Vec::new();
+    for (index, preflight) in preflights.into_iter().enumerate() {
+        match preflight? {
+            FetchPreflight::Entry(entry) => entries[index] = Some(*entry),
+            FetchPreflight::Task { common_directory } => {
+                tasks.push(FetchTask { index, repository: repositories[index], common_directory });
+            }
+        }
+    }
+
+    let fetched = workers::map_keyed(
+        &tasks,
         parallelism,
-        |repository| status_resource(git, repository),
-        |repository| status_for_repository(git, repository, fetch),
+        |task| task.common_directory.clone(),
+        |task| fetch_status(git, task),
     )?;
-    results.into_iter().collect()
+    for result in fetched {
+        let (index, entry) = result?;
+        entries[index] = Some(entry);
+    }
+    entries
+        .into_iter()
+        .map(|entry| entry.ok_or_else(|| AppError::internal("status preflight omitted an entry")))
+        .collect()
 }
 
-// Group repositories by Git common directory so linked worktrees of one
-// repository serialize their fetches. A valid work tree always resolves its
-// common directory, so the probe fails only for missing or non-repository
-// paths; those never fetch (`status_for_repository` reports them Missing or
-// Invalid), so keying them on their own path is the harmless fallback the
-// status --fetch design specifies.
-fn status_resource(git: &impl RepositoryProbe, repository: &RepositoryDefinition) -> PathBuf {
-    git.common_directory(repository.path()).unwrap_or_else(|_| repository.path().to_path_buf())
+struct FetchTask<'a> {
+    index: usize,
+    repository: &'a RepositoryDefinition,
+    common_directory: PathBuf,
+}
+
+enum FetchPreflight {
+    Entry(Box<StatusEntry>),
+    Task { common_directory: PathBuf },
+}
+
+fn fetch_preflight(
+    git: &impl RepositoryProbe,
+    repository: &RepositoryDefinition,
+) -> Result<FetchPreflight, AppError> {
+    if !repository.path().exists() {
+        return Ok(FetchPreflight::Entry(Box::new(StatusEntry::from_repository(
+            repository,
+            None,
+            StatusCondition::Missing,
+            None,
+            None,
+        ))));
+    }
+
+    if !repository.path().is_dir() || !git.is_work_tree(repository.path())? {
+        return Ok(FetchPreflight::Entry(Box::new(StatusEntry::from_repository(
+            repository,
+            None,
+            StatusCondition::Invalid(inspection::destination_not_git_repository().to_string()),
+            None,
+            None,
+        ))));
+    }
+
+    let Some(actual) = git.remote_url(repository.path())? else {
+        return Ok(FetchPreflight::Entry(Box::new(StatusEntry::from_repository(
+            repository,
+            None,
+            StatusCondition::Invalid(inspection::missing_origin().to_string()),
+            None,
+            None,
+        ))));
+    };
+    if !urls_match(&actual, repository.url()) {
+        return Ok(FetchPreflight::Entry(Box::new(status_for_repository(git, repository)?)));
+    }
+
+    Ok(FetchPreflight::Task { common_directory: git.common_directory(repository.path())? })
+}
+
+fn fetch_status(
+    git: &impl RepositoryProbe,
+    task: &FetchTask<'_>,
+) -> Result<(usize, StatusEntry), AppError> {
+    let _lock = git.lock_repository(&task.common_directory)?;
+    let Some(actual) = git.remote_url(task.repository.path())? else {
+        return Ok((
+            task.index,
+            StatusEntry::from_repository(
+                task.repository,
+                None,
+                StatusCondition::Invalid(inspection::missing_origin().to_string()),
+                None,
+                None,
+            ),
+        ));
+    };
+    if !urls_match(&actual, task.repository.url()) {
+        return Ok((task.index, status_for_repository(git, task.repository)?));
+    }
+
+    let mut progress = NoopGitProgressSink;
+    if let Err(error) = git.fetch(task.repository.path(), &mut progress) {
+        return Ok((
+            task.index,
+            StatusEntry::from_repository(
+                task.repository,
+                None,
+                StatusCondition::FetchFailed(error.to_string()),
+                None,
+                None,
+            ),
+        ));
+    }
+    Ok((task.index, status_for_repository(git, task.repository)?))
 }
 
 fn status_for_repository(
     git: &impl RepositoryProbe,
     repository: &RepositoryDefinition,
-    fetch: bool,
 ) -> Result<StatusEntry, AppError> {
     if !repository.path().exists() {
         return Ok(StatusEntry::from_repository(
@@ -235,46 +332,6 @@ fn status_for_repository(
             None,
             None,
         ));
-    }
-
-    if !repository.path().is_dir() {
-        return Ok(StatusEntry::from_repository(
-            repository,
-            None,
-            StatusCondition::Invalid(inspection::destination_not_git_repository().to_string()),
-            None,
-            None,
-        ));
-    }
-
-    if fetch && !git.is_work_tree(repository.path())? {
-        return Ok(StatusEntry::from_repository(
-            repository,
-            None,
-            StatusCondition::Invalid(inspection::destination_not_git_repository().to_string()),
-            None,
-            None,
-        ));
-    }
-
-    let _lock = if fetch {
-        let common_directory = git.common_directory(repository.path())?;
-        Some(git.lock_repository(&common_directory)?)
-    } else {
-        None
-    };
-
-    if fetch {
-        let mut progress = NoopGitProgressSink;
-        if let Err(err) = git.fetch(repository.path(), &mut progress) {
-            return Ok(StatusEntry::from_repository(
-                repository,
-                None,
-                StatusCondition::FetchFailed(err.to_string()),
-                None,
-                None,
-            ));
-        }
     }
 
     let Some(worktree) = git.worktree_status(repository.path())? else {
@@ -287,12 +344,10 @@ fn status_for_repository(
         ));
     };
     let branch = worktree.branch().map(str::to_string);
-    let remote_mismatch = git.remote_url(repository.path())?.and_then(|actual| {
-        if urls_match(&actual, repository.url()) {
-            None
-        } else {
-            Some(RemoteUrlMismatch::new(actual.to_string(), repository.url().to_string()))
-        }
+    let actual = git.remote_url(repository.path())?;
+    let remote_mismatch = actual.as_ref().and_then(|actual| {
+        (!urls_match(actual, repository.url()))
+            .then(|| RemoteUrlMismatch::new(actual.to_string(), repository.url().to_string()))
     });
     let default_branch = git.default_branch(repository.path(), repository.default_branch())?;
     let default_branch = if let Some(branch) = default_branch.as_deref() {
@@ -300,7 +355,9 @@ fn status_for_repository(
     } else {
         None
     };
-    let condition = if remote_mismatch.is_some() {
+    let condition = if actual.is_none() {
+        StatusCondition::Invalid(inspection::missing_origin().to_string())
+    } else if remote_mismatch.is_some() {
         StatusCondition::RemoteMismatch
     } else if worktree.is_clean() {
         StatusCondition::Clean
@@ -332,9 +389,7 @@ mod tests {
     use std::sync::{Arc, Barrier};
 
     use super::{AppError, StatusCondition, collect_entries};
-    use crate::git::{
-        BranchReferences, BranchTracking, GitProgressSink, RepositoryProbe, WorktreeStatus,
-    };
+    use crate::git::{BranchTracking, GitProgressSink, RepositoryProbe, WorktreeStatus};
     use crate::repositories::{BranchName, RemoteUrl, RepositoryDefinition, RepositoryName};
 
     struct BarrierGit {
@@ -374,7 +429,7 @@ mod tests {
         }
 
         fn remote_url(&self, _repository: &Path) -> Result<Option<RemoteUrl>, AppError> {
-            Ok(None)
+            Ok(Some(RemoteUrl::new("https://example.com/repo.git").unwrap()))
         }
 
         fn default_branch(
@@ -391,14 +446,6 @@ mod tests {
             _branch: &BranchName,
         ) -> Result<BranchTracking, AppError> {
             Ok(BranchTracking::Divergence { ahead: 0, behind: 0 })
-        }
-
-        fn branch_references(
-            &self,
-            _repository: &Path,
-            _branch: &BranchName,
-        ) -> Result<BranchReferences, AppError> {
-            Ok(BranchReferences::Present)
         }
     }
 

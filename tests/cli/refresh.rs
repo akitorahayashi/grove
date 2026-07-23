@@ -562,6 +562,18 @@ url = "{}"
 
     ctx.cli()
         .arg("--config")
+        .arg(&config)
+        .arg("refresh")
+        .arg("--dry-run")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Blocked 2 repositories"))
+        .stderr(predicate::str::contains(
+            "multiple selected linked worktrees cannot all stay on 'main'",
+        ));
+
+    ctx.cli()
+        .arg("--config")
         .arg(config)
         .arg("refresh")
         .assert()

@@ -5,10 +5,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 use super::{
-    BranchReferences, BranchTracking, CacheEntry, DefaultBranch, GitProgressSink,
-    GitRefreshOutcome, GitUpdate, GitUpdateBlock, GitUpdateOutcome, RepositoryLock,
-    RepositoryProbe, Restoration, WorktreeStatus, default_branch, parse_git_progress, tracking,
-    worktree,
+    BranchTracking, CacheEntry, DefaultBranch, GitProgressSink, GitRefreshOutcome, GitUpdate,
+    GitUpdateBlock, GitUpdateOutcome, RepositoryLock, RepositoryProbe, Restoration, WorktreeStatus,
+    default_branch, parse_git_progress, tracking, worktree,
 };
 use crate::AppError;
 use crate::repositories::redact_urls_for_display;
@@ -289,21 +288,6 @@ impl RepositoryProbe for CommandGitClient {
         }
         let (ahead, behind) = self.divergence_counts(repository, branch)?;
         Ok(BranchTracking::Divergence { ahead, behind })
-    }
-
-    fn branch_references(
-        &self,
-        repository: &Path,
-        branch: &BranchName,
-    ) -> Result<BranchReferences, AppError> {
-        let revisions = self.branch_revisions(repository, branch)?;
-        if revisions.local().is_none() {
-            Ok(BranchReferences::MissingLocal)
-        } else if revisions.remote().is_none() {
-            Ok(BranchReferences::MissingRemote)
-        } else {
-            Ok(BranchReferences::Present)
-        }
     }
 }
 
