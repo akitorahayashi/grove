@@ -10,7 +10,40 @@ on:
       - 'v*'
 
 jobs:
+  verify-version:
+    name: Verify release version
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Match tag to package version
+        run: bash scripts/verify-release-version.sh "${{ github.ref_name }}"
+
+  static-checks:
+    name: Static checks
+    needs:
+      - verify-version
+    permissions:
+      contents: read
+    uses: ./.github/workflows/run-static-checks.yml
+
+  tests:
+    name: Tests
+    needs:
+      - verify-version
+    permissions:
+      contents: read
+    uses: ./.github/workflows/run-tests.yml
+
   prepare-release:
+    needs:
+      - verify-version
+      - static-checks
+      - tests
     permissions:
       contents: write
     runs-on: ubuntu-latest
