@@ -2,7 +2,10 @@ use std::path::Path;
 
 use predicates::prelude::*;
 
-use crate::harness::{TestContext, run_git};
+use crate::harness::{TestContext, commit_file, run_git};
+
+mod planning;
+mod safety;
 
 #[test]
 fn refresh_missing_repository_fails_without_cloning() {
@@ -250,7 +253,7 @@ url = "{}"
 
     for name in ["ahead", "diverged"] {
         let repository = ctx.workspace().join(name);
-        commit_local(&repository, "local.txt");
+        commit_file(&repository, "local.txt");
         run_git(&repository, &["switch", "-c", "feature"]);
     }
     diverged.add_commit("remote.txt", "remote\n");
@@ -326,7 +329,7 @@ fn refresh_reports_invalid_destinations_origin_and_default_branch() {
     let no_origin = ctx.workspace().join("no-origin");
     std::fs::create_dir(&no_origin).unwrap();
     run_git(&no_origin, &["init", "-b", "main"]);
-    commit_local(&no_origin, "README.md");
+    commit_file(&no_origin, "README.md");
 
     let config = ctx.write_config(&format!(
         r#"
@@ -366,57 +369,6 @@ url = "{}"
 }
 
 #[test]
-fn refresh_dry_run_does_not_fetch_or_switch() {
-    let ctx = TestContext::new();
-    let remote = ctx.create_remote("blog");
-    let config = single_repository_config(&ctx, "blog", &remote.url(), None);
-    ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
-    let repository = ctx.workspace().join("blog");
-    run_git(&repository, &["switch", "-c", "feature"]);
-    let tracking_revision = git_stdout(&repository, &["rev-parse", "origin/main"]);
-    remote.add_commit("remote.txt", "remote\n");
-
-    ctx.cli()
-        .arg("--config")
-        .arg(config)
-        .arg("refresh")
-        .arg("--dry-run")
-        .assert()
-        .success()
-        .stdout(predicate::str::is_empty())
-        .stderr(predicate::str::contains("Would fetch and refresh 1 repository"))
-        .stderr(predicate::str::contains("Checked ").not())
-        .stderr(predicate::str::contains("Fetching repositories").not());
-
-    assert_eq!(current_branch(&repository), "feature");
-    assert_eq!(git_stdout(&repository, &["rev-parse", "origin/main"]), tracking_revision);
-}
-
-#[test]
-fn refresh_dry_run_blocks_locally_visible_ahead_branch() {
-    let ctx = TestContext::new();
-    let remote = ctx.create_remote("blog");
-    let config = single_repository_config(&ctx, "blog", &remote.url(), None);
-    ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
-    let repository = ctx.workspace().join("blog");
-    commit_local(&repository, "local.txt");
-    run_git(&repository, &["switch", "-c", "feature"]);
-
-    ctx.cli()
-        .arg("--config")
-        .arg(config)
-        .arg("refresh")
-        .arg("--dry-run")
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("Blocked 1 repository"))
-        .stderr(predicate::str::contains("main is ahead of origin/main"))
-        .stderr(predicate::str::contains("Would fetch and refresh").not());
-
-    assert_eq!(current_branch(&repository), "feature");
-}
-
-#[test]
 fn refresh_redacts_remote_url_mismatch_details() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
@@ -453,133 +405,6 @@ fn refresh_redacts_remote_url_mismatch_details() {
         .stderr(predicate::str::contains("expected-token").not());
 }
 
-#[cfg(unix)]
-#[test]
-fn refresh_fetch_failure_leaves_original_branch_checked_out() {
-    let ctx = TestContext::new();
-    let remote = ctx.create_remote("blog");
-    let config = single_repository_config(&ctx, "blog", &remote.url(), None);
-    ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
-    let repository = ctx.workspace().join("blog");
-    run_git(&repository, &["switch", "-c", "feature"]);
-    let path =
-        install_git_wrapper(&ctx, "if [ \"$1\" = fetch ]; then echo fetch-failed >&2; exit 42; fi");
-
-    ctx.cli()
-        .env("PATH", path)
-        .arg("--config")
-        .arg(config)
-        .arg("refresh")
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("fetch-failed"));
-
-    assert_eq!(current_branch(&repository), "feature");
-}
-
-#[cfg(unix)]
-#[test]
-fn refresh_switch_failure_is_blocked_on_the_original_branch() {
-    let ctx = TestContext::new();
-    let remote = ctx.create_remote("blog");
-    let config = single_repository_config(&ctx, "blog", &remote.url(), None);
-    ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
-    let repository = ctx.workspace().join("blog");
-    run_git(&repository, &["switch", "-c", "feature"]);
-    let path = install_git_wrapper(
-        &ctx,
-        "if [ \"$1\" = switch ]; then echo switch-failed >&2; exit 42; fi",
-    );
-
-    ctx.cli()
-        .env("PATH", path)
-        .arg("--config")
-        .arg(config)
-        .arg("refresh")
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("Blocked 1 repository"))
-        .stderr(predicate::str::contains("switch-failed"));
-
-    assert_eq!(current_branch(&repository), "feature");
-}
-
-#[cfg(unix)]
-#[test]
-fn refresh_merge_failure_does_not_restore_original_branch() {
-    let ctx = TestContext::new();
-    let remote = ctx.create_remote("blog");
-    let config = single_repository_config(&ctx, "blog", &remote.url(), None);
-    ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
-    let repository = ctx.workspace().join("blog");
-    run_git(&repository, &["switch", "-c", "feature"]);
-    remote.add_commit("remote.txt", "remote\n");
-    let path =
-        install_git_wrapper(&ctx, "if [ \"$1\" = merge ]; then echo merge-failed >&2; exit 42; fi");
-
-    ctx.cli()
-        .env("PATH", path)
-        .arg("--config")
-        .arg(config)
-        .arg("refresh")
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("Refreshed 1 repository"))
-        .stderr(predicate::str::contains("Blocked 1 repository"))
-        .stderr(predicate::str::contains("x blog switched to main from feature; update failed:"))
-        .stderr(predicate::str::contains("merge-failed"));
-
-    assert_eq!(current_branch(&repository), "main");
-}
-
-#[test]
-fn refresh_blocks_multiple_linked_worktrees_before_switching() {
-    let ctx = TestContext::new();
-    let remote = ctx.create_remote("shared");
-    let initial_config = single_repository_config(&ctx, "primary", &remote.url(), None);
-    ctx.cli().arg("--config").arg(&initial_config).arg("sync").assert().success();
-
-    let primary = ctx.workspace().join("primary");
-    let linked = ctx.workspace().join("linked");
-    run_git(&primary, &["worktree", "add", "-b", "feature-linked", linked.to_str().unwrap()]);
-    remote.add_commit("remote.txt", "remote\n");
-
-    let config = ctx.write_config(&format!(
-        r#"
-version = 1
-
-[repos.primary]
-path = "primary"
-url = "{}"
-
-[repos.linked]
-path = "linked"
-url = "{}"
-"#,
-        remote.url(),
-        remote.url()
-    ));
-
-    ctx.cli()
-        .arg("--config")
-        .arg(config)
-        .arg("refresh")
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("Blocked 2 repositories"))
-        .stderr(predicate::str::contains(
-            "multiple selected linked worktrees cannot all stay on 'main'",
-        ))
-        .stderr(predicate::str::contains("Refreshed ").not());
-
-    assert_eq!(current_branch(&primary), "main");
-    assert_eq!(current_branch(&linked), "feature-linked");
-    assert_ne!(
-        git_stdout(&primary, &["rev-parse", "main"]),
-        git_stdout(&primary, &["rev-parse", "origin/main"])
-    );
-}
-
 fn single_repository_config(
     ctx: &TestContext,
     name: &str,
@@ -610,33 +435,4 @@ fn git_stdout(repository: &Path, args: &[&str]) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8_lossy(&output.stdout).trim().to_string()
-}
-
-fn commit_local(repository: &Path, file: &str) {
-    std::fs::write(repository.join(file), "local\n").unwrap();
-    run_git(repository, &["add", file]);
-    run_git(
-        repository,
-        &["-c", "user.name=Grove Test", "-c", "user.email=grove@example.com", "commit", "-m", file],
-    );
-}
-
-#[cfg(unix)]
-fn install_git_wrapper(ctx: &TestContext, behavior: &str) -> std::ffi::OsString {
-    use std::os::unix::fs::PermissionsExt;
-
-    let command = std::process::Command::new("sh").args(["-c", "command -v git"]).output().unwrap();
-    let real_git = String::from_utf8_lossy(&command.stdout).trim().to_string();
-    let bin = ctx.root().join("refresh-git-wrapper-bin");
-    std::fs::create_dir(&bin).unwrap();
-    let wrapper = bin.join("git");
-    std::fs::write(&wrapper, format!("#!/bin/sh\n{behavior}\nexec \"{real_git}\" \"$@\"\n"))
-        .unwrap();
-    let mut permissions = std::fs::metadata(&wrapper).unwrap().permissions();
-    permissions.set_mode(0o755);
-    std::fs::set_permissions(&wrapper, permissions).unwrap();
-    let mut paths =
-        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect::<Vec<_>>();
-    paths.insert(0, bin);
-    std::env::join_paths(paths).unwrap()
 }

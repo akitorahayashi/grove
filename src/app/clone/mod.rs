@@ -14,6 +14,7 @@ use crate::repositories::RemoteUrl;
 pub use crate::phases::Summary as PhaseSummary;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Phase {
     Cloning,
 }

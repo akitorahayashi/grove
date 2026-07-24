@@ -21,6 +21,7 @@ pub(super) fn repository<'a>(
     events: &impl EventSink<Phase>,
 ) -> Result<Completion<'a>, crate::AppError> {
     let mut progress = EventProgress::new(task.repository(), events);
+    let _lock = git.lock_repository(task.resource())?;
 
     Ok(match git.fetch(task.repository().path(), &mut progress) {
         Ok(()) => Completion::Refresh(task.clone()),

@@ -7,13 +7,6 @@ pub enum BranchTracking {
     Divergence { ahead: u32, behind: u32 },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BranchReferences {
-    MissingLocal,
-    MissingRemote,
-    Present,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct BranchRevisions {
     local: Option<String>,

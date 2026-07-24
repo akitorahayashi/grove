@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
 use crate::AppError;
-use crate::git::{BranchReferences, GitClient};
-use crate::inspection::{self, Readiness};
-use crate::repositories::{BranchName, RepositoryDefinition};
+use crate::git::GitClient;
+use crate::inspection::{self, BranchReadiness, Readiness};
+use crate::repositories::RepositoryDefinition;
 
 use super::{BlockedReason, Entry, Outcome, Plan, SkippedReason};
 
@@ -100,14 +100,19 @@ fn default_branch_block_reason(
     repository: &RepositoryDefinition,
     default_branch: &str,
 ) -> Result<Option<BlockedReason>, AppError> {
-    let branch = BranchName::new(default_branch)?;
-    match git.branch_references(repository.path(), &branch)? {
-        BranchReferences::MissingLocal => {
+    match inspection::branch_readiness(git, repository, default_branch)? {
+        BranchReadiness::MissingLocal => {
             Ok(Some(BlockedReason::MissingLocalBranch { branch: default_branch.to_string() }))
         }
-        BranchReferences::MissingRemote => {
+        BranchReadiness::MissingRemote => {
             Ok(Some(BlockedReason::MissingRemoteBranch { branch: default_branch.to_string() }))
         }
-        BranchReferences::Present => Ok(None),
+        BranchReadiness::Divergence { ahead, behind } if ahead > 0 && behind > 0 => {
+            Ok(Some(BlockedReason::Diverged { branch: default_branch.to_string() }))
+        }
+        BranchReadiness::Divergence { ahead, .. } if ahead > 0 => {
+            Ok(Some(BlockedReason::AheadOfOrigin { branch: default_branch.to_string() }))
+        }
+        BranchReadiness::Divergence { .. } => Ok(None),
     }
 }

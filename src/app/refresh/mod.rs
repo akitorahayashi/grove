@@ -73,15 +73,20 @@ pub(crate) fn execute_with_events(
         check_phase(ctx.git(), &repositories, parallelism, options.dry_run(), events)?;
 
     let mut fetches = Vec::new();
+    let mut dry_runs = Vec::new();
     for (index, (repository, decision)) in repositories.iter().copied().zip(decisions).enumerate() {
         match decision {
             check::Decision::Entry(entry) => entries[index] = Some(entry),
             check::Decision::Fetch { common_directory, default_branch } => {
                 fetches.push(Task::new(index, repository, common_directory, default_branch));
             }
+            check::Decision::DryRun { common_directory, default_branch } => {
+                dry_runs.push(Task::new(index, repository, common_directory, default_branch));
+            }
         }
     }
 
+    plan_dry_runs(&dry_runs, &mut entries);
     let (refreshes, fetched) = fetch_phase(ctx.git(), &fetches, &mut entries, parallelism, events)?;
     let refreshed = refresh_phase(ctx.git(), &refreshes, &mut entries, parallelism, events)?;
 
@@ -190,4 +195,26 @@ fn refreshable_tasks<'a, 'b>(
         }
     }
     refreshable
+}
+
+fn plan_dry_runs(tasks: &[Task<'_>], entries: &mut [Option<Entry>]) {
+    let mut counts = HashMap::<(PathBuf, String), usize>::new();
+    for task in tasks {
+        let key = (task.resource().to_path_buf(), task.default_branch().to_string());
+        *counts.entry(key).or_default() += 1;
+    }
+
+    for task in tasks {
+        let key = (task.resource().to_path_buf(), task.default_branch().to_string());
+        let outcome = if counts[&key] > 1 {
+            Outcome::Blocked {
+                reason: BlockedReason::LinkedWorktreeDefaultBranchConflict {
+                    branch: task.default_branch().to_string(),
+                },
+            }
+        } else {
+            Outcome::Planned(Plan::new(task.default_branch().to_string()))
+        };
+        entries[task.index()] = Some(Entry::new(task.repository(), outcome));
+    }
 }
