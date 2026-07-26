@@ -27,7 +27,7 @@ pub(super) struct RawRepository {
 pub(super) fn parse(contents: &str, label: &str) -> Result<RawConfigFile, AppError> {
     let mut root = contents
         .parse::<Table>()
-        .map_err(|err| AppError::config_error(format!("{label}: invalid TOML: {err}")))?;
+        .map_err(|err| AppError::config_source(format!("{label}: invalid TOML: {err}"), err))?;
 
     reject_unknown_root_fields(&root, label)?;
 
@@ -69,7 +69,7 @@ fn parse_include(value: Option<Value>, label: &str) -> Result<Vec<String>, AppEr
     let Some(value) = value else {
         return Ok(Vec::new());
     };
-    value.try_into().map_err(|err| AppError::config_error(format!("{label}: include: {err}")))
+    value.try_into().map_err(|err| AppError::config_source(format!("{label}: include: {err}"), err))
 }
 
 fn parse_repositories(
@@ -87,7 +87,7 @@ fn parse_repositories(
         .into_iter()
         .map(|(name, value)| {
             let repository = value.try_into().map_err(|err| {
-                AppError::config_error(format!("{label}: repository '{name}': {err}"))
+                AppError::config_source(format!("{label}: repository '{name}': {err}"), err)
             })?;
             Ok(RawRepositoryEntry { name, repository })
         })

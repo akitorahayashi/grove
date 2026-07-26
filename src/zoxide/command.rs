@@ -12,10 +12,13 @@ impl ZoxideClient for CommandZoxideClient {
     fn verify_available(&self) -> Result<(), AppError> {
         let mut command = Command::new("zoxide");
         command.arg("--version");
-        let output =
-            command.output().map_err(|err| AppError::ZoxideUnavailable(err.to_string()))?;
+        let output = command.output().map_err(AppError::zoxide_unavailable_source)?;
         if !output.status.success() {
-            return Err(AppError::ZoxideUnavailable(command_message(&output)));
+            return Err(AppError::zoxide_unavailable_status(
+                "zoxide --version",
+                command_message(&output),
+                output.status.code(),
+            ));
         }
 
         verify_capability(&["query", "--help"])?;
@@ -48,18 +51,21 @@ impl ZoxideClient for CommandZoxideClient {
 }
 
 fn verify_capability(args: &[&str]) -> Result<(), AppError> {
-    let output = Command::new("zoxide")
-        .args(args)
-        .output()
-        .map_err(|err| AppError::ZoxideUnavailable(err.to_string()))?;
+    let output =
+        Command::new("zoxide").args(args).output().map_err(AppError::zoxide_unavailable_source)?;
     if output.status.success() {
         Ok(())
     } else {
-        Err(AppError::ZoxideUnavailable(format!(
-            "required capability `zoxide {}` is unavailable: {}",
-            args.join(" "),
-            command_message(&output)
-        )))
+        let command = format!("zoxide {}", args.join(" "));
+        Err(AppError::zoxide_unavailable_status(
+            command,
+            format!(
+                "required capability `zoxide {}` is unavailable: {}",
+                args.join(" "),
+                command_message(&output)
+            ),
+            output.status.code(),
+        ))
     }
 }
 
@@ -67,11 +73,15 @@ fn run_required(command: &mut Command, display: impl Into<String>) -> Result<Out
     let display = display.into();
     let output = command
         .output()
-        .map_err(|err| AppError::zoxide_command_failed(display.clone(), err.to_string()))?;
+        .map_err(|err| AppError::zoxide_command_failed_source(display.clone(), err))?;
     if output.status.success() {
         Ok(output)
     } else {
-        Err(AppError::zoxide_command_failed(display, command_message(&output)))
+        Err(AppError::zoxide_command_failed_status(
+            display,
+            command_message(&output),
+            output.status.code(),
+        ))
     }
 }
 

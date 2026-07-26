@@ -6,12 +6,19 @@ use crate::harness::TestContext;
 fn cache_list_shows_headers_when_nothing_cached() {
     let ctx = TestContext::new();
 
-    ctx.cli()
-        .arg("cache")
-        .arg("list")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("URL").and(predicate::str::contains("UPDATED")));
+    let output = ctx.cli().arg("cache").arg("list").output().expect("cache list should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("cache list output should be UTF-8");
+    assert_eq!(
+        stdout
+            .lines()
+            .find(|line| !line.trim().is_empty())
+            .unwrap()
+            .split_whitespace()
+            .collect::<Vec<_>>(),
+        ["URL", "UPDATED"]
+    );
 }
 
 #[test]
@@ -30,6 +37,21 @@ fn cache_list_shows_entry_after_clone() {
 }
 
 #[test]
+fn cache_list_orders_entries_by_url() {
+    let ctx = TestContext::new();
+    let zeta = ctx.create_remote("zeta");
+    let alpha = ctx.create_remote("alpha");
+    ctx.cli().arg("clone").arg(zeta.url()).arg("zeta").assert().success();
+    ctx.cli().arg("clone").arg(alpha.url()).arg("alpha").assert().success();
+
+    let output = ctx.cli().arg("cache").arg("list").output().expect("cache list should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("cache list output should be UTF-8");
+    assert!(stdout.find("alpha.git").unwrap() < stdout.find("zeta.git").unwrap());
+}
+
+#[test]
 fn cache_list_emits_color_when_forced() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
@@ -44,6 +66,35 @@ fn cache_list_emits_color_when_forced() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\u{1b}[1m"));
+}
+
+#[test]
+fn cache_list_redacts_generic_schemes_and_encoded_secret_keys() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    ctx.cli().arg("clone").arg(remote.url()).arg("cloned").assert().success();
+    let entry = std::fs::read_dir(ctx.cache_root())
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| path.join("url").is_file())
+        .unwrap();
+    std::fs::write(
+        entry.join("url"),
+        "GIT+SSH://user:credential@example.com/repo.git?access%5Ftoken=secret-value",
+    )
+    .unwrap();
+
+    ctx.cli()
+        .arg("cache")
+        .arg("list")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "GIT+SSH://[redacted]@example.com/repo.git?access%5Ftoken=[redacted]",
+        ))
+        .stdout(predicate::str::contains("credential").not())
+        .stdout(predicate::str::contains("secret-value").not());
 }
 
 #[test]

@@ -21,7 +21,11 @@ fn clone_places_repository_and_populates_cache() {
         .stderr(predicate::str::contains("(cached)"));
 
     assert!(ctx.workspace().join("cloned").join(".git").exists());
-    let entries = fs::read_dir(ctx.cache_root()).expect("cache root should exist").count();
+    let entries = fs::read_dir(ctx.cache_root())
+        .expect("cache root should exist")
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().join("url").is_file())
+        .count();
     assert_eq!(entries, 1);
 }
 

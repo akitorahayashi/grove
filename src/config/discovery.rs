@@ -8,7 +8,7 @@ pub(super) fn resolve_config_path(explicit_config: Option<&Path>) -> Result<Path
     if let Some(path) = explicit_config {
         return path
             .canonicalize()
-            .map_err(|err| AppError::config_error(format!("{}: {err}", path.display())));
+            .map_err(|err| AppError::config_source(format!("{}: {err}", path.display()), err));
     }
 
     let candidate = std::env::current_dir()?.join(CONFIG_FILE_NAME);

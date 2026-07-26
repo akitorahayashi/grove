@@ -6,10 +6,8 @@
 //! so the placed clone is self-contained and correct even when the entry is
 //! stale or narrow — the entry only reduces network transfer.
 
-use std::collections::HashMap;
-use std::fs;
+use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use crate::AppError;
@@ -20,6 +18,7 @@ use crate::repositories::{
 
 /// What happened to the cache entry backing a placement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Outcome {
     /// No entry existed; a new one was created.
     Miss,
@@ -35,17 +34,12 @@ pub enum Outcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct EntryInfo {
     url: String,
-    size_bytes: u64,
     modified: Option<SystemTime>,
 }
 
 impl EntryInfo {
     pub(crate) fn url(&self) -> &str {
         &self.url
-    }
-
-    pub(crate) fn size_bytes(&self) -> u64 {
-        self.size_bytes
     }
 
     pub(crate) fn modified(&self) -> Option<SystemTime> {
@@ -56,7 +50,6 @@ impl EntryInfo {
 /// The local clone cache rooted at a single directory.
 pub(crate) struct Store {
     root: PathBuf,
-    locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
 }
 
 impl Store {
@@ -65,12 +58,12 @@ impl Store {
     /// rather than a silent fallback to some other location.
     pub(crate) fn from_env() -> Result<Self, AppError> {
         let root = cache_root_from_env()?;
-        Ok(Self { root, locks: Mutex::new(HashMap::new()) })
+        Ok(Self { root })
     }
 
     #[cfg(test)]
     pub(crate) fn with_root(root: PathBuf) -> Self {
-        Self { root, locks: Mutex::new(HashMap::new()) }
+        Self { root }
     }
 
     /// Clone `url` into `destination`, ensuring and reusing a cache entry.
@@ -90,8 +83,8 @@ impl Store {
         guard_destination(destination, grove_root)?;
 
         let key = url.as_process_argument();
-        let lock = self.entry_lock(key);
-        let _guard = lock.lock().expect("cache entry lock poisoned");
+        let _global_lock = self.global_lock(LockMode::Shared)?;
+        let _entry_lock = self.entry_lock(key)?;
 
         let container = self.root.join(entry_directory_name(key));
         let bare = container.join("git");
@@ -121,8 +114,8 @@ impl Store {
         progress: &mut dyn GitProgressSink,
     ) -> Result<bool, AppError> {
         let key = url.as_process_argument();
-        let lock = self.entry_lock(key);
-        let _guard = lock.lock().expect("cache entry lock poisoned");
+        let _global_lock = self.global_lock(LockMode::Shared)?;
+        let _entry_lock = self.entry_lock(key)?;
 
         let container = self.root.join(entry_directory_name(key));
         if container.exists() {
@@ -143,21 +136,19 @@ impl Store {
 
     /// Enumerate cache entries for reporting.
     pub(crate) fn list(&self) -> Result<Vec<EntryInfo>, AppError> {
+        let _global_lock = self.global_lock(LockMode::Shared)?;
         let mut infos = Vec::new();
-        if !self.root.exists() {
-            return Ok(infos);
-        }
         for entry in fs::read_dir(&self.root)? {
-            let container = entry?.path();
-            if !container.is_dir() {
+            let entry = entry?;
+            if !entry.file_type()?.is_dir() || entry.file_name() == LOCK_DIRECTORY {
                 continue;
             }
+            let container = entry.path();
             let Some(url) = read_metadata(&container, "url")? else {
                 continue;
             };
             infos.push(EntryInfo {
                 url,
-                size_bytes: directory_size(&container)?,
                 modified: fs::metadata(container.join("updated"))
                     .and_then(|meta| meta.modified())
                     .ok(),
@@ -169,15 +160,14 @@ impl Store {
 
     /// Remove every cache entry, returning how many were removed.
     pub(crate) fn clean_all(&self) -> Result<usize, AppError> {
+        let _global_lock = self.global_lock(LockMode::Exclusive)?;
         let mut removed = 0;
-        if !self.root.exists() {
-            return Ok(0);
-        }
         for entry in fs::read_dir(&self.root)? {
-            let container = entry?.path();
-            if !container.is_dir() {
+            let entry = entry?;
+            if !entry.file_type()?.is_dir() || entry.file_name() == LOCK_DIRECTORY {
                 continue;
             }
+            let container = entry.path();
             let counts = read_metadata(&container, "url")?.is_some();
             fs::remove_dir_all(&container)?;
             if counts {
@@ -189,13 +179,38 @@ impl Store {
 
     /// Remove the cache entry for a single URL, if present.
     pub(crate) fn remove(&self, url: &RemoteUrl) -> Result<bool, AppError> {
+        let key = url.as_process_argument();
+        let _global_lock = self.global_lock(LockMode::Shared)?;
+        let _entry_lock = self.entry_lock(key)?;
         let container = self.root.join(entry_directory_name(url.as_process_argument()));
-        if container.exists() {
-            fs::remove_dir_all(&container)?;
-            Ok(true)
-        } else {
-            Ok(false)
+        let metadata = match fs::symlink_metadata(&container) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error.into()),
+        };
+        if !metadata.file_type().is_dir() {
+            return Err(AppError::cache_state(format!(
+                "cache entry '{}' is not a directory",
+                container.display()
+            )));
         }
+        match read_metadata(&container, "url")? {
+            Some(recorded) if recorded == key => {}
+            Some(_) => {
+                return Err(AppError::cache_state(format!(
+                    "cache entry '{}' records a different URL",
+                    container.display()
+                )));
+            }
+            None => {
+                return Err(AppError::cache_state(format!(
+                    "cache entry '{}' has no URL metadata",
+                    container.display()
+                )));
+            }
+        }
+        fs::remove_dir_all(&container)?;
+        Ok(true)
     }
 
     fn ensure_entry(
@@ -268,10 +283,84 @@ impl Store {
         Ok(())
     }
 
-    fn entry_lock(&self, key: &str) -> Arc<Mutex<()>> {
-        let mut locks = self.locks.lock().expect("cache lock map poisoned");
-        Arc::clone(locks.entry(key.to_string()).or_insert_with(|| Arc::new(Mutex::new(()))))
+    fn global_lock(&self, mode: LockMode) -> Result<CacheLock, AppError> {
+        self.ensure_root()?;
+        CacheLock::acquire(&self.root.join(LOCK_DIRECTORY).join("global.lock"), mode)
     }
+
+    fn entry_lock(&self, key: &str) -> Result<CacheLock, AppError> {
+        let mut name = entry_directory_name(key);
+        name.push_str(".lock");
+        CacheLock::acquire(&self.root.join(LOCK_DIRECTORY).join(name), LockMode::Exclusive)
+    }
+
+    fn ensure_root(&self) -> Result<(), AppError> {
+        ensure_private_directory(&self.root)?;
+        ensure_private_directory(&self.root.join(LOCK_DIRECTORY))
+    }
+}
+
+const LOCK_DIRECTORY: &str = ".locks";
+
+#[derive(Clone, Copy)]
+enum LockMode {
+    Shared,
+    Exclusive,
+}
+
+struct CacheLock {
+    file: File,
+}
+
+impl CacheLock {
+    fn acquire(path: &Path, mode: LockMode) -> Result<Self, AppError> {
+        let file =
+            OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path)?;
+        match mode {
+            LockMode::Shared => file.lock_shared()?,
+            LockMode::Exclusive => file.lock()?,
+        }
+        Ok(Self { file })
+    }
+}
+
+impl Drop for CacheLock {
+    fn drop(&mut self) {
+        let _ = File::unlock(&self.file);
+    }
+}
+
+fn ensure_private_directory(path: &Path) -> Result<(), AppError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if !metadata.file_type().is_dir() => {
+            return Err(AppError::cache_state(format!(
+                "cache path '{}' is not a directory",
+                path.display()
+            )));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            fs::create_dir_all(path)?;
+            let metadata = fs::symlink_metadata(path)?;
+            if !metadata.file_type().is_dir() {
+                return Err(AppError::cache_state(format!(
+                    "cache path '{}' is not a directory",
+                    path.display()
+                )));
+            }
+        }
+        Err(error) => return Err(error.into()),
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut permissions = fs::metadata(path)?.permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(path, permissions)?;
+    }
+    Ok(())
 }
 
 fn guard_destination(destination: &Path, grove_root: Option<&Path>) -> Result<(), AppError> {
@@ -385,20 +474,6 @@ fn touch_updated(container: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
-fn directory_size(path: &Path) -> Result<u64, AppError> {
-    let mut total = 0;
-    for entry in fs::read_dir(path)? {
-        let entry = entry?;
-        let metadata = entry.metadata()?;
-        if metadata.is_dir() {
-            total += directory_size(&entry.path())?;
-        } else {
-            total += metadata.len();
-        }
-    }
-    Ok(total)
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -407,10 +482,34 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use super::{Outcome, Store};
-    use crate::AppError;
+    use super::{LOCK_DIRECTORY, LockMode, Outcome, Store, entry_directory_name, temporary_path};
     use crate::git::{CommandGitClient, NoopGitProgressSink};
     use crate::repositories::{BranchName, RemoteUrl};
+
+    #[cfg(unix)]
+    #[test]
+    fn list_reads_metadata_without_traversing_repository_contents() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = TempDir::new().unwrap();
+        let container = root.path().join("entry");
+        let inaccessible = container.join("git/objects/deep");
+        fs::create_dir_all(&inaccessible).unwrap();
+        fs::write(container.join("url"), "https://example.com/repository.git").unwrap();
+        fs::write(container.join("updated"), []).unwrap();
+        let mut permissions = fs::metadata(&inaccessible).unwrap().permissions();
+        permissions.set_mode(0o000);
+        fs::set_permissions(&inaccessible, permissions).unwrap();
+
+        let result = Store::with_root(root.path().to_path_buf()).list();
+
+        let mut permissions = fs::metadata(&inaccessible).unwrap().permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&inaccessible, permissions).unwrap();
+        let entries = result.expect("listing should not inspect repository contents");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].url(), "https://example.com/repository.git");
+    }
 
     fn run_git(directory: &Path, args: &[&str]) {
         let output =
@@ -449,7 +548,7 @@ mod tests {
         let mut entries = fs::read_dir(cache_root)
             .unwrap()
             .map(|entry| entry.unwrap().path())
-            .filter(|path| path.is_dir())
+            .filter(|path| path.join("url").is_file())
             .collect::<Vec<_>>();
         assert_eq!(entries.len(), 1, "expected exactly one cache entry");
         entries.remove(0)
@@ -474,6 +573,55 @@ mod tests {
             .unwrap();
         assert_eq!(second, Outcome::Hit);
         assert!(tmp.path().join("b").join(".git").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cache_root_and_lock_directory_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("cache");
+        fs::create_dir(&root).unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).unwrap();
+        let store = Store::with_root(root.clone());
+
+        store.list().unwrap();
+
+        assert_eq!(fs::metadata(&root).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(
+            fs::metadata(root.join(LOCK_DIRECTORY)).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+    }
+
+    #[test]
+    fn global_cache_lock_coordinates_independent_stores() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("cache");
+        let first = Store::with_root(root.clone());
+        let second = Store::with_root(root.clone());
+        let held = first.global_lock(LockMode::Exclusive).unwrap();
+        second.ensure_root().unwrap();
+        let competing = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(root.join(LOCK_DIRECTORY).join("global.lock"))
+            .unwrap();
+
+        assert!(matches!(competing.try_lock_shared(), Err(fs::TryLockError::WouldBlock)));
+        drop(held);
+        competing.try_lock_shared().unwrap();
+    }
+
+    #[test]
+    fn clean_all_preserves_lock_state() {
+        let tmp = TempDir::new().unwrap();
+        let store = Store::with_root(tmp.path().join("cache"));
+
+        store.list().unwrap();
+        assert_eq!(store.clean_all().unwrap(), 0);
+        assert!(store.root.join(LOCK_DIRECTORY).join("global.lock").is_file());
     }
 
     #[test]
@@ -544,6 +692,49 @@ mod tests {
     }
 
     #[test]
+    fn named_removal_rejects_mismatched_url_metadata() {
+        let tmp = TempDir::new().unwrap();
+        let remote = make_remote(&tmp.path().join("origin"), false);
+        let cache_root = tmp.path().join("cache");
+        let store = Store::with_root(cache_root.clone());
+        let git = CommandGitClient::default();
+        let url = url_of(&remote);
+
+        store
+            .place(&git, &url, &tmp.path().join("a"), None, None, &mut NoopGitProgressSink)
+            .unwrap();
+        let entry = single_entry(&cache_root);
+        fs::write(entry.join("url"), "https://example.com/other.git").unwrap();
+
+        let error = store.remove(&url).unwrap_err();
+
+        assert!(error.to_string().contains("records a different URL"));
+        assert!(entry.exists());
+    }
+
+    #[test]
+    fn interrupted_staging_is_replaced_under_the_entry_lock() {
+        let tmp = TempDir::new().unwrap();
+        let remote = make_remote(&tmp.path().join("origin"), false);
+        let cache_root = tmp.path().join("cache");
+        let store = Store::with_root(cache_root.clone());
+        let git = CommandGitClient::default();
+        let url = url_of(&remote);
+        let container = cache_root.join(entry_directory_name(url.as_process_argument()));
+        let staging = temporary_path(&container);
+        fs::create_dir_all(&staging).unwrap();
+        fs::write(staging.join("partial"), "incomplete").unwrap();
+
+        let outcome = store
+            .place(&git, &url, &tmp.path().join("a"), None, None, &mut NoopGitProgressSink)
+            .unwrap();
+
+        assert_eq!(outcome, Outcome::Miss);
+        assert!(!staging.exists());
+        assert!(container.join("url").is_file());
+    }
+
+    #[test]
     fn update_failure_surfaces_as_a_non_internal_error() {
         let tmp = TempDir::new().unwrap();
         let remote = make_remote(&tmp.path().join("origin"), false);
@@ -559,7 +750,7 @@ mod tests {
         let error = store
             .place(&git, &url, &tmp.path().join("b"), None, None, &mut NoopGitProgressSink)
             .unwrap_err();
-        assert!(!matches!(error, AppError::Internal(_)));
+        assert!(!error.is_internal());
     }
 
     #[test]
@@ -600,17 +791,23 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let remote = make_remote(&tmp.path().join("origin"), false);
         let cache_root = tmp.path().join("cache");
-        let store = Store::with_root(cache_root);
+        let store = Store::with_root(cache_root.clone());
         let git = CommandGitClient::default();
         let url = url_of(&remote);
 
         store
             .place(&git, &url, &tmp.path().join("a"), None, None, &mut NoopGitProgressSink)
             .unwrap();
-        let created =
-            store.list().unwrap()[0].modified().expect("placement records an update time");
-
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        let marker = single_entry(&cache_root).join("updated");
+        let known_older_time =
+            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1);
+        fs::File::options()
+            .write(true)
+            .open(&marker)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(known_older_time))
+            .unwrap();
+        let created = fs::metadata(&marker).unwrap().modified().unwrap();
 
         store
             .place(&git, &url, &tmp.path().join("b"), None, None, &mut NoopGitProgressSink)
@@ -622,6 +819,29 @@ mod tests {
             refreshed > created,
             "a later placement must advance the reported update time, not report entry creation",
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn list_never_follows_directory_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = TempDir::new().unwrap();
+        let remote = make_remote(&tmp.path().join("origin"), false);
+        let cache_root = tmp.path().join("cache");
+        let store = Store::with_root(cache_root.clone());
+        let git = CommandGitClient::default();
+        let url = url_of(&remote);
+        store
+            .place(&git, &url, &tmp.path().join("a"), None, None, &mut NoopGitProgressSink)
+            .unwrap();
+        let entry = single_entry(&cache_root);
+        symlink(&entry, entry.join("git").join("cycle")).unwrap();
+
+        let entries = store.list().unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].url(), url.as_process_argument());
     }
 
     #[test]

@@ -33,4 +33,7 @@ pub use app::sync::{
 pub use app::validate::Report as ValidationReport;
 pub use cache::Outcome as CacheOutcome;
 pub use cli::run as cli;
-pub use error::AppError;
+pub use error::{
+    AppError, AppErrorKind, ArgumentError, CacheError, ConfigError, GitError, InternalError,
+    ProcessErrorKind, ZoxideError,
+};

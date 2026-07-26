@@ -11,7 +11,6 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, error::ErrorKind};
 
-use crate::AppError;
 use crate::repositories::redact_urls_for_display;
 use output::{Output, terminal_multiline_text, terminal_text};
 
@@ -87,7 +86,13 @@ fn run_with_args(args: impl IntoIterator<Item = OsString>, output: &mut Output<'
     match result {
         Ok(Completion::Success) => ExitCode::SUCCESS,
         Ok(Completion::Failure) => ExitCode::FAILURE,
-        Err(AppError::Io(error)) if error.kind() == io::ErrorKind::BrokenPipe => ExitCode::SUCCESS,
+        Err(error)
+            if error
+                .io_error()
+                .is_some_and(|source| source.kind() == io::ErrorKind::BrokenPipe) =>
+        {
+            ExitCode::SUCCESS
+        }
         Err(error) => {
             let message = terminal_text(&redact_urls_for_display(&error.to_string()));
             if output.stderr(format_args!("error: {message}\n")).is_err() {

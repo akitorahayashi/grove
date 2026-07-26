@@ -15,9 +15,9 @@ url = "git@example.com:frontend.git"
 
     let result = grove::status(Some(config), vec!["backend".to_string()], false);
 
-    assert!(
-        matches!(result, Err(grove::AppError::RepositoryNotFound(ref name)) if name == "backend")
-    );
+    let error = result.expect_err("sync should reject an unknown repository");
+    assert_eq!(error.kind(), grove::AppErrorKind::RepositoryNotFound);
+    assert_eq!(error.repository_name(), Some("backend"));
 }
 
 #[test]
@@ -39,7 +39,7 @@ url = "git@example.com:frontend.git"
         grove::RefreshOptions::new(false),
     );
 
-    assert!(
-        matches!(result, Err(grove::AppError::RepositoryNotFound(ref name)) if name == "backend")
-    );
+    let error = result.expect_err("refresh should reject an unknown repository");
+    assert_eq!(error.kind(), grove::AppErrorKind::RepositoryNotFound);
+    assert_eq!(error.repository_name(), Some("backend"));
 }

@@ -60,9 +60,19 @@ fn print_detail(entry: &StatusEntry, styled: bool, output: &mut Output<'_>) -> i
     print_detail_separator(name.len(), styled, output)?;
     print_section("Repository", styled, output)?;
     print_field("Path", &terminal_text(entry.display_path()), styled, output)?;
-    print_field("Absolute path", &terminal_text(entry.absolute_path()), styled, output)?;
+    print_field(
+        "Absolute path",
+        &terminal_text(&entry.absolute_path().display().to_string()),
+        styled,
+        output,
+    )?;
     print_field("URL", &terminal_text(entry.url()), styled, output)?;
-    print_field("Config", &terminal_text(entry.source_config()), styled, output)?;
+    print_field(
+        "Config",
+        &terminal_text(&entry.source_config().display().to_string()),
+        styled,
+        output,
+    )?;
 
     output.stdout(format_args!("\n"))?;
     print_section("Status", styled, output)?;

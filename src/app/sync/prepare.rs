@@ -52,7 +52,7 @@ impl Completion<'_> {
 
 pub(super) fn repository<'a>(
     git: &impl GitClient,
-    cache: &Store,
+    cache: Option<&Store>,
     task: &Task<'a>,
     events: &impl EventSink<Phase>,
 ) -> Result<Completion<'a>, crate::AppError> {
@@ -60,35 +60,42 @@ pub(super) fn repository<'a>(
     let mut progress = EventProgress::new(repository, events);
 
     match task {
-        Task::Clone { index, repository } => Ok(
-            match cache.place(
-                git,
-                repository.url(),
-                repository.path(),
-                Some(repository.root()),
-                repository.default_branch(),
-                &mut progress,
-            ) {
-                Ok(cache) => Completion::Entry {
-                    index: *index,
-                    entry: Entry::new(
-                        repository,
-                        Outcome::Cloned { url: repository.url().to_string(), cache },
-                    ),
-                    prepared: true,
+        Task::Clone { index, repository } => {
+            let cache =
+                cache.ok_or_else(|| crate::AppError::internal("clone task has no cache store"))?;
+            Ok(
+                match cache.place(
+                    git,
+                    repository.url(),
+                    repository.path(),
+                    Some(repository.root()),
+                    repository.default_branch(),
+                    &mut progress,
+                ) {
+                    Ok(cache) => Completion::Entry {
+                        index: *index,
+                        entry: Entry::new(
+                            repository,
+                            Outcome::Cloned { url: repository.url().to_string(), cache },
+                        ),
+                        prepared: true,
+                    },
+                    Err(err) if err.is_internal() => return Err(err),
+                    Err(err) => Completion::Entry {
+                        index: *index,
+                        entry: Entry::new(
+                            repository,
+                            Outcome::Blocked {
+                                reason: BlockedReason::CloneFailed(err.to_string()),
+                            },
+                        ),
+                        prepared: false,
+                    },
                 },
-                Err(err) if err.is_internal() => return Err(err),
-                Err(err) => Completion::Entry {
-                    index: *index,
-                    entry: Entry::new(
-                        repository,
-                        Outcome::Blocked { reason: BlockedReason::CloneFailed(err.to_string()) },
-                    ),
-                    prepared: false,
-                },
-            },
-        ),
+            )
+        }
         Task::Fetch { index, repository, common_directory, default_branch } => {
+            let _lock = git.lock_repository(common_directory)?;
             Ok(match git.fetch(repository.path(), &mut progress) {
                 Ok(()) => Completion::Update(update::Task::new(
                     *index,

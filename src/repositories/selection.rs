@@ -25,7 +25,7 @@ pub fn select_repositories<'a>(
         let repository = by_name
             .get(name.as_str())
             .copied()
-            .ok_or_else(|| AppError::RepositoryNotFound(name.as_str().to_string()))?;
+            .ok_or_else(|| AppError::repository_not_found(name.as_str()))?;
         selected.push(repository);
     }
 
@@ -78,6 +78,7 @@ mod tests {
 
         let result = select_repositories(&repositories, &["missing".to_string()]);
 
-        assert!(matches!(result, Err(AppError::RepositoryNotFound(ref name)) if name == "missing"));
+        let error = result.expect_err("selection should reject an unknown repository");
+        assert_eq!(error.repository_name(), Some("missing"));
     }
 }

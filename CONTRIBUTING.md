@@ -15,7 +15,7 @@ just check
 just test
 ```
 
-`just coverage` runs tarpaulin with the repository's 30 percent floor.
+`just coverage` runs tarpaulin with the repository's 86 percent floor.
 
 ## Source ownership
 
