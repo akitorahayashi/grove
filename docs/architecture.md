@@ -187,6 +187,13 @@ Cache placement revalidates the destination's existing ancestor immediately
 before creating directories and invoking Git. A filesystem actor can still
 replace components between validation and mutation; the standard filesystem
 API provides no portable atomic confinement primitive for this residual race.
+Standalone clone invocations retain their raw operating-system arguments and
+delegate final parsing to Git. The clone argument classifier only determines
+whether cache injection preserves the requested semantics. Eligible invocations
+insert `--reference-if-able` and `--dissociate` immediately before the operands;
+all other invocations execute unchanged. This keeps Git authoritative for
+diagnostics and lets an entry removed after cache preparation degrade to a
+normal clone rather than a failure.
 
 `zoxide` owns optional capability checks and command execution. Registration
 uses an initial database snapshot, adds missing entries with per-path outcomes,

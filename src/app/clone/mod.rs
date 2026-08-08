@@ -1,13 +1,18 @@
 //! Single-repository clone through the local cache, independent of any
 //! configuration file.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::process::ExitStatus;
 use std::time::{Duration, Instant};
 
 use crate::AppError;
 use crate::app::AppContext;
 use crate::cache::Outcome as CacheOutcome;
-use crate::git::{GitClient, GitProgress, GitProgressSink};
+use crate::git::{
+    CloneCacheDecision, CloneCommand, CloneInvocation, GitClient, GitProgress, GitProgressSink,
+    NoopGitProgressSink,
+};
 use crate::phases::{DiscardEvents, Event, EventSink};
 use crate::repositories::RemoteUrl;
 
@@ -17,6 +22,35 @@ pub use crate::phases::Summary as PhaseSummary;
 #[non_exhaustive]
 pub enum Phase {
     Cloning,
+}
+
+#[derive(Debug)]
+pub(crate) enum CommandCache {
+    Used(CacheOutcome),
+    Bypassed(&'static str),
+    Delegated,
+    Unavailable(String),
+}
+
+#[derive(Debug)]
+pub(crate) struct CommandReport {
+    status: ExitStatus,
+    cache: CommandCache,
+    quiet: bool,
+}
+
+impl CommandReport {
+    pub(crate) fn status(&self) -> ExitStatus {
+        self.status
+    }
+
+    pub(crate) fn cache(&self) -> &CommandCache {
+        &self.cache
+    }
+
+    pub(crate) fn quiet(&self) -> bool {
+        self.quiet
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,6 +85,35 @@ pub fn execute(
     destination: Option<PathBuf>,
 ) -> Result<Report, AppError> {
     execute_with_events(ctx, url, destination, &DiscardEvents)
+}
+
+pub(crate) fn execute_command(
+    ctx: &AppContext<impl GitClient + CloneCommand>,
+    arguments: Vec<OsString>,
+) -> Result<CommandReport, AppError> {
+    let invocation = CloneInvocation::new(arguments);
+    let (reference, cache) = match invocation.cache() {
+        CloneCacheDecision::Eligible { url, insertion_index } => {
+            let mut progress = NoopGitProgressSink;
+            match ctx
+                .cache()
+                .and_then(|store| store.prepare_clone_reference(ctx.git(), url, &mut progress))
+            {
+                Ok((reference, outcome)) => {
+                    (Some((reference, *insertion_index)), CommandCache::Used(outcome))
+                }
+                Err(error) => (None, CommandCache::Unavailable(error.to_string())),
+            }
+        }
+        CloneCacheDecision::Bypassed(reason) => (None, CommandCache::Bypassed(reason)),
+        CloneCacheDecision::Delegated => (None, CommandCache::Delegated),
+    };
+
+    let status = ctx.git().clone_command(
+        &invocation,
+        reference.as_ref().map(|(path, index)| (path.as_path(), *index)),
+    )?;
+    Ok(CommandReport { status, cache, quiet: invocation.quiet() })
 }
 
 pub(crate) fn execute_with_events(
