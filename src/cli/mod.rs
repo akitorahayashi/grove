@@ -11,6 +11,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, error::ErrorKind};
 
+use crate::AppError;
 use crate::repositories::redact_urls_for_display;
 use output::{Output, terminal_multiline_text, terminal_text};
 
@@ -57,6 +58,7 @@ enum Commands {
 pub(in crate::cli) enum Completion {
     Success,
     Failure,
+    Code(u8),
 }
 
 /// Entry point for the CLI.
@@ -68,6 +70,18 @@ pub fn run() -> ExitCode {
 }
 
 fn run_with_args(args: impl IntoIterator<Item = OsString>, output: &mut Output<'_>) -> ExitCode {
+    let args = args.into_iter().collect::<Vec<_>>();
+    if let Some(arguments) = direct_clone_arguments(&args) {
+        return render_completion(
+            commands::clone::run(
+                None,
+                commands::clone::CloneCommand::from_raw(arguments.to_vec()),
+                output,
+            ),
+            output,
+        );
+    }
+
     let cli = match Cli::try_parse_from(args) {
         Ok(cli) => cli,
         Err(error) => return render_clap_error(error, output),
@@ -83,9 +97,21 @@ fn run_with_args(args: impl IntoIterator<Item = OsString>, output: &mut Output<'
         Commands::Validate(command) => commands::validate::run(cli.config, command, output),
     };
 
+    render_completion(result, output)
+}
+
+fn direct_clone_arguments(args: &[OsString]) -> Option<&[OsString]> {
+    match args.get(1).and_then(|argument| argument.to_str()) {
+        Some("clone" | "cl") => Some(&args[2..]),
+        _ => None,
+    }
+}
+
+fn render_completion(result: Result<Completion, AppError>, output: &mut Output<'_>) -> ExitCode {
     match result {
         Ok(Completion::Success) => ExitCode::SUCCESS,
         Ok(Completion::Failure) => ExitCode::FAILURE,
+        Ok(Completion::Code(code)) => ExitCode::from(code),
         Err(error)
             if error
                 .io_error()

@@ -3,6 +3,7 @@
 mod branch_update;
 mod cache_entry;
 mod client;
+mod clone;
 mod command;
 mod default_branch;
 mod probe;
@@ -16,6 +17,7 @@ pub(crate) use client::RepositoryLock;
 pub use client::{
     CacheEntry, DefaultBranch, GitClient, GitProgressSink, NoopGitProgressSink, RepositoryProbe,
 };
+pub(crate) use clone::{CacheDecision as CloneCacheDecision, CloneCommand, CloneInvocation};
 pub use command::CommandGitClient;
 pub use progress::{GitProgress, parse_git_progress};
 pub use remote::urls_match;

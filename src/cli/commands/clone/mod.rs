@@ -1,25 +1,28 @@
-use std::io;
+use std::ffi::OsString;
 use std::path::PathBuf;
+use std::process::ExitStatus;
 
 use clap::Args;
-use owo_colors::OwoColorize;
 
 use crate::AppError;
 use crate::app::api;
-use crate::app::clone::{Phase, PhaseSummary, Report};
+use crate::app::clone::CommandCache;
 
 use crate::cli::Completion;
 use crate::cli::output::{Output, terminal_text};
-use crate::cli::tty::progress::{ProgressPhase, run_with_progress};
-use crate::cli::tty::report::{cache_annotation, write_line};
+use crate::cli::tty::report::{cache_annotation, safe_message};
 
 #[derive(Args)]
+#[command(disable_help_flag = true, trailing_var_arg = true)]
 pub(in crate::cli) struct CloneCommand {
-    #[arg(value_name = "url")]
-    url: String,
+    #[arg(value_name = "git-clone-argument", num_args = 0.., allow_hyphen_values = true)]
+    arguments: Vec<OsString>,
+}
 
-    #[arg(value_name = "dest")]
-    dest: Option<PathBuf>,
+impl CloneCommand {
+    pub(in crate::cli) fn from_raw(arguments: Vec<OsString>) -> Self {
+        Self { arguments }
+    }
 }
 
 pub(in crate::cli) fn run(
@@ -31,47 +34,45 @@ pub(in crate::cli) fn run(
         return Err(AppError::invalid_arguments("--config cannot be used with clone"));
     }
 
-    let report = run_with_progress(
-        output,
-        "clone",
-        move |sender| api::clone_with_events(command.url, command.dest, &sender),
-        print_phase_completion,
-    )?;
+    let report = api::clone_command(command.arguments)?;
+    match report.cache() {
+        CommandCache::Used(_) | CommandCache::Bypassed(_) if report.quiet() => {}
+        CommandCache::Used(outcome) => output.stderr(format_args!(
+            "gv: clone cache {}\n",
+            terminal_text(cache_annotation(*outcome))
+        ))?,
+        CommandCache::Bypassed(reason) => {
+            output.stderr(format_args!("gv: clone cache bypassed: {}\n", terminal_text(reason)))?
+        }
+        CommandCache::Delegated => {}
+        CommandCache::Unavailable(message) => output.stderr(format_args!(
+            "gv: clone cache unavailable; cloned without cache: {}\n",
+            safe_message(message)
+        ))?,
+    }
 
-    print_report(&report, output)?;
-    Ok(Completion::Success)
+    if report.status().success() {
+        Ok(Completion::Success)
+    } else {
+        Ok(Completion::Code(status_code(report.status())))
+    }
 }
 
-impl ProgressPhase for Phase {
-    fn message(self) -> &'static str {
-        match self {
-            Phase::Cloning => "Cloning repository...",
+fn status_code(status: ExitStatus) -> u8 {
+    if let Some(code) = status.code().and_then(|code| u8::try_from(code).ok()) {
+        return code;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+
+        if let Some(signal) = status.signal()
+            && let Ok(code) = u8::try_from(128 + signal)
+        {
+            return code;
         }
     }
 
-    fn shows_git_progress(self) -> bool {
-        true
-    }
-}
-
-fn print_phase_completion(
-    _phase: Phase,
-    _summary: PhaseSummary,
-    _output: &mut Output<'_>,
-) -> io::Result<()> {
-    Ok(())
-}
-
-fn print_report(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
-    let destination = terminal_text(&report.destination().display().to_string());
-    write_line(
-        output,
-        format_args!(
-            " {} {} {}",
-            "+".green(),
-            destination.bold(),
-            format!("from {} {}", terminal_text(report.url()), cache_annotation(report.cache()))
-                .dimmed()
-        ),
-    )
+    1
 }

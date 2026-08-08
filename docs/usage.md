@@ -156,11 +156,16 @@ later clones of that URL transfer only the difference. Each URL is seeded once.
 Seeding runs as its own phase and is best-effort: a failure is reported as a
 note without changing the repository's own result.
 
-`gv clone <url> [dest]` clones a single repository through the cache without
-reading or writing `grove.toml`. `dest` defaults to the final URL path segment
-with a trailing `.git` removed. An existing non-empty destination is rejected,
-and `--config` is not accepted. It is a cache-accelerated `git clone`, not a
-reimplementation of every `git clone` option.
+`gv clone [<git-clone-options>] [--] <repository> [<directory>]` accepts the
+system Git's complete clone command surface without reading or writing
+`grove.toml`. Grove preserves Git's operand parsing, output, destination rules,
+and process exit status. Standard clones borrow objects from the local cache
+and dissociate before completion. Options that define object sharing, history
+selection, or transport configuration run unchanged without cache injection;
+the reason is reported on stderr. Unknown options are also delegated unchanged,
+so the installed Git remains the authority for validation and future options.
+Failure to prepare the cache is reported and falls back to the unchanged Git
+invocation, while a failure from the final clone is returned without retrying.
 
 `gv cache list` reports cached repositories in `URL` and `UPDATED` columns. `gv
 cache clean` removes every entry; `gv cache clean <repo>...` removes the entries

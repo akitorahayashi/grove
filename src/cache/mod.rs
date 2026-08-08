@@ -100,6 +100,26 @@ impl Store {
         Ok(outcome)
     }
 
+    /// Ensure a reusable entry for a standalone clone and return its bare Git
+    /// directory. The caller uses `--reference-if-able`, so removing the entry
+    /// after this method releases its lock cannot make the clone fail.
+    pub(crate) fn prepare_clone_reference(
+        &self,
+        git: &impl CacheEntry,
+        url: &RemoteUrl,
+        progress: &mut dyn GitProgressSink,
+    ) -> Result<(PathBuf, Outcome), AppError> {
+        let key = url.as_process_argument();
+        let _global_lock = self.global_lock(LockMode::Shared)?;
+        let _entry_lock = self.entry_lock(key)?;
+
+        let container = self.root.join(entry_directory_name(key));
+        let bare = container.join("git");
+        let outcome = self.ensure_entry(git, url, &container, &bare, None, progress)?;
+        touch_updated(&container)?;
+        Ok((bare, outcome))
+    }
+
     /// Seed a cache entry for `url` from an already-present local clone,
     /// without placing any destination. The remote's default branch is tracked
     /// (as with `gv clone`), and objects are borrowed from `source` and

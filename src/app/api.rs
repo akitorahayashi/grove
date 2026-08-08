@@ -1,5 +1,6 @@
 //! Public application API facade.
 
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 use crate::AppError;
@@ -47,6 +48,11 @@ pub fn clone(url: String, destination: Option<PathBuf>) -> Result<clone::Report,
     clone::execute(&ctx, &url, destination)
 }
 
+pub(crate) fn clone_command(arguments: Vec<OsString>) -> Result<clone::CommandReport, AppError> {
+    let ctx = default_context();
+    clone::execute_command(&ctx, arguments)
+}
+
 pub(crate) fn cache_list() -> Result<Vec<crate::cache::EntryInfo>, AppError> {
     let ctx = default_context();
     cache::list(ctx.cache()?)
@@ -82,13 +88,4 @@ pub(crate) fn sync_with_events(
 ) -> Result<sync::Report, AppError> {
     let ctx = default_context();
     sync::execute_with_events(&ctx, config_path.as_deref(), &targets, options, events)
-}
-
-pub(crate) fn clone_with_events(
-    url: String,
-    destination: Option<PathBuf>,
-    events: &impl EventSink<clone::Phase>,
-) -> Result<clone::Report, AppError> {
-    let ctx = default_context();
-    clone::execute_with_events(&ctx, &url, destination, events)
 }
