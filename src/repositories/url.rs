@@ -22,13 +22,17 @@ impl RemoteUrl {
         &self.0
     }
 
-    /// The transport-independent repository identity: `host[:port]/path` with
-    /// the host lowercased and userinfo, query, fragment, leading and trailing
-    /// slashes, and a trailing `.git` dropped. The `git@` and `https://` forms
-    /// of one repository share this identity, and credentials embedded in a
-    /// URL never become part of it. `file://` URLs reduce to their path;
-    /// local paths stay verbatim because on a filesystem `repo` and
-    /// `repo.git` are genuinely different directories.
+    /// The repository identity the cache keys on: `host[:port]/path` with the
+    /// host lowercased and userinfo, query, fragment, leading and trailing
+    /// slashes, and a trailing `.git` dropped, so the `git@` and `https://`
+    /// forms of one repository share it and embedded credentials never become
+    /// part of it. This follows Git hosting conventions rather than proven
+    /// equivalence — on plain SSH servers, userinfo or a home-relative path
+    /// can distinguish repositories — so the cache treats a shared identity
+    /// as a hint and rebuilds an entry whose refresh fails (see
+    /// `crate::cache`). `file://` URLs reduce to their path; local paths stay
+    /// verbatim because on a filesystem `repo` and `repo.git` are genuinely
+    /// different directories.
     pub(crate) fn identity(&self) -> String {
         let value = self.0.as_str();
         if let Some((scheme, remainder)) = value.split_once("://") {
@@ -36,11 +40,10 @@ impl RemoteUrl {
             let (authority, resource) = remainder.split_at(authority_end);
             let host = authority.rsplit_once('@').map_or(authority, |(_, host)| host);
             if scheme.eq_ignore_ascii_case("file") {
-                return if host.is_empty() || host.eq_ignore_ascii_case("localhost") {
-                    resource.to_string()
-                } else {
-                    value.to_string()
-                };
+                // Git resolves file:// URLs by their path alone, discarding
+                // the authority, so a host or userinfo never distinguishes
+                // repositories and must not reach the identity.
+                return resource.to_string();
             }
             return join_identity(host, resource);
         }
@@ -341,7 +344,12 @@ mod tests {
 
     #[test]
     fn identity_reduces_file_urls_to_their_verbatim_path() {
-        for url in ["file:///srv/git/repo.git", "file://localhost/srv/git/repo.git"] {
+        for url in [
+            "file:///srv/git/repo.git",
+            "file://localhost/srv/git/repo.git",
+            "file://example.com/srv/git/repo.git",
+            "file://user:secret@example.com/srv/git/repo.git",
+        ] {
             assert_eq!(RemoteUrl::new(url).unwrap().identity(), "/srv/git/repo.git", "{url}");
         }
     }

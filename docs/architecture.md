@@ -138,10 +138,13 @@ and removes cache entries.
 transport-independent URL identity (`RemoteUrl::identity`), with entry layout,
 identity keying, origin repointing on reuse, advisory global and per-entry file
 locking, placement that borrows objects through `--reference --dissociate`, and
-seeding from an existing local clone. Placement, seeding, listing, named
+seeding from an existing local clone. A failed entry refresh rebuilds the
+entry from the requested URL, so heuristic identity sharing reduces transfer
+at worst and never blocks placement. Placement, seeding, listing, named
 removal, and whole-cache cleaning use one lock order across processes. The
-owner-only cache root contains stable lock files and only real entry
-directories are inspected. The sync, clone, and cache use cases share it.
+owner-only cache root records its format version and is emptied under the
+exclusive global lock when the recorded format is not current; it contains
+stable lock files and only real entry directories are inspected. The sync, clone, and cache use cases share it.
 
 `phases` owns phase-structured bounded-parallel execution. `events` owns the
 phase-generic event, sink, and progress adapter; `run` owns the check and worker
