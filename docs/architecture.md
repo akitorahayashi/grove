@@ -55,6 +55,7 @@ src/
       fetch.rs
       mod.rs
       report.rs
+      task.rs
       update.rs
     status.rs
     sync/
