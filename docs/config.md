@@ -28,6 +28,21 @@ precedence over `origin/HEAD`; `origin/HEAD` is used only when the field is
 absent. Branch names are validated as Git refs without invoking Git, so `gv
 validate` remains independent of installed external tools.
 
+## Discovery
+
+Commands that read configuration locate `grove.toml` by searching the current
+directory and then its ancestors, so they work from anywhere inside the tree the
+root file covers. The nearest file wins, which leaves a nested `grove.toml`
+authoritative for its own subtree. A `grove.toml` entry that exists but cannot
+be resolved — a broken symlink, an unreadable file, or a non-file — ends the
+search as a failure rather than deferring to a parent. When the search ascends
+above the current directory, the resolved file is named on stderr; `gv
+validate` is the exception, always naming the file on stdout in its summary.
+
+`--config <path>` addresses a file directly and performs no search. `gv init`
+writes to the current directory, and `gv clone`, `gv cache list`, and
+`gv cache clean` without repository names read no configuration.
+
 ## Path resolution
 
 Explicit paths are resolved relative to the `grove.toml` file that defines

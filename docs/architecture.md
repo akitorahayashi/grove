@@ -118,6 +118,8 @@ repository-count wording are shared across the phase-emitting commands rather
 than duplicated per command. The column-aligned table is shared between the
 status and cache listings, which emit styling unconditionally and let `output`
 strip ANSI when the destination or environment calls for plain text.
+Configuration-reading subcommands resolve the `grove.toml` path before invoking
+their use case and name a file that discovery found above the current directory.
 Subcommands return completion or error values. The
 crate-root `cli` function returns `ExitCode`; `main` is the sole process
 termination boundary. Output write failures propagate, and a closed stdout pipe
@@ -159,7 +161,8 @@ channel disconnects become application errors.
 the conditions the use cases share, so their reason vocabularies map from one
 probe and their shared messages cannot drift.
 
-`config` discovers the root file, resolves one include level, decodes TOML, and
+`config` discovers the root file by ascending from the current directory to the
+nearest `grove.toml`, resolves one include level, decodes TOML, and
 validates the complete catalog without invoking Git or zoxide. It rejects schema
 violations, unsupported versions, duplicate or nested includes, invalid names
 and branch refs, duplicate or nested repository identities, absolute paths, and

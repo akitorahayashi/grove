@@ -37,7 +37,9 @@ repositories.
 local clone cache from the command line. `gv cache list`, with the alias `gv c ls`,
 and `gv cache clean`, with the alias `gv c cln`, operate on cache entries.
 
-Configuration file schema and validation rules are documented in
+Commands that read configuration search the current directory and its ancestors
+for `grove.toml`, and `--config <path>` addresses one directly. Configuration
+discovery, file schema, and validation rules are documented in
 [configuration](config.md).
 
 ## Status
@@ -199,7 +201,9 @@ aarch64 binaries. Checksums, signatures, and attestations are not published.
 The supported Rust API is the crate-root facade: `cli`, `clone`, `refresh`,
 `status`, `sync`, and `validate`, plus their report, outcome, and error types.
 `sync` and `refresh` take option structs: `sync(config, targets, SyncOptions)`
-and `refresh(config, targets, RefreshOptions)`. `SyncOptions` carries the
+and `refresh(config, targets, RefreshOptions)`. A `None` config argument
+discovers `grove.toml` from the process's current directory upward, matching the
+CLI. `SyncOptions` carries the
 dry-run and zoxide-registration flags, so library callers reach the same zoxide
 report as the CLI. `clone(url, destination)` clones a single URL through the
 cache and returns a `CloneReport` carrying the resulting `CacheOutcome`. Sync
