@@ -134,8 +134,9 @@ directory. Results retain selection order. Refresh blocks selected linked
 worktrees that would finish on the same default branch. The cache use case lists
 and removes cache entries.
 
-`cache` owns the local clone cache: a bare, single-branch entry per verbatim
-remote URL, with entry layout, URL keying, advisory global and per-entry file
+`cache` owns the local clone cache: a bare, single-branch entry per
+transport-independent URL identity (`RemoteUrl::identity`), with entry layout,
+identity keying, origin repointing on reuse, advisory global and per-entry file
 locking, placement that borrows objects through `--reference --dissociate`, and
 seeding from an existing local clone. Placement, seeding, listing, named
 removal, and whole-cache cleaning use one lock order across processes. The
@@ -161,7 +162,8 @@ and branch refs, duplicate or nested repository identities, absolute paths, and
 paths outside the canonical grove root.
 
 `repositories` owns validated repository values. `RemoteUrl` exposes raw text
-only through its process-argument accessor; `Display` and `Debug` are redacted.
+only through its process-argument accessor; `Display` and `Debug` are redacted,
+and the credential-free cache identity derives from it.
 Repository path resolution canonicalizes the deepest existing ancestor and
 appends the nonexistent suffix. In-root aliases resolve to one operational
 identity while retaining the configured display path.

@@ -21,6 +21,52 @@ impl RemoteUrl {
     pub fn as_process_argument(&self) -> &str {
         &self.0
     }
+
+    /// The transport-independent repository identity: `host[:port]/path` with
+    /// the host lowercased and userinfo, query, fragment, leading and trailing
+    /// slashes, and a trailing `.git` dropped. The `git@` and `https://` forms
+    /// of one repository share this identity, and credentials embedded in a
+    /// URL never become part of it. `file://` URLs reduce to their path;
+    /// local paths stay verbatim because on a filesystem `repo` and
+    /// `repo.git` are genuinely different directories.
+    pub(crate) fn identity(&self) -> String {
+        let value = self.0.as_str();
+        if let Some((scheme, remainder)) = value.split_once("://") {
+            let authority_end = remainder.find(['/', '?', '#']).unwrap_or(remainder.len());
+            let (authority, resource) = remainder.split_at(authority_end);
+            let host = authority.rsplit_once('@').map_or(authority, |(_, host)| host);
+            if scheme.eq_ignore_ascii_case("file") {
+                return if host.is_empty() || host.eq_ignore_ascii_case("localhost") {
+                    resource.to_string()
+                } else {
+                    value.to_string()
+                };
+            }
+            return join_identity(host, resource);
+        }
+
+        // scp-like syntax: a ':' before the first '/' separates host and path
+        // (git's own rule); a leading path segment such as `./` never
+        // contains one, so local paths fall through verbatim.
+        let head = value.split('/').next().unwrap_or_default();
+        if head.contains(':')
+            && let Some((before, path)) = value.split_once(':')
+            && !before.is_empty()
+        {
+            let host = before.rsplit_once('@').map_or(before, |(_, host)| host);
+            return join_identity(host, path);
+        }
+
+        value.to_string()
+    }
+}
+
+fn join_identity(host: &str, resource: &str) -> String {
+    let path = resource.split(['?', '#']).next().unwrap_or_default();
+    let trimmed = path.trim_matches('/');
+    let path = trimmed.strip_suffix(".git").unwrap_or(trimmed).trim_end_matches('/');
+    let host = host.to_ascii_lowercase();
+    if path.is_empty() { host } else { format!("{host}/{path}") }
 }
 
 impl fmt::Display for RemoteUrl {
@@ -262,6 +308,47 @@ mod tests {
             displayed,
             "failed (HTTPS://[redacted]@example.com/repo.git?token=[redacted]), retry"
         );
+    }
+
+    #[test]
+    fn identity_unifies_transports_of_one_repository() {
+        for url in [
+            "https://github.com/Org/Repo.git",
+            "HTTPS://GITHUB.COM/Org/Repo",
+            "https://user:secret@github.com/Org/Repo.git?access_token=value#fragment",
+            "ssh://git@github.com/Org/Repo.git",
+            "git@github.com:Org/Repo.git",
+            "git@GitHub.com:/Org/Repo/",
+        ] {
+            assert_eq!(RemoteUrl::new(url).unwrap().identity(), "github.com/Org/Repo", "{url}");
+        }
+    }
+
+    #[test]
+    fn identity_keeps_ports_distinct() {
+        assert_eq!(
+            RemoteUrl::new("ssh://git@example.com:2222/org/repo.git").unwrap().identity(),
+            "example.com:2222/org/repo"
+        );
+    }
+
+    #[test]
+    fn identity_keeps_local_paths_verbatim() {
+        for path in ["/srv/git/repo.git", "./relative/repo", "../repo.git/", "seeds/blog"] {
+            assert_eq!(RemoteUrl::new(path).unwrap().identity(), path, "{path}");
+        }
+    }
+
+    #[test]
+    fn identity_reduces_file_urls_to_their_verbatim_path() {
+        for url in ["file:///srv/git/repo.git", "file://localhost/srv/git/repo.git"] {
+            assert_eq!(RemoteUrl::new(url).unwrap().identity(), "/srv/git/repo.git", "{url}");
+        }
+    }
+
+    #[test]
+    fn identity_treats_colons_after_the_first_path_segment_as_local() {
+        assert_eq!(RemoteUrl::new("./odd:name/repo").unwrap().identity(), "./odd:name/repo");
     }
 
     #[test]

@@ -1,10 +1,13 @@
 //! Local clone cache.
 //!
 //! A cache entry is a bare, single-branch repository under the user cache
-//! directory, keyed by the verbatim remote URL. Placement clones the real
-//! remote while borrowing objects from the entry (`--reference --dissociate`),
-//! so the placed clone is self-contained and correct even when the entry is
-//! stale or narrow — the entry only reduces network transfer.
+//! directory, keyed by the URL's transport-independent identity
+//! ([`RemoteUrl::identity`]), so the `git@` and `https://` forms of one
+//! repository share an entry. Reuse repoints the entry's origin at the
+//! requested URL before fetching. Placement clones the real remote while
+//! borrowing objects from the entry (`--reference --dissociate`), so the
+//! placed clone is self-contained and correct even when the entry is stale or
+//! narrow — the entry only reduces network transfer.
 
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
@@ -82,11 +85,11 @@ impl Store {
     ) -> Result<Outcome, AppError> {
         guard_destination(destination, grove_root)?;
 
-        let key = url.as_process_argument();
+        let key = url.identity();
         let _global_lock = self.global_lock(LockMode::Shared)?;
-        let _entry_lock = self.entry_lock(key)?;
+        let _entry_lock = self.entry_lock(&key)?;
 
-        let container = self.root.join(entry_directory_name(key));
+        let container = self.root.join(entry_directory_name(&key));
         let bare = container.join("git");
         let wanted = branch.map(BranchName::as_str);
 
@@ -109,11 +112,11 @@ impl Store {
         url: &RemoteUrl,
         progress: &mut dyn GitProgressSink,
     ) -> Result<(PathBuf, Outcome), AppError> {
-        let key = url.as_process_argument();
+        let key = url.identity();
         let _global_lock = self.global_lock(LockMode::Shared)?;
-        let _entry_lock = self.entry_lock(key)?;
+        let _entry_lock = self.entry_lock(&key)?;
 
-        let container = self.root.join(entry_directory_name(key));
+        let container = self.root.join(entry_directory_name(&key));
         let bare = container.join("git");
         let outcome = self.ensure_entry(git, url, &container, &bare, None, progress)?;
         touch_updated(&container)?;
@@ -133,11 +136,11 @@ impl Store {
         source: &Path,
         progress: &mut dyn GitProgressSink,
     ) -> Result<bool, AppError> {
-        let key = url.as_process_argument();
+        let key = url.identity();
         let _global_lock = self.global_lock(LockMode::Shared)?;
-        let _entry_lock = self.entry_lock(key)?;
+        let _entry_lock = self.entry_lock(&key)?;
 
-        let container = self.root.join(entry_directory_name(key));
+        let container = self.root.join(entry_directory_name(&key));
         if container.exists() {
             return Ok(false);
         }
@@ -151,7 +154,7 @@ impl Store {
     /// callers can skip resolving a seed source for an already-cached URL; the
     /// authoritative check happens under the entry lock in `seed_from_local`.
     pub(crate) fn is_cached(&self, url: &RemoteUrl) -> bool {
-        self.root.join(entry_directory_name(url.as_process_argument())).exists()
+        self.root.join(entry_directory_name(&url.identity())).exists()
     }
 
     /// Enumerate cache entries for reporting.
@@ -199,10 +202,10 @@ impl Store {
 
     /// Remove the cache entry for a single URL, if present.
     pub(crate) fn remove(&self, url: &RemoteUrl) -> Result<bool, AppError> {
-        let key = url.as_process_argument();
+        let key = url.identity();
         let _global_lock = self.global_lock(LockMode::Shared)?;
-        let _entry_lock = self.entry_lock(key)?;
-        let container = self.root.join(entry_directory_name(url.as_process_argument()));
+        let _entry_lock = self.entry_lock(&key)?;
+        let container = self.root.join(entry_directory_name(&key));
         let metadata = match fs::symlink_metadata(&container) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
@@ -248,7 +251,7 @@ impl Store {
         }
 
         match read_metadata(container, "url")? {
-            Some(recorded) if recorded == url.as_process_argument() => {}
+            Some(recorded) if recorded == url.identity() => {}
             Some(_) => {
                 return Err(AppError::cache_state(format!(
                     "cache entry '{}' records a different URL",
@@ -269,12 +272,12 @@ impl Store {
         if let Some(wanted) = wanted
             && read_metadata(container, "branch")?.as_deref() != Some(wanted)
         {
-            git.cache_retarget(bare, wanted, progress)?;
+            git.cache_retarget(bare, url, wanted, progress)?;
             write_branch(container, wanted)?;
             return Ok(Outcome::Retargeted);
         }
 
-        git.cache_update(bare, progress)?;
+        git.cache_update(bare, url, progress)?;
         Ok(Outcome::Hit)
     }
 
@@ -293,7 +296,7 @@ impl Store {
         }
 
         let tracked = git.cache_create(url, &temporary.join("git"), wanted, reference, progress)?;
-        fs::write(temporary.join("url"), url.as_process_argument())?;
+        fs::write(temporary.join("url"), url.identity())?;
         write_branch(&temporary, &tracked)?;
 
         if container.exists() {
@@ -434,11 +437,12 @@ fn cache_root_from_env() -> Result<PathBuf, AppError> {
     Err(AppError::cache_state("cannot determine the cache directory: set XDG_CACHE_HOME or HOME"))
 }
 
-fn entry_directory_name(url: &str) -> String {
-    // The hash keys on the verbatim URL, but the human-readable slug is built
-    // from the redacted URL so credentials never land in a directory name.
-    let slug = slug(&redact_urls_for_display(url));
-    let hash = fnv1a(url.as_bytes());
+fn entry_directory_name(key: &str) -> String {
+    // The key is the transport-independent identity, which already drops URL
+    // credentials; the slug is still built from the redacted form so a
+    // verbatim (local-path) key can never land secrets in a directory name.
+    let slug = slug(&redact_urls_for_display(key));
+    let hash = fnv1a(key.as_bytes());
     if slug.is_empty() { format!("{hash:016x}") } else { format!("{slug}-{hash:016x}") }
 }
 
@@ -692,6 +696,41 @@ mod tests {
     }
 
     #[test]
+    fn transports_sharing_an_identity_share_the_entry_and_repoint_its_origin() {
+        let tmp = TempDir::new().unwrap();
+        let remote = make_remote(&tmp.path().join("origin"), false);
+        let cache_root = tmp.path().join("cache");
+        let store = Store::with_root(cache_root.clone());
+        let git = CommandGitClient::default();
+        let path_form = url_of(&remote);
+        let file_form = RemoteUrl::new(&format!("file://{}", remote.display())).unwrap();
+
+        let first = store
+            .place(&git, &path_form, &tmp.path().join("a"), None, None, &mut NoopGitProgressSink)
+            .unwrap();
+        assert_eq!(first, Outcome::Miss);
+
+        let second = store
+            .place(&git, &file_form, &tmp.path().join("b"), None, None, &mut NoopGitProgressSink)
+            .unwrap();
+        assert_eq!(second, Outcome::Hit, "the file:// form must reuse the path form's entry");
+
+        // `single_entry` asserts the two forms did not create separate entries.
+        let bare = single_entry(&cache_root).join("git");
+        let output = Command::new("git")
+            .current_dir(&bare)
+            .args(["remote", "get-url", "origin"])
+            .output()
+            .expect("run git remote get-url");
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            file_form.as_process_argument(),
+            "reuse must repoint the entry's origin at the requested URL",
+        );
+    }
+
+    #[test]
     fn mismatched_url_metadata_is_rejected() {
         let tmp = TempDir::new().unwrap();
         let remote = make_remote(&tmp.path().join("origin"), false);
@@ -740,7 +779,7 @@ mod tests {
         let store = Store::with_root(cache_root.clone());
         let git = CommandGitClient::default();
         let url = url_of(&remote);
-        let container = cache_root.join(entry_directory_name(url.as_process_argument()));
+        let container = cache_root.join(entry_directory_name(&url.identity()));
         let staging = temporary_path(&container);
         fs::create_dir_all(&staging).unwrap();
         fs::write(staging.join("partial"), "incomplete").unwrap();
