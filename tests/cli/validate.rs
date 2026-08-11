@@ -588,3 +588,29 @@ fn validate_reports_the_searched_directory_when_no_config_exists() {
         .stderr(predicate::str::contains("grove.toml was not found in"))
         .stderr(predicate::str::contains("or any parent directory"));
 }
+
+#[cfg(unix)]
+#[test]
+fn validate_surfaces_a_broken_config_symlink_instead_of_ascending() {
+    let ctx = TestContext::new();
+    ctx.write_config(
+        r#"
+version = 1
+[repos.blog]
+path = "blog"
+url = "git@example.com:blog.git"
+"#,
+    );
+    let nested = ctx.workspace().join("inner");
+    std::fs::create_dir_all(&nested).expect("failed to create nested directory");
+    std::os::unix::fs::symlink(nested.join("missing-target.toml"), nested.join("grove.toml"))
+        .expect("failed to create broken symlink");
+
+    ctx.cli()
+        .current_dir(&nested)
+        .arg("validate")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("grove.toml"))
+        .stderr(predicate::str::contains("Validated").not());
+}

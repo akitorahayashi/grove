@@ -1,3 +1,4 @@
+use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::AppError;
@@ -20,8 +21,29 @@ pub(crate) fn locate(explicit_config: Option<&Path>) -> Result<PathBuf, AppError
     let start = std::env::current_dir()?;
     for directory in start.ancestors() {
         let candidate = directory.join(CONFIG_FILE_NAME);
-        if candidate.is_file() {
-            return candidate.canonicalize().map_err(AppError::from);
+        // The presence of the entry itself ends the search: a broken symlink
+        // or unreadable file here must surface as a failure, not silently
+        // defer to a parent configuration covering a different repository set.
+        match std::fs::symlink_metadata(&candidate) {
+            Ok(_) => {
+                let resolved = candidate.canonicalize().map_err(|err| {
+                    AppError::config_source(format!("{}: {err}", candidate.display()), err)
+                })?;
+                if !resolved.is_file() {
+                    return Err(AppError::config_error(format!(
+                        "{}: not a regular file",
+                        candidate.display()
+                    )));
+                }
+                return Ok(resolved);
+            }
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+            Err(err) => {
+                return Err(AppError::config_source(
+                    format!("{}: {err}", candidate.display()),
+                    err,
+                ));
+            }
         }
     }
 
