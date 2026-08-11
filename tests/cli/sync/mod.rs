@@ -1211,3 +1211,32 @@ fn configured_default_branch_overrides_stale_origin_head() {
         .success()
         .stderr(predicate::str::contains("~ blog main"));
 }
+
+#[test]
+fn sync_discovers_config_from_a_subdirectory_and_names_it() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    let config = ctx.write_config(&format!(
+        r#"
+version = 1
+
+[repos.blog]
+path = "blog"
+url = "{}"
+"#,
+        remote.url()
+    ));
+    let config = config.canonicalize().expect("failed to resolve config path");
+    let nested = ctx.workspace().join("nested").join("deeper");
+    std::fs::create_dir_all(&nested).expect("failed to create nested directory");
+
+    ctx.cli()
+        .current_dir(&nested)
+        .arg("sync")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(format!("Config: {}", config.display())))
+        .stderr(predicate::str::contains("+ blog"));
+
+    assert!(ctx.workspace().join("blog").join(".git").exists());
+}

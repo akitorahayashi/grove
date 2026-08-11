@@ -518,3 +518,73 @@ default_branch = "release/stable"
 
     ctx.cli().arg("--config").arg(config).arg("validate").assert().success();
 }
+
+#[test]
+fn validate_discovers_config_in_a_parent_directory() {
+    let ctx = TestContext::new();
+    let config = ctx.write_config(
+        r#"
+version = 1
+[repos.blog]
+path = "blog"
+url = "git@example.com:blog.git"
+"#,
+    );
+    let config = config.canonicalize().expect("failed to resolve config path");
+    let nested = ctx.workspace().join("blog").join("docs");
+    std::fs::create_dir_all(&nested).expect("failed to create nested directory");
+
+    ctx.cli()
+        .current_dir(&nested)
+        .arg("validate")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Validated 1 repository"))
+        .stdout(predicate::str::contains(format!("Config: {}", config.display())));
+}
+
+#[test]
+fn validate_prefers_the_nearest_config_while_ascending() {
+    let ctx = TestContext::new();
+    ctx.write_config(
+        r#"
+version = 1
+[repos.blog]
+path = "blog"
+url = "git@example.com:blog.git"
+"#,
+    );
+    let nested = ctx.write_config_at(
+        "inner/grove.toml",
+        r#"
+version = 1
+[repos.frontend]
+path = "frontend"
+url = "git@example.com:frontend.git"
+[repos.backend]
+path = "backend"
+url = "git@example.com:backend.git"
+"#,
+    );
+    let nested = nested.canonicalize().expect("failed to resolve config path");
+
+    ctx.cli()
+        .current_dir(ctx.workspace().join("inner"))
+        .arg("validate")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Validated 2 repositories"))
+        .stdout(predicate::str::contains(format!("Config: {}", nested.display())));
+}
+
+#[test]
+fn validate_reports_the_searched_directory_when_no_config_exists() {
+    let ctx = TestContext::new();
+
+    ctx.cli()
+        .arg("validate")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("grove.toml was not found in"))
+        .stderr(predicate::str::contains("or any parent directory"));
+}

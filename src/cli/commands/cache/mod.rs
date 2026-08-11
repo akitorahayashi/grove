@@ -72,6 +72,12 @@ fn run_clean(
     repositories: Vec<String>,
     output: &mut Output<'_>,
 ) -> Result<Completion, AppError> {
+    // Cleaning the whole cache reads no configuration, so it stays usable
+    // outside a grove root.
+    let config = match repositories.is_empty() {
+        true => None,
+        false => Some(super::resolve_config(config, output)?),
+    };
     let report = api::cache_clean(config, repositories)?;
     let removed = report.removed();
     let noun = if removed == 1 { "entry" } else { "entries" };
