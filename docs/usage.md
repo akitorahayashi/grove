@@ -132,20 +132,31 @@ when neither variable is set, the command fails rather than choosing another
 location.
 
 Each cache entry is a bare, single-branch repository holding the default branch
-history, keyed by the verbatim remote URL. The `git@` and `https://` forms of
-one repository are distinct entries. Placement runs
-`git clone --reference <entry> --dissociate` against the real remote, so
-`origin` points at the requested URL and the placed clone is self-contained;
-removing the cache never affects existing clones. Because Git objects are
-content-addressed and refs always come from the real remote, a stale or narrow
-entry only reduces transfer and never yields an incorrect clone.
+history, keyed by the URL's transport-independent identity: `host[:port]/path`
+with the host lowercased and userinfo, query, fragment, and a trailing `.git`
+dropped. The `git@` and `https://` forms of one repository share one entry;
+`file://` URLs reduce to their path and local paths are keyed verbatim. The
+identity follows Git hosting conventions rather than proven equivalence, so
+URL forms Git can resolve to different repositories may share an entry; the
+refresh-failure rebuild below keeps that a transfer-efficiency concern rather
+than a correctness one. On reuse the entry's origin is repointed at the
+requested URL before fetching, so the caller's transport and credentials
+apply. `gv cache list` shows the identity. Placement runs `git clone --reference <entry> --dissociate` against
+the real remote, so `origin` points at the requested URL and the placed clone
+is self-contained; removing the cache never affects existing clones. Because
+Git objects are content-addressed and refs always come from the real remote, a
+stale or narrow entry only reduces transfer and never yields an incorrect
+clone.
 
 On each use the entry is created when absent, refreshed when present, rebuilt
-when unusable, and repointed when a different default branch is requested.
-Advisory global and per-entry locks coordinate placement, seeding, listing, and
-cleaning across `gv` processes. The cache root and lock directory are
-owner-only on supported platforms, and interrupted staging directories are
-recovered under the entry lock.
+when unusable or when its refresh fails at the requested URL, and repointed
+when a different default branch is requested, so a shared or stale entry never
+blocks a placement that the remote itself would serve. Advisory global and
+per-entry locks coordinate placement, seeding, listing, and cleaning across
+`gv` processes. The cache root records its format version; a root written in
+another format is emptied on first use and entries are re-created on demand.
+The cache root and lock directory are owner-only on supported platforms, and
+interrupted staging directories are recovered under the entry lock.
 
 `gv sync` also seeds the cache from repositories already on disk. After the
 update phase, each reachable existing repository whose URL has no entry — one

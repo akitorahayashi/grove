@@ -90,17 +90,23 @@ pub trait CacheEntry: Sync {
         progress: &mut dyn GitProgressSink,
     ) -> Result<String, AppError>;
 
-    /// Refresh a cache entry's tracked branch, pruning deleted refs.
+    /// Refresh a cache entry's tracked branch from `url`, pruning deleted
+    /// refs. The entry may have been created through a different transport of
+    /// the same repository identity, so its origin is repointed at `url`
+    /// before fetching and the caller's transport and credentials apply.
     fn cache_update(
         &self,
         entry: &Path,
+        url: &RemoteUrl,
         progress: &mut dyn GitProgressSink,
     ) -> Result<(), AppError>;
 
-    /// Point a cache entry at a different branch, then refresh it.
+    /// Point a cache entry at a different branch, then refresh it from `url`
+    /// under the same origin-repointing contract as `cache_update`.
     fn cache_retarget(
         &self,
         entry: &Path,
+        url: &RemoteUrl,
         branch: &str,
         progress: &mut dyn GitProgressSink,
     ) -> Result<(), AppError>;

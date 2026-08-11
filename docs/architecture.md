@@ -134,13 +134,17 @@ directory. Results retain selection order. Refresh blocks selected linked
 worktrees that would finish on the same default branch. The cache use case lists
 and removes cache entries.
 
-`cache` owns the local clone cache: a bare, single-branch entry per verbatim
-remote URL, with entry layout, URL keying, advisory global and per-entry file
+`cache` owns the local clone cache: a bare, single-branch entry per
+transport-independent URL identity (`RemoteUrl::identity`), with entry layout,
+identity keying, origin repointing on reuse, advisory global and per-entry file
 locking, placement that borrows objects through `--reference --dissociate`, and
-seeding from an existing local clone. Placement, seeding, listing, named
+seeding from an existing local clone. A failed entry refresh rebuilds the
+entry from the requested URL, so heuristic identity sharing reduces transfer
+at worst and never blocks placement. Placement, seeding, listing, named
 removal, and whole-cache cleaning use one lock order across processes. The
-owner-only cache root contains stable lock files and only real entry
-directories are inspected. The sync, clone, and cache use cases share it.
+owner-only cache root records its format version and is emptied under the
+exclusive global lock when the recorded format is not current; it contains
+stable lock files and only real entry directories are inspected. The sync, clone, and cache use cases share it.
 
 `phases` owns phase-structured bounded-parallel execution. `events` owns the
 phase-generic event, sink, and progress adapter; `run` owns the check and worker
@@ -161,7 +165,8 @@ and branch refs, duplicate or nested repository identities, absolute paths, and
 paths outside the canonical grove root.
 
 `repositories` owns validated repository values. `RemoteUrl` exposes raw text
-only through its process-argument accessor; `Display` and `Debug` are redacted.
+only through its process-argument accessor; `Display` and `Debug` are redacted,
+and the credential-free cache identity derives from it.
 Repository path resolution canonicalizes the deepest existing ancestor and
 appends the nonexistent suffix. In-root aliases resolve to one operational
 identity while retaining the configured display path.
