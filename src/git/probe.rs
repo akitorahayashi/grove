@@ -279,3 +279,176 @@ pub(super) fn parse_git_version(output: &str) -> Option<(u32, u32, u32)> {
 fn stdout(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
+
+#[cfg(test)]
+mod tests {
+    use tempfile::TempDir;
+
+    use super::super::command::tests::{
+        create_updatable_repository, git_wrapper, initialize_committed_repository, run_git,
+    };
+    use crate::git::{BranchTracking, CommandGitClient, RepositoryProbe};
+    use crate::repositories::BranchName;
+
+    #[test]
+    fn linked_worktrees_resolve_to_the_same_common_directory() {
+        let root = TempDir::new().unwrap();
+        let main = root.path().join("main");
+        let linked = root.path().join("linked");
+
+        run_git(root.path(), &["init", "-b", "main", main.to_str().unwrap()]);
+        std::fs::write(main.join("README.md"), "initial\n").unwrap();
+        run_git(&main, &["add", "README.md"]);
+        run_git(
+            &main,
+            &[
+                "-c",
+                "user.name=Grove Test",
+                "-c",
+                "user.email=grove@example.com",
+                "commit",
+                "-m",
+                "initial",
+            ],
+        );
+        run_git(&main, &["worktree", "add", "-b", "linked", linked.to_str().unwrap()]);
+
+        let client = CommandGitClient::default();
+        assert_eq!(
+            client.common_directory(&main).unwrap(),
+            client.common_directory(&linked).unwrap()
+        );
+    }
+
+    #[test]
+    fn worktree_status_returns_error_for_fatal_probe_failure() {
+        let root = TempDir::new().unwrap();
+        let repository = root.path().join("repo");
+        run_git(root.path(), &["init", "-b", "main", repository.to_str().unwrap()]);
+        std::fs::write(repository.join(".git").join("config"), "[bad\n").unwrap();
+
+        let result = CommandGitClient::default().worktree_status(&repository);
+
+        assert!(result.is_err_and(|err| {
+            err.to_string().contains("git command failed") && err.to_string().contains("status")
+        }));
+    }
+
+    #[test]
+    fn remote_url_returns_error_for_fatal_probe_failure() {
+        let root = TempDir::new().unwrap();
+        let repository = root.path().join("repo");
+        run_git(root.path(), &["init", "-b", "main", repository.to_str().unwrap()]);
+        std::fs::write(repository.join(".git").join("config"), "[bad\n").unwrap();
+
+        let result = CommandGitClient::default().remote_url(&repository);
+
+        assert!(result.is_err_and(|err| {
+            err.to_string().contains("git command failed") && err.to_string().contains("config")
+        }));
+    }
+
+    #[test]
+    fn expected_absence_is_distinct_from_fatal_probe_failure() {
+        let root = TempDir::new().unwrap();
+        let repository = root.path().join("repo");
+        initialize_committed_repository(&repository);
+        run_git(&repository, &["checkout", "--detach"]);
+        let client = CommandGitClient::default();
+
+        assert_eq!(client.worktree_status(&repository).unwrap().unwrap().branch(), None);
+        assert_eq!(client.remote_url(&repository).unwrap(), None);
+        assert_eq!(
+            client.branch_tracking(&repository, &BranchName::new("missing").unwrap()).unwrap(),
+            BranchTracking::MissingLocal
+        );
+    }
+
+    #[test]
+    fn worktree_status_distinguishes_detached_head_from_a_branch_named_detached() {
+        let root = TempDir::new().unwrap();
+        let repository = root.path().join("repo");
+        initialize_committed_repository(&repository);
+        let client = CommandGitClient::default();
+
+        run_git(&repository, &["switch", "-c", "(detached)"]);
+        let named = client.worktree_status(&repository).unwrap().unwrap();
+        assert_eq!(named.branch(), Some("(detached)"));
+        assert!(named.is_clean());
+
+        run_git(&repository, &["checkout", "--detach"]);
+        let detached = client.worktree_status(&repository).unwrap().unwrap();
+        assert_eq!(detached.branch(), None);
+    }
+
+    #[test]
+    fn worktree_status_reports_unborn_dirty_and_non_worktree_states() {
+        let root = TempDir::new().unwrap();
+        let repository = root.path().join("repo");
+        run_git(root.path(), &["init", "-b", "main", repository.to_str().unwrap()]);
+        let client = CommandGitClient::default();
+
+        let unborn = client.worktree_status(&repository).unwrap().unwrap();
+        assert_eq!(unborn.branch(), Some("main"));
+        assert!(unborn.is_clean());
+
+        std::fs::write(repository.join("untracked.txt"), "dirty\n").unwrap();
+        assert!(!client.worktree_status(&repository).unwrap().unwrap().is_clean());
+        assert_eq!(client.worktree_status(root.path()).unwrap(), None);
+    }
+
+    #[test]
+    fn configured_default_branch_wins_without_probing_origin_head() {
+        let root = TempDir::new().unwrap();
+        let repository = root.path().join("repo");
+        initialize_committed_repository(&repository);
+        std::fs::write(repository.join(".git/config"), "[bad\n").unwrap();
+        let configured = BranchName::new("release/stable").unwrap();
+
+        let branch =
+            CommandGitClient::default().default_branch(&repository, Some(&configured)).unwrap();
+
+        assert_eq!(branch.as_deref(), Some("release/stable"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn divergence_rejects_partial_extra_and_nonnumeric_output() {
+        let root = TempDir::new().unwrap();
+        let repository = create_updatable_repository(root.path());
+        for malformed in ["0", "0 1 extra", "zero 1"] {
+            let wrapper = git_wrapper(
+                root.path(),
+                &format!("if [ \"$1\" = rev-list ]; then\n  echo '{malformed}'\n  exit 0\nfi"),
+            );
+            let result = CommandGitClient::with_executable(&wrapper)
+                .branch_tracking(&repository, &BranchName::new("main").unwrap());
+            assert!(result.is_err_and(|error| error.to_string().contains("malformed output")));
+            std::fs::remove_file(wrapper).unwrap();
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn empty_reference_output_reports_missing_local() {
+        let root = TempDir::new().unwrap();
+        let repository = root.path().join("repo");
+        initialize_committed_repository(&repository);
+        let wrapper = git_wrapper(root.path(), "if [ \"$1\" = for-each-ref ]; then\n  exit 0\nfi");
+
+        let result = CommandGitClient::with_executable(wrapper)
+            .branch_tracking(&repository, &BranchName::new("main").unwrap());
+
+        assert_eq!(result.unwrap(), BranchTracking::MissingLocal);
+    }
+
+    #[test]
+    fn parses_supported_git_versions() {
+        assert_eq!(super::parse_git_version("git version 2.23.0\n"), Some((2, 23, 0)));
+        assert_eq!(
+            super::parse_git_version("git version 2.39.5 (Apple Git-154)\n"),
+            Some((2, 39, 5))
+        );
+        assert_eq!(super::parse_git_version("unexpected"), None);
+    }
+}

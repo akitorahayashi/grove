@@ -145,3 +145,53 @@ impl CommandGitClient {
         Ok(trimmed.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use tempfile::TempDir;
+
+    use crate::git::{CacheEntry, CommandGitClient, NoopGitProgressSink};
+    use crate::repositories::RemoteUrl;
+
+    #[cfg(unix)]
+    #[test]
+    fn clone_passes_option_like_url_after_operand_terminator() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = TempDir::new().unwrap();
+        let log = root.path().join("args");
+        let wrapper = root.path().join("git-wrapper");
+        std::fs::write(
+            &wrapper,
+            format!("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"{}\"\n", log.display()),
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&wrapper).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&wrapper, permissions).unwrap();
+        let workspace = root.path().join("workspace");
+        std::fs::create_dir(&workspace).unwrap();
+        let workspace = workspace.canonicalize().unwrap();
+        let destination = workspace.join("repo");
+        let reference = workspace.join("cache");
+        let url = RemoteUrl::new("--upload-pack=hostile").unwrap();
+
+        CommandGitClient::with_executable(&wrapper)
+            .clone_with_reference(&url, &destination, &reference, &mut NoopGitProgressSink)
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(log).unwrap().lines().collect::<Vec<_>>(),
+            [
+                "clone",
+                "--reference",
+                reference.to_str().unwrap(),
+                "--dissociate",
+                "--progress",
+                "--",
+                "--upload-pack=hostile",
+                destination.to_str().unwrap()
+            ]
+        );
+    }
+}

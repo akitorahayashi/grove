@@ -159,3 +159,28 @@ impl GitProgressSink for NoopGitProgressSink {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs::{OpenOptions, TryLockError};
+
+    use tempfile::TempDir;
+
+    use crate::git::{CommandGitClient, RepositoryProbe};
+
+    #[test]
+    fn repository_locks_coordinate_independent_file_handles() {
+        let root = TempDir::new().unwrap();
+        let client = CommandGitClient::default();
+        let held = client.lock_repository(root.path()).unwrap();
+        let competing = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(root.path().join("grove-operation.lock"))
+            .unwrap();
+
+        assert!(matches!(competing.try_lock(), Err(TryLockError::WouldBlock)));
+        drop(held);
+        competing.try_lock().unwrap();
+    }
+}
