@@ -98,7 +98,6 @@ src/
     mod.rs
     probe.rs
     progress.rs
-    remote.rs
     tracking.rs
     update.rs
     worktree.rs

@@ -6,7 +6,7 @@
 //! per-use-case reason enums from drifting apart.
 
 use crate::AppError;
-use crate::git::{BranchTracking, RepositoryProbe, urls_match};
+use crate::git::{BranchTracking, RepositoryProbe};
 use crate::repositories::{BranchName, RepositoryDefinition};
 
 /// A repository's operability at an existing path, independent of any use
@@ -39,7 +39,7 @@ pub(crate) fn inspect(
     let Some(actual_url) = git.remote_url(repository.path())? else {
         return Ok(Readiness::MissingOrigin);
     };
-    if !urls_match(&actual_url, repository.url()) {
+    if !actual_url.matches(repository.url()) {
         return Ok(Readiness::UrlMismatch {
             actual: actual_url.to_string(),
             expected: repository.url().to_string(),
