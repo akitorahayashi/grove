@@ -648,6 +648,24 @@ fn sync_blocks_non_repository_missing_origin_and_detached_head() {
 }
 
 #[test]
+fn sync_blocks_a_bare_repository_at_the_destination() {
+    let ctx = TestContext::new();
+    let destination = ctx.workspace().join("blog");
+    run_git(ctx.workspace(), &["init", "--bare", destination.to_str().unwrap()]);
+    let config = ctx.write_config(
+        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"git@example.com:blog.git\"\n",
+    );
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("sync")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("destination exists but is not a Git repository"));
+}
+
+#[test]
 fn sync_blocks_missing_default_and_configured_branches() {
     let missing_default = TestContext::new();
     let remote = missing_default.create_remote("blog");

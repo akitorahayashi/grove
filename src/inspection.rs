@@ -26,9 +26,15 @@ pub(crate) fn inspect(
     git: &impl RepositoryProbe,
     repository: &RepositoryDefinition,
 ) -> Result<Readiness, AppError> {
-    if !repository.path().is_dir() || !git.is_work_tree(repository.path())? {
+    if !repository.path().is_dir() {
         return Ok(Readiness::NotAWorkTree);
     }
+    // `worktree_status` reports the absent work tree itself, so probing
+    // `is_work_tree` first would spend a Git process per repository to learn
+    // what this observation already carries.
+    let Some(worktree) = git.worktree_status(repository.path())? else {
+        return Ok(Readiness::NotAWorkTree);
+    };
 
     let Some(actual_url) = git.remote_url(repository.path())? else {
         return Ok(Readiness::MissingOrigin);
@@ -40,9 +46,6 @@ pub(crate) fn inspect(
         });
     }
 
-    let Some(worktree) = git.worktree_status(repository.path())? else {
-        return Ok(Readiness::NotAWorkTree);
-    };
     if worktree.branch().is_none() {
         return Ok(Readiness::DetachedHead);
     }
