@@ -52,3 +52,30 @@ fn sync_dry_run_never_requires_or_creates_a_cache_root() {
 
     assert!(!ctx.workspace().join("blog").exists());
 }
+
+#[test]
+fn sync_short_alias_plans_missing_clone() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    let config = ctx.write_config(&format!(
+        r#"
+version = 1
+
+[repos.blog]
+path = "blog"
+url = "{}"
+"#,
+        remote.url()
+    ));
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("s")
+        .arg("--dry-run")
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("Would clone 1 repository"))
+        .stderr(predicate::str::contains("+ blog"));
+}

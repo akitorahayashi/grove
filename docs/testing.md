@@ -12,8 +12,9 @@ binaries plus a shared fixture module:
 - `tests/cli.rs` is the crate root for CLI boundary behavior. It pulls in
   `tests/cli/`, one file per subcommand: `cache.rs`, `clone.rs`, `init.rs`,
   `status.rs`, and `validate.rs`, plus responsibility-oriented `refresh/` and
-  `sync/` modules for planning, updates, safety, cache, progress, and zoxide
-  behavior.
+  `sync/` modules. `refresh/` splits out `planning` and `safety`; `sync/`
+  splits out `planning`, `cache`, `progress`, and `zoxide`. Each `mod.rs`
+  keeps the module wiring and its subcommand's core flow.
 - `tests/library.rs` is the crate root for public library-facade behavior. It
   pulls in `tests/library/`: `error_contract.rs`, `facade.rs`,
   `unknown_repository_fails.rs`, and `validate.rs`.
