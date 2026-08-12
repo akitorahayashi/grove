@@ -10,19 +10,9 @@ use crate::AppError;
 use crate::app::AppContext;
 use crate::cache::Outcome as CacheOutcome;
 use crate::git::{
-    CloneCacheDecision, CloneCommand, CloneInvocation, GitClient, GitProgress, GitProgressSink,
-    NoopGitProgressSink,
+    CloneCacheDecision, CloneCommand, CloneInvocation, GitClient, NoopGitProgressSink,
 };
-use crate::phases::{DiscardEvents, Event, EventSink};
 use crate::repositories::RemoteUrl;
-
-pub use crate::phases::Summary as PhaseSummary;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum Phase {
-    Cloning,
-}
 
 #[derive(Debug)]
 pub(crate) enum CommandCache {
@@ -84,7 +74,14 @@ pub fn execute(
     url: &str,
     destination: Option<PathBuf>,
 ) -> Result<Report, AppError> {
-    execute_with_events(ctx, url, destination, &DiscardEvents)
+    ctx.git().verify_available()?;
+    let store = ctx.cache()?;
+    let url = RemoteUrl::new(url)?;
+    let destination = resolve_destination(&url, destination)?;
+
+    let started = Instant::now();
+    let cache = store.place(ctx.git(), &url, &destination, None, None, &mut NoopGitProgressSink)?;
+    Ok(Report { destination, url: url.to_string(), cache, elapsed: started.elapsed() })
 }
 
 pub(crate) fn execute_command(
@@ -116,41 +113,6 @@ pub(crate) fn execute_command(
     Ok(CommandReport { status, cache, quiet: invocation.quiet() })
 }
 
-pub(crate) fn execute_with_events(
-    ctx: &AppContext<impl GitClient, impl crate::zoxide::ZoxideClient>,
-    url: &str,
-    destination: Option<PathBuf>,
-    events: &impl EventSink<Phase>,
-) -> Result<Report, AppError> {
-    ctx.git().verify_available()?;
-    let cache = ctx.cache()?;
-    let url = RemoteUrl::new(url)?;
-    let destination = resolve_destination(&url, destination)?;
-    let name = display_name(&destination);
-    let started = Instant::now();
-
-    events.emit(Event::PhaseStarted { phase: Phase::Cloning, total: 1 })?;
-    events.emit(Event::RepositoryStarted { repository: name.clone(), phase: Phase::Cloning })?;
-    let mut progress = NamedProgress { name: name.clone(), events };
-    let outcome = cache.place(ctx.git(), &url, &destination, None, None, &mut progress);
-    events.emit(Event::RepositoryFinished { repository: name, phase: Phase::Cloning })?;
-
-    let cache = match outcome {
-        Ok(cache) => cache,
-        Err(err) => {
-            events.emit(Event::PhaseFailed { phase: Phase::Cloning })?;
-            return Err(err);
-        }
-    };
-
-    let elapsed = started.elapsed();
-    events.emit(Event::PhaseCompleted {
-        phase: Phase::Cloning,
-        summary: PhaseSummary::new(1, elapsed),
-    })?;
-    Ok(Report { destination, url: url.to_string(), cache, elapsed })
-}
-
 fn resolve_destination(url: &RemoteUrl, destination: Option<PathBuf>) -> Result<PathBuf, AppError> {
     let relative = match destination {
         Some(destination) => destination,
@@ -173,24 +135,6 @@ fn default_destination_name(url: &str) -> Result<String, AppError> {
         ))
     } else {
         Ok(name.to_string())
-    }
-}
-
-fn display_name(destination: &Path) -> String {
-    destination
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| destination.display().to_string())
-}
-
-struct NamedProgress<'a, P> {
-    name: String,
-    events: &'a dyn EventSink<P>,
-}
-
-impl<P> GitProgressSink for NamedProgress<'_, P> {
-    fn progress(&mut self, progress: GitProgress) -> Result<(), AppError> {
-        self.events.emit(Event::GitProgress { repository: self.name.clone(), progress })
     }
 }
 
