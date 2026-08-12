@@ -95,11 +95,7 @@ fn print_phase_completion(
 
 fn print_entries(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
     let mut entries = report.entries().iter().collect::<Vec<_>>();
-    entries.sort_by(|left, right| {
-        left.repository()
-            .cmp(right.repository())
-            .then_with(|| change_rank(left.outcome()).cmp(&change_rank(right.outcome())))
-    });
+    entries.sort_by_key(|entry| entry.repository());
 
     for entry in entries {
         match entry.outcome() {
@@ -163,15 +159,4 @@ fn print_entries(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
         }
     }
     Ok(())
-}
-
-fn change_rank(outcome: &Outcome) -> u8 {
-    match outcome {
-        Outcome::Refreshed { .. } => 0,
-        Outcome::Switched { .. } => 1,
-        Outcome::SwitchedAndBlocked { .. } => 2,
-        Outcome::Skipped { .. } => 3,
-        Outcome::Blocked { .. } => 4,
-        Outcome::Planned(_) | Outcome::Current { .. } => 5,
-    }
 }
