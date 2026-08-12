@@ -17,7 +17,51 @@ where
     T: Sync,
     R: Send,
 {
-    map_indexed(items, parallelism, |_, item| action(item))
+    if items.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let worker_count = parallelism.max(1).min(items.len()).min(MAX_WORKERS);
+    let next = AtomicUsize::new(0);
+    let (sender, receiver) = mpsc::channel();
+
+    std::thread::scope(|scope| {
+        for _ in 0..worker_count {
+            let sender = sender.clone();
+            let action = &action;
+            let next = &next;
+
+            scope.spawn(move || {
+                loop {
+                    let index = next.fetch_add(1, Ordering::Relaxed);
+                    let Some(item) = items.get(index) else {
+                        break;
+                    };
+                    let result = catch_unwind(AssertUnwindSafe(|| action(item)))
+                        .map_err(|_| AppError::internal("repository worker panicked"));
+                    if sender.send((index, result)).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+    });
+    drop(sender);
+
+    let mut ordered = std::iter::repeat_with(|| None).take(items.len()).collect::<Vec<_>>();
+    for _ in 0..items.len() {
+        let (index, result) = receiver
+            .recv()
+            .map_err(|_| AppError::internal("repository worker result channel disconnected"))?;
+        ordered[index] = Some(result?);
+    }
+
+    ordered
+        .into_iter()
+        .map(|result| {
+            result.ok_or_else(|| AppError::internal("repository worker omitted a result"))
+        })
+        .collect()
 }
 
 pub(crate) fn map_keyed<T, R, K>(
@@ -51,62 +95,6 @@ where
     ordered
         .into_iter()
         .map(|result| result.ok_or_else(|| AppError::internal("keyed worker omitted a result")))
-        .collect()
-}
-
-fn map_indexed<T, R>(
-    items: &[T],
-    parallelism: usize,
-    action: impl Fn(usize, &T) -> R + Sync,
-) -> Result<Vec<R>, AppError>
-where
-    T: Sync,
-    R: Send,
-{
-    if items.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let worker_count = parallelism.max(1).min(items.len()).min(MAX_WORKERS);
-    let next = AtomicUsize::new(0);
-    let (sender, receiver) = mpsc::channel();
-
-    std::thread::scope(|scope| {
-        for _ in 0..worker_count {
-            let sender = sender.clone();
-            let action = &action;
-            let next = &next;
-
-            scope.spawn(move || {
-                loop {
-                    let index = next.fetch_add(1, Ordering::Relaxed);
-                    let Some(item) = items.get(index) else {
-                        break;
-                    };
-                    let result = catch_unwind(AssertUnwindSafe(|| action(index, item)))
-                        .map_err(|_| AppError::internal("repository worker panicked"));
-                    if sender.send((index, result)).is_err() {
-                        break;
-                    }
-                }
-            });
-        }
-    });
-    drop(sender);
-
-    let mut ordered = std::iter::repeat_with(|| None).take(items.len()).collect::<Vec<_>>();
-    for _ in 0..items.len() {
-        let (index, result) = receiver
-            .recv()
-            .map_err(|_| AppError::internal("repository worker result channel disconnected"))?;
-        ordered[index] = Some(result?);
-    }
-
-    ordered
-        .into_iter()
-        .map(|result| {
-            result.ok_or_else(|| AppError::internal("repository worker omitted a result"))
-        })
         .collect()
 }
 

@@ -115,11 +115,7 @@ fn print_dry_run_summary(report: &Report, output: &mut Output<'_>) -> io::Result
 
 fn print_entries(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
     let mut entries = report.entries().iter().collect::<Vec<_>>();
-    entries.sort_by(|left, right| {
-        left.repository()
-            .cmp(right.repository())
-            .then_with(|| change_rank(left.outcome()).cmp(&change_rank(right.outcome())))
-    });
+    entries.sort_by_key(|entry| entry.repository());
 
     for entry in entries {
         match entry.outcome() {
@@ -295,14 +291,4 @@ fn print_zoxide_report(
         }
     }
     Ok(())
-}
-
-fn change_rank(outcome: &Outcome) -> u8 {
-    match outcome {
-        Outcome::Planned(Plan::Clone { .. }) | Outcome::Cloned { .. } => 0,
-        Outcome::Updated { .. } | Outcome::UpdatedButRestorationFailed { .. } => 1,
-        Outcome::Skipped { .. } => 2,
-        Outcome::Blocked { .. } => 3,
-        Outcome::Planned(Plan::Fetch { .. }) | Outcome::Current { .. } => 4,
-    }
 }

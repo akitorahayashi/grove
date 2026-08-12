@@ -6,7 +6,7 @@
 //! per-use-case reason enums from drifting apart.
 
 use crate::AppError;
-use crate::git::{BranchTracking, RepositoryProbe, urls_match};
+use crate::git::{BranchTracking, RepositoryProbe};
 use crate::repositories::{BranchName, RepositoryDefinition};
 
 /// A repository's operability at an existing path, independent of any use
@@ -26,6 +26,14 @@ pub(crate) fn inspect(
     git: &impl RepositoryProbe,
     repository: &RepositoryDefinition,
 ) -> Result<Readiness, AppError> {
+    // The probe order is a contract, not an optimization target. `git status`
+    // honors the repository's own `core.fsmonitor`, which Git may run as an
+    // external hook command, while `rev-parse` and `config --get` never invoke
+    // one. Establishing ownership from those two first keeps sync and refresh
+    // from running repository-configured behavior in a repository they go on to
+    // decline. `worktree_status` alone would report the absent work tree, so
+    // `is_work_tree` looks redundant here; it is the side-effect-free gate that
+    // makes the later observation safe to reach.
     if !repository.path().is_dir() || !git.is_work_tree(repository.path())? {
         return Ok(Readiness::NotAWorkTree);
     }
@@ -33,7 +41,7 @@ pub(crate) fn inspect(
     let Some(actual_url) = git.remote_url(repository.path())? else {
         return Ok(Readiness::MissingOrigin);
     };
-    if !urls_match(&actual_url, repository.url()) {
+    if !actual_url.matches(repository.url()) {
         return Ok(Readiness::UrlMismatch {
             actual: actual_url.to_string(),
             expected: repository.url().to_string(),

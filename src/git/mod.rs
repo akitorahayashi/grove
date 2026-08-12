@@ -8,7 +8,6 @@ mod command;
 mod default_branch;
 mod probe;
 mod progress;
-mod remote;
 mod tracking;
 mod update;
 mod worktree;
@@ -20,7 +19,6 @@ pub use client::{
 pub(crate) use clone::{CacheDecision as CloneCacheDecision, CloneCommand, CloneInvocation};
 pub use command::CommandGitClient;
 pub use progress::{GitProgress, parse_git_progress};
-pub use remote::urls_match;
 pub use tracking::BranchTracking;
 pub use update::{GitRefreshOutcome, GitUpdate, GitUpdateBlock, GitUpdateOutcome, Restoration};
 pub use worktree::WorktreeStatus;

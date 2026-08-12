@@ -22,6 +22,14 @@ impl RemoteUrl {
         &self.0
     }
 
+    /// Whether two URLs name the same remote verbatim. This is exact, unlike
+    /// `identity`: a configured URL and a repository's `origin` must agree on
+    /// the transport too, so a switch from `https://` to `git@` is reported as
+    /// a mismatch rather than silently accepted.
+    pub(crate) fn matches(&self, other: &RemoteUrl) -> bool {
+        self.0.trim() == other.0.trim()
+    }
+
     /// The repository identity the cache keys on: `host[:port]/path` with the
     /// host lowercased and userinfo, query, fragment, leading and trailing
     /// slashes, and a trailing `.git` dropped, so the `git@` and `https://`

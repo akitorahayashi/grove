@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use crate::AppError;
 use crate::app::AppContext;
 use crate::config;
-use crate::git::{GitClient, NoopGitProgressSink, RepositoryProbe, urls_match};
+use crate::git::{GitClient, NoopGitProgressSink, RepositoryProbe};
 use crate::inspection::{self, BranchReadiness};
 use crate::phases::workers;
 use crate::repositories::RepositoryDefinition;
@@ -278,7 +278,7 @@ fn fetch_preflight(
             None,
         ))));
     };
-    if !urls_match(&actual, repository.url()) {
+    if !actual.matches(repository.url()) {
         return Ok(FetchPreflight::Entry(Box::new(status_for_repository(git, repository)?)));
     }
 
@@ -302,7 +302,7 @@ fn fetch_status(
             ),
         ));
     };
-    if !urls_match(&actual, task.repository.url()) {
+    if !actual.matches(task.repository.url()) {
         return Ok((task.index, status_for_repository(git, task.repository)?));
     }
 
@@ -348,7 +348,7 @@ fn status_for_repository(
     let branch = worktree.branch().map(str::to_string);
     let actual = git.remote_url(repository.path())?;
     let remote_mismatch = actual.as_ref().and_then(|actual| {
-        (!urls_match(actual, repository.url()))
+        (!actual.matches(repository.url()))
             .then(|| RemoteUrlMismatch::new(actual.to_string(), repository.url().to_string()))
     });
     let default_branch = git.default_branch(repository.path(), repository.default_branch())?;

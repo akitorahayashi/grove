@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -172,24 +172,13 @@ fn refreshable_tasks<'a, 'b>(
     tasks: &'b [Task<'a>],
     entries: &mut [Option<Entry>],
 ) -> Vec<&'b Task<'a>> {
-    let mut counts = HashMap::<(PathBuf, String), usize>::new();
-    for task in tasks {
-        let key = (task.resource().to_path_buf(), task.default_branch().to_string());
-        *counts.entry(key).or_default() += 1;
-    }
+    let conflicts = linked_worktree_conflicts(tasks);
 
     let mut refreshable = Vec::new();
     for task in tasks {
-        let key = (task.resource().to_path_buf(), task.default_branch().to_string());
-        if counts[&key] > 1 {
-            entries[task.index()] = Some(Entry::new(
-                task.repository(),
-                Outcome::Blocked {
-                    reason: BlockedReason::LinkedWorktreeDefaultBranchConflict {
-                        branch: task.default_branch().to_string(),
-                    },
-                },
-            ));
+        if conflicts.contains(&worktree_branch_key(task)) {
+            entries[task.index()] =
+                Some(Entry::new(task.repository(), linked_worktree_conflict_outcome(task)));
         } else {
             refreshable.push(task);
         }
@@ -198,23 +187,37 @@ fn refreshable_tasks<'a, 'b>(
 }
 
 fn plan_dry_runs(tasks: &[Task<'_>], entries: &mut [Option<Entry>]) {
-    let mut counts = HashMap::<(PathBuf, String), usize>::new();
-    for task in tasks {
-        let key = (task.resource().to_path_buf(), task.default_branch().to_string());
-        *counts.entry(key).or_default() += 1;
-    }
+    let conflicts = linked_worktree_conflicts(tasks);
 
     for task in tasks {
-        let key = (task.resource().to_path_buf(), task.default_branch().to_string());
-        let outcome = if counts[&key] > 1 {
-            Outcome::Blocked {
-                reason: BlockedReason::LinkedWorktreeDefaultBranchConflict {
-                    branch: task.default_branch().to_string(),
-                },
-            }
+        let outcome = if conflicts.contains(&worktree_branch_key(task)) {
+            linked_worktree_conflict_outcome(task)
         } else {
             Outcome::Planned(Plan::new(task.default_branch().to_string()))
         };
         entries[task.index()] = Some(Entry::new(task.repository(), outcome));
+    }
+}
+
+/// The keys claimed by more than one selected repository. Git checks a branch
+/// out in at most one worktree of a repository, so two linked worktrees sharing
+/// a default branch cannot both be put on it.
+fn linked_worktree_conflicts(tasks: &[Task<'_>]) -> HashSet<(PathBuf, String)> {
+    let mut counts = HashMap::<(PathBuf, String), usize>::new();
+    for task in tasks {
+        *counts.entry(worktree_branch_key(task)).or_default() += 1;
+    }
+    counts.into_iter().filter(|(_, count)| *count > 1).map(|(key, _)| key).collect()
+}
+
+fn worktree_branch_key(task: &Task<'_>) -> (PathBuf, String) {
+    (task.resource().to_path_buf(), task.default_branch().to_string())
+}
+
+fn linked_worktree_conflict_outcome(task: &Task<'_>) -> Outcome {
+    Outcome::Blocked {
+        reason: BlockedReason::LinkedWorktreeDefaultBranchConflict {
+            branch: task.default_branch().to_string(),
+        },
     }
 }
