@@ -647,6 +647,61 @@ fn sync_blocks_non_repository_missing_origin_and_detached_head() {
         .stderr(predicate::str::contains("detached HEAD"));
 }
 
+/// `git status` runs the repository's own `core.fsmonitor` as an external hook
+/// command, so reaching it before the remote URL is validated would let a
+/// repository grove declines to manage execute its configured behavior.
+#[cfg(unix)]
+#[test]
+fn sync_declines_a_mismatched_repository_without_running_its_fsmonitor_hook() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    let matching_config = ctx.write_config(&format!(
+        r#"
+version = 1
+
+[repos.blog]
+path = "blog"
+url = "{}"
+"#,
+        remote.url()
+    ));
+    ctx.cli().arg("--config").arg(&matching_config).arg("sync").assert().success();
+
+    let repository = ctx.workspace().join("blog");
+    let sentinel = ctx.root().join("fsmonitor-ran");
+    let hook = ctx.root().join("fsmonitor-hook");
+    std::fs::write(&hook, format!("#!/bin/sh\n: > \"{}\"\nexit 1\n", sentinel.display()))
+        .expect("failed to write fsmonitor hook");
+    let mut permissions =
+        std::fs::metadata(&hook).expect("failed to inspect fsmonitor hook").permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&hook, permissions).expect("failed to chmod fsmonitor hook");
+    run_git(&repository, &["config", "core.fsmonitor", hook.to_str().unwrap()]);
+    run_git(&repository, &["remote", "set-url", "origin", "https://example.com/other.git"]);
+
+    let mismatched_config = ctx.write_config(
+        r#"
+version = 1
+
+[repos.blog]
+path = "blog"
+url = "https://example.com/expected.git"
+"#,
+    );
+
+    ctx.cli()
+        .arg("--config")
+        .arg(mismatched_config)
+        .arg("sync")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("remote URL does not match grove.toml"));
+
+    assert!(!sentinel.exists(), "sync ran the fsmonitor hook of a repository it declined");
+}
+
 #[test]
 fn sync_blocks_a_bare_repository_at_the_destination() {
     let ctx = TestContext::new();

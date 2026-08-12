@@ -26,15 +26,17 @@ pub(crate) fn inspect(
     git: &impl RepositoryProbe,
     repository: &RepositoryDefinition,
 ) -> Result<Readiness, AppError> {
-    if !repository.path().is_dir() {
+    // The probe order is a contract, not an optimization target. `git status`
+    // honors the repository's own `core.fsmonitor`, which Git may run as an
+    // external hook command, while `rev-parse` and `config --get` never invoke
+    // one. Establishing ownership from those two first keeps sync and refresh
+    // from running repository-configured behavior in a repository they go on to
+    // decline. `worktree_status` alone would report the absent work tree, so
+    // `is_work_tree` looks redundant here; it is the side-effect-free gate that
+    // makes the later observation safe to reach.
+    if !repository.path().is_dir() || !git.is_work_tree(repository.path())? {
         return Ok(Readiness::NotAWorkTree);
     }
-    // `worktree_status` reports the absent work tree itself, so probing
-    // `is_work_tree` first would spend a Git process per repository to learn
-    // what this observation already carries.
-    let Some(worktree) = git.worktree_status(repository.path())? else {
-        return Ok(Readiness::NotAWorkTree);
-    };
 
     let Some(actual_url) = git.remote_url(repository.path())? else {
         return Ok(Readiness::MissingOrigin);
@@ -46,6 +48,9 @@ pub(crate) fn inspect(
         });
     }
 
+    let Some(worktree) = git.worktree_status(repository.path())? else {
+        return Ok(Readiness::NotAWorkTree);
+    };
     if worktree.branch().is_none() {
         return Ok(Readiness::DetachedHead);
     }
