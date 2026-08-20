@@ -1,7 +1,8 @@
 use std::fs;
 use std::path::Path;
 
-use super::command::{format_probe, run_with_progress};
+use super::command::run_with_progress;
+use super::probe::required_line;
 use super::{CacheEntry, CommandGitClient, GitProgressSink};
 use crate::AppError;
 use crate::repositories::{RemoteUrl, redact_urls_for_display};
@@ -130,19 +131,7 @@ impl CommandGitClient {
     fn head_branch(&self, entry: &Path) -> Result<String, AppError> {
         let args = ["symbolic-ref", "--short", "HEAD"];
         let output = self.git_required(entry, &args)?;
-        let value = String::from_utf8_lossy(&output.stdout);
-        let trimmed = value.trim();
-        if trimmed.is_empty() || trimmed.split_whitespace().count() != 1 {
-            return Err(AppError::git_command_failed(
-                format_probe(entry, &args),
-                if trimmed.is_empty() {
-                    "Git returned empty output"
-                } else {
-                    "Git returned malformed output"
-                },
-            ));
-        }
-        Ok(trimmed.to_string())
+        required_line(entry, &args, &output)
     }
 }
 

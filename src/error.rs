@@ -219,6 +219,12 @@ impl AppError {
     pub(crate) fn is_internal(&self) -> bool {
         self.kind() == AppErrorKind::Internal
     }
+
+    /// Demote a per-repository boundary failure to its message for the report.
+    /// A genuine internal error keeps propagating and aborts the run.
+    pub(crate) fn demote(self) -> Result<String, AppError> {
+        if self.is_internal() { Err(self) } else { Ok(self.to_string()) }
+    }
 }
 
 impl fmt::Display for AppError {
@@ -402,115 +408,70 @@ impl ProcessError {
     }
 }
 
-#[derive(Debug)]
-pub struct GitError(ProcessError);
+macro_rules! process_error {
+    ($name:ident, $tool:literal) => {
+        #[derive(Debug)]
+        pub struct $name(ProcessError);
+
+        impl $name {
+            fn unavailable_source(message: impl Into<String>, source: io::Error) -> Self {
+                Self(ProcessError::unavailable_source(message, source))
+            }
+
+            fn unavailable_status(
+                command: impl Into<String>,
+                message: impl Into<String>,
+                exit_code: Option<i32>,
+            ) -> Self {
+                Self(ProcessError::unavailable_status(command, message, exit_code))
+            }
+
+            fn command_failed(
+                command: impl Into<String>,
+                message: impl Into<String>,
+                exit_code: Option<i32>,
+                source: Option<io::Error>,
+            ) -> Self {
+                Self(ProcessError::command_failed(command, message, exit_code, source))
+            }
+
+            pub fn kind(&self) -> ProcessErrorKind {
+                self.0.kind
+            }
+
+            pub fn command(&self) -> Option<&str> {
+                self.0.command.as_deref()
+            }
+
+            pub fn diagnostic(&self) -> &str {
+                &self.0.message
+            }
+
+            pub fn exit_code(&self) -> Option<i32> {
+                self.0.exit_code
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                self.0.render(formatter, $tool)
+            }
+        }
+
+        impl Error for $name {
+            fn source(&self) -> Option<&(dyn Error + 'static)> {
+                self.0.source()
+            }
+        }
+    };
+}
+
+process_error!(GitError, "git");
+process_error!(ZoxideError, "zoxide");
 
 impl GitError {
     fn unavailable(message: impl Into<String>) -> Self {
         Self(ProcessError::unavailable(message))
-    }
-
-    fn unavailable_source(message: impl Into<String>, source: io::Error) -> Self {
-        Self(ProcessError::unavailable_source(message, source))
-    }
-
-    fn unavailable_status(
-        command: impl Into<String>,
-        message: impl Into<String>,
-        exit_code: Option<i32>,
-    ) -> Self {
-        Self(ProcessError::unavailable_status(command, message, exit_code))
-    }
-
-    fn command_failed(
-        command: impl Into<String>,
-        message: impl Into<String>,
-        exit_code: Option<i32>,
-        source: Option<io::Error>,
-    ) -> Self {
-        Self(ProcessError::command_failed(command, message, exit_code, source))
-    }
-
-    pub fn kind(&self) -> ProcessErrorKind {
-        self.0.kind
-    }
-
-    pub fn command(&self) -> Option<&str> {
-        self.0.command.as_deref()
-    }
-
-    pub fn diagnostic(&self) -> &str {
-        &self.0.message
-    }
-
-    pub fn exit_code(&self) -> Option<i32> {
-        self.0.exit_code
-    }
-}
-
-impl fmt::Display for GitError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.render(formatter, "git")
-    }
-}
-
-impl Error for GitError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        self.0.source()
-    }
-}
-
-#[derive(Debug)]
-pub struct ZoxideError(ProcessError);
-
-impl ZoxideError {
-    fn unavailable_source(message: impl Into<String>, source: io::Error) -> Self {
-        Self(ProcessError::unavailable_source(message, source))
-    }
-
-    fn unavailable_status(
-        command: impl Into<String>,
-        message: impl Into<String>,
-        exit_code: Option<i32>,
-    ) -> Self {
-        Self(ProcessError::unavailable_status(command, message, exit_code))
-    }
-
-    fn command_failed(
-        command: impl Into<String>,
-        message: impl Into<String>,
-        exit_code: Option<i32>,
-        source: Option<io::Error>,
-    ) -> Self {
-        Self(ProcessError::command_failed(command, message, exit_code, source))
-    }
-
-    pub fn kind(&self) -> ProcessErrorKind {
-        self.0.kind
-    }
-
-    pub fn command(&self) -> Option<&str> {
-        self.0.command.as_deref()
-    }
-
-    pub fn diagnostic(&self) -> &str {
-        &self.0.message
-    }
-
-    pub fn exit_code(&self) -> Option<i32> {
-        self.0.exit_code
-    }
-}
-
-impl fmt::Display for ZoxideError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.render(formatter, "zoxide")
-    }
-}
-
-impl Error for ZoxideError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        self.0.source()
     }
 }
 

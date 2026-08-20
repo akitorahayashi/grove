@@ -35,6 +35,20 @@ impl TestContext {
         path
     }
 
+    pub fn write_single_repository_config(
+        &self,
+        name: &str,
+        url: &str,
+        default_branch: Option<&str>,
+    ) -> PathBuf {
+        let configured_branch = default_branch
+            .map(|branch| format!("default_branch = \"{branch}\"\n"))
+            .unwrap_or_default();
+        self.write_config(&format!(
+            "version = 1\n[repos.{name}]\npath = \"{name}\"\nurl = \"{url}\"\n{configured_branch}"
+        ))
+    }
+
     pub fn write_config_at(&self, relative_path: &str, contents: &str) -> PathBuf {
         let path = self.workspace.join(relative_path);
         if let Some(parent) = path.parent() {
@@ -134,4 +148,23 @@ pub fn run_git(directory: &Path, args: &[&str]) {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+pub fn git_stdout(directory: &Path, args: &[&str]) -> String {
+    let output = ProcessCommand::new("git")
+        .current_dir(directory)
+        .args(args)
+        .output()
+        .expect("failed to inspect Git repository");
+    assert!(
+        output.status.success(),
+        "git {} failed: {}",
+        args.join(" "),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+pub fn current_branch(repository: &Path) -> String {
+    git_stdout(repository, &["branch", "--show-current"])
 }

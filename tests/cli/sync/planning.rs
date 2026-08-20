@@ -6,16 +6,7 @@ use crate::harness::TestContext;
 fn sync_dry_run_plans_missing_clone_without_creating_destination() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
-    let config = ctx.write_config(&format!(
-        r#"
-version = 1
-
-[repos.blog]
-path = "blog"
-url = "{}"
-"#,
-        remote.url()
-    ));
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
 
     ctx.cli()
         .arg("--config")
@@ -34,9 +25,7 @@ url = "{}"
 #[test]
 fn sync_dry_run_never_requires_or_creates_a_cache_root() {
     let ctx = TestContext::new();
-    let config = ctx.write_config(
-        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"https://example.com/blog.git\"\n",
-    );
+    let config = ctx.write_single_repository_config("blog", "https://example.com/blog.git", None);
 
     ctx.cli()
         .env_remove("XDG_CACHE_HOME")
@@ -57,16 +46,7 @@ fn sync_dry_run_never_requires_or_creates_a_cache_root() {
 fn sync_short_alias_plans_missing_clone() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
-    let config = ctx.write_config(&format!(
-        r#"
-version = 1
-
-[repos.blog]
-path = "blog"
-url = "{}"
-"#,
-        remote.url()
-    ));
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
 
     ctx.cli()
         .arg("--config")

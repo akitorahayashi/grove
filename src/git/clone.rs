@@ -150,12 +150,14 @@ fn parse_long_option(
         return attached.is_none().then_some(index + 1);
     }
     if let Some(base) = name.strip_prefix("--no-")
-        && NEGATABLE_VALUE_OPTIONS.contains(&base)
+        && VALUE_OPTIONS.contains(&base)
     {
         mark_bypass(bypass, bypass_reason(name));
         return attached.is_none().then_some(index + 1);
     }
-    if LONG_VALUE_OPTIONS.contains(&name) {
+    if let Some(base) = name.strip_prefix("--")
+        && VALUE_OPTIONS.contains(&base)
+    {
         mark_bypass(bypass, bypass_reason(name));
         return if attached.is_some() {
             Some(index + 1)
@@ -276,27 +278,9 @@ const LONG_FLAGS: &[&str] = &[
     "--ipv6",
 ];
 
-const LONG_VALUE_OPTIONS: &[&str] = &[
-    "--jobs",
-    "--template",
-    "--reference",
-    "--reference-if-able",
-    "--origin",
-    "--branch",
-    "--revision",
-    "--upload-pack",
-    "--depth",
-    "--shallow-since",
-    "--shallow-exclude",
-    "--separate-git-dir",
-    "--ref-format",
-    "--config",
-    "--server-option",
-    "--filter",
-    "--bundle-uri",
-];
-
-const NEGATABLE_VALUE_OPTIONS: &[&str] = &[
+/// Value-carrying long options, named without their `--` prefix so the plain
+/// and `--no-` negated forms parse against a single list.
+const VALUE_OPTIONS: &[&str] = &[
     "jobs",
     "template",
     "reference",

@@ -14,9 +14,10 @@ use crate::cli::Completion;
 use crate::cli::output::{Output, terminal_text};
 use crate::cli::tty::progress::{ProgressPhase, run_with_progress};
 use crate::cli::tty::report::{
-    cache_annotation, print_blocked_details, print_count, print_count_with_elapsed, print_phase,
-    safe_message, write_line,
+    cache_annotation, entry_line, print_blocked_details, print_count, print_count_with_elapsed,
+    print_phase, safe_message, write_line,
 };
+use crate::cli::tty::table::Paint;
 
 #[derive(Args)]
 pub(in crate::cli) struct SyncCommand {
@@ -120,77 +121,61 @@ fn print_entries(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
     for entry in entries {
         match entry.outcome() {
             Outcome::Planned(Plan::Clone { url }) => {
-                let repository = terminal_text(entry.repository());
-                write_line(
+                entry_line(
                     output,
-                    format_args!(
-                        " {} {} {}",
-                        "+".green(),
-                        repository.bold(),
-                        format!("from {}", terminal_text(url)).dimmed()
-                    ),
+                    "+",
+                    Paint::Green,
+                    entry.repository(),
+                    &format!("from {}", terminal_text(url)),
                 )?;
             }
             Outcome::Planned(Plan::Fetch { .. }) | Outcome::Current { .. } => {}
             Outcome::Cloned { url, cache } => {
-                let repository = terminal_text(entry.repository());
-                write_line(
+                entry_line(
                     output,
-                    format_args!(
-                        " {} {} {}",
-                        "+".green(),
-                        repository.bold(),
-                        format!("from {} {}", terminal_text(url), cache_annotation(*cache))
-                            .dimmed()
-                    ),
+                    "+",
+                    Paint::Green,
+                    entry.repository(),
+                    &format!("from {} {}", terminal_text(url), cache_annotation(*cache)),
                 )?;
             }
             Outcome::Updated { branch, before, after } => {
-                let repository = terminal_text(entry.repository());
-                write_line(
+                entry_line(
                     output,
-                    format_args!(
-                        " {} {} {}",
-                        "~".yellow(),
-                        repository.bold(),
-                        terminal_text(&format!("{branch} {before} -> {after}")).dimmed()
-                    ),
+                    "~",
+                    Paint::Yellow,
+                    entry.repository(),
+                    &terminal_text(&format!("{branch} {before} -> {after}")),
                 )?;
             }
             Outcome::UpdatedButRestorationFailed { branch, before, after, message } => {
-                let repository = terminal_text(entry.repository());
                 let message = safe_message(message);
-                write_line(
+                entry_line(
                     output,
-                    format_args!(
-                        " {} {} {}",
-                        "x".red(),
-                        repository.bold(),
-                        terminal_text(&format!(
-                            "{branch} {before} -> {after}; restoring the original branch failed: {message}"
-                        ))
-                        .dimmed()
-                    ),
+                    "x",
+                    Paint::Red,
+                    entry.repository(),
+                    &terminal_text(&format!(
+                        "{branch} {before} -> {after}; restoring the original branch failed: {message}"
+                    )),
                 )?;
             }
             Outcome::Skipped { reason } => {
-                let repository = terminal_text(entry.repository());
-                write_line(
+                entry_line(
                     output,
-                    format_args!(
-                        " {} {} {}",
-                        "!".yellow(),
-                        repository.bold(),
-                        terminal_text(reason.message()).dimmed()
-                    ),
+                    "!",
+                    Paint::Yellow,
+                    entry.repository(),
+                    &terminal_text(reason.message()),
                 )?;
             }
             Outcome::Blocked { reason } => {
-                let repository = terminal_text(entry.repository());
-                let message = safe_message(&reason.message());
-                write_line(
+                entry_line(
                     output,
-                    format_args!(" {} {} {}", "x".red(), repository.bold(), message.dimmed()),
+                    "x",
+                    Paint::Red,
+                    entry.repository(),
+                    &safe_message(&reason.message()),
                 )?;
                 print_blocked_details(entry.blocked_details(), output)?;
             }
@@ -250,43 +235,16 @@ fn print_zoxide_report(
     for entry in report.entries() {
         match entry.outcome() {
             ZoxideOutcome::WouldRegister => {
-                let repository = terminal_text(entry.repository());
-                write_line(
-                    output,
-                    format_args!(
-                        " {} {} {}",
-                        "?".cyan(),
-                        repository.bold(),
-                        "would register".dimmed()
-                    ),
-                )?;
+                entry_line(output, "?", Paint::Cyan, entry.repository(), "would register")?;
             }
             ZoxideOutcome::Added => {
-                let repository = terminal_text(entry.repository());
-                write_line(
-                    output,
-                    format_args!(" {} {} {}", "+".green(), repository.bold(), "added".dimmed()),
-                )?;
+                entry_line(output, "+", Paint::Green, entry.repository(), "added")?;
             }
             ZoxideOutcome::AlreadyRegistered => {
-                let repository = terminal_text(entry.repository());
-                write_line(
-                    output,
-                    format_args!(
-                        " {} {} {}",
-                        "=".cyan(),
-                        repository.bold(),
-                        "already registered".dimmed()
-                    ),
-                )?;
+                entry_line(output, "=", Paint::Cyan, entry.repository(), "already registered")?;
             }
             ZoxideOutcome::Failed(message) => {
-                let repository = terminal_text(entry.repository());
-                let message = safe_message(message);
-                write_line(
-                    output,
-                    format_args!(" {} {} {}", "x".red(), repository.bold(), message.dimmed()),
-                )?;
+                entry_line(output, "x", Paint::Red, entry.repository(), &safe_message(message))?;
             }
         }
     }

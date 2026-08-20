@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use crate::AppError;
 use crate::git::GitClient;
 use crate::inspection::{self, BranchReadiness, Readiness};
-use crate::repositories::RepositoryDefinition;
+use crate::repositories::{BranchName, RepositoryDefinition};
 
 use super::{BlockedReason, Entry, Outcome, Plan, SkippedReason};
 
@@ -12,7 +12,7 @@ pub(super) enum Decision {
     Clone,
     Fetch {
         common_directory: PathBuf,
-        default_branch: String,
+        default_branch: BranchName,
     },
     /// A terminal outcome whose repository is still eligible to seed the cache
     /// from its local objects — an existing, URL-matching clone grove leaves
@@ -77,7 +77,7 @@ pub(super) fn repository(
         }
         return Ok(Decision::Entry(Entry::new(
             repository,
-            Outcome::Planned(Plan::Fetch { branch: default_branch }),
+            Outcome::Planned(Plan::Fetch { branch: default_branch.to_string() }),
         )));
     }
 
@@ -98,21 +98,14 @@ fn seed_only_or_terminal(entry: Entry, dry_run: bool) -> Decision {
 fn default_branch_block_reason(
     git: &impl GitClient,
     repository: &RepositoryDefinition,
-    default_branch: &str,
+    default_branch: &BranchName,
 ) -> Result<Option<BlockedReason>, AppError> {
-    match inspection::branch_readiness(git, repository, default_branch)? {
-        BranchReadiness::MissingLocal => {
-            Ok(Some(BlockedReason::MissingLocalBranch { branch: default_branch.to_string() }))
-        }
-        BranchReadiness::MissingRemote => {
-            Ok(Some(BlockedReason::MissingRemoteBranch { branch: default_branch.to_string() }))
-        }
-        BranchReadiness::Divergence { ahead, behind } if ahead > 0 && behind > 0 => {
-            Ok(Some(BlockedReason::Diverged { branch: default_branch.to_string() }))
-        }
-        BranchReadiness::Divergence { ahead, .. } if ahead > 0 => {
-            Ok(Some(BlockedReason::AheadOfOrigin { branch: default_branch.to_string() }))
-        }
-        BranchReadiness::Divergence { .. } => Ok(None),
-    }
+    let branch = default_branch.to_string();
+    Ok(match inspection::branch_readiness(git, repository, default_branch)? {
+        BranchReadiness::MissingLocal => Some(BlockedReason::MissingLocalBranch { branch }),
+        BranchReadiness::MissingRemote => Some(BlockedReason::MissingRemoteBranch { branch }),
+        BranchReadiness::Diverged { .. } => Some(BlockedReason::Diverged { branch }),
+        BranchReadiness::AheadOfOrigin { .. } => Some(BlockedReason::AheadOfOrigin { branch }),
+        BranchReadiness::FastForwardable { .. } => None,
+    })
 }

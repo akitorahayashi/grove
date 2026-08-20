@@ -7,7 +7,7 @@ use crate::cli::output::Output;
 
 const COLUMN_GAP: &str = "  ";
 
-/// Color carried by a rendered cell.
+/// Color carried by a rendered cell or report marker.
 #[derive(Debug, Clone, Copy)]
 pub(in crate::cli) enum Paint {
     Bold,
@@ -17,6 +17,20 @@ pub(in crate::cli) enum Paint {
     Green,
     Yellow,
     Red,
+}
+
+impl Paint {
+    pub(in crate::cli) fn apply(self, text: &str) -> String {
+        match self {
+            Self::Bold => text.bold().to_string(),
+            Self::Dimmed => text.dimmed().to_string(),
+            Self::Cyan => text.cyan().to_string(),
+            Self::Blue => text.blue().to_string(),
+            Self::Green => text.green().to_string(),
+            Self::Yellow => text.yellow().to_string(),
+            Self::Red => text.red().to_string(),
+        }
+    }
 }
 
 /// A single cell: display-ready text paired with the color it carries.
@@ -70,7 +84,7 @@ impl Table {
             let cells = row
                 .iter()
                 .zip(&widths)
-                .map(|(cell, &width)| apply(pad(&cell.text, width), cell.paint));
+                .map(|(cell, &width)| cell.paint.apply(&pad(&cell.text, width)));
             write_row(cells, output)?;
         }
         Ok(())
@@ -117,18 +131,6 @@ fn pad(text: &str, width: usize) -> String {
     padded.push_str(text);
     padded.push_str(&" ".repeat(deficit));
     padded
-}
-
-fn apply(text: String, paint: Paint) -> String {
-    match paint {
-        Paint::Bold => text.bold().to_string(),
-        Paint::Dimmed => text.dimmed().to_string(),
-        Paint::Cyan => text.cyan().to_string(),
-        Paint::Blue => text.blue().to_string(),
-        Paint::Green => text.green().to_string(),
-        Paint::Yellow => text.yellow().to_string(),
-        Paint::Red => text.red().to_string(),
-    }
 }
 
 #[cfg(test)]

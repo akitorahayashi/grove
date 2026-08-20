@@ -11,10 +11,7 @@ use crate::harness::{TestContext, path_with_wrapper};
 fn sync_progress_completes_when_stderr_is_a_terminal() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
-    let config = ctx.write_config(&format!(
-        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
-        remote.url()
-    ));
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
     ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
 
     let path = path_with_wrapper(

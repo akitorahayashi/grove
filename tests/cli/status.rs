@@ -1,5 +1,7 @@
 use predicates::prelude::*;
 
+#[cfg(unix)]
+use crate::harness::path_with_wrapper;
 use crate::harness::{TestContext, run_git};
 
 #[test]
@@ -31,16 +33,7 @@ url = "git@example.com:blog.git"
 fn status_fetch_updates_remote_tracking_information() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("frontend");
-    let config = ctx.write_config(&format!(
-        r#"
-version = 1
-
-[repos.frontend]
-path = "frontend"
-url = "{}"
-"#,
-        remote.url()
-    ));
+    let config = ctx.write_single_repository_config("frontend", &remote.url(), None);
 
     ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
     remote.add_commit("change.txt", "change\n");
@@ -63,16 +56,7 @@ fn status_fetch_observes_worktree_changes_made_after_fetch() {
 
     let ctx = TestContext::new();
     let remote = ctx.create_remote("frontend");
-    let config = ctx.write_config(&format!(
-        r#"
-version = 1
-
-[repos.frontend]
-path = "frontend"
-url = "{}"
-"#,
-        remote.url()
-    ));
+    let config = ctx.write_single_repository_config("frontend", &remote.url(), None);
     ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
 
     let real_git =
@@ -150,10 +134,7 @@ url = "git@example.com:backend.git"
 fn status_reports_linked_worktrees_in_configuration_order() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("shared");
-    let initial_config = ctx.write_config(&format!(
-        "version = 1\n[repos.primary]\npath = \"primary\"\nurl = \"{}\"\n",
-        remote.url()
-    ));
+    let initial_config = ctx.write_single_repository_config("primary", &remote.url(), None);
     ctx.cli().arg("--config").arg(&initial_config).arg("sync").assert().success();
 
     let primary = ctx.workspace().join("primary");
@@ -248,16 +229,7 @@ url = "git@example.com:blog.git"
 fn status_target_reports_remote_mismatch_diagnostics() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
-    let initial_config = ctx.write_config(&format!(
-        r#"
-version = 1
-
-[repos.blog]
-path = "blog"
-url = "{}"
-"#,
-        remote.url()
-    ));
+    let initial_config = ctx.write_single_repository_config("blog", &remote.url(), None);
 
     ctx.cli().arg("--config").arg(&initial_config).arg("sync").assert().success();
     run_git(
@@ -269,14 +241,10 @@ url = "{}"
             "https://user:ghp_actual@example.com/org/repo.git?access_token=actual_token&branch=main",
         ],
     );
-    let mismatched_config = ctx.write_config(
-        r#"
-version = 1
-
-[repos.blog]
-path = "blog"
-url = "https://user:ghp_expected@example.com/org/repo.git?password=expected_secret&branch=main"
-"#,
+    let mismatched_config = ctx.write_single_repository_config(
+        "blog",
+        "https://user:ghp_expected@example.com/org/repo.git?password=expected_secret&branch=main",
+        None,
     );
 
     ctx.cli()
@@ -304,15 +272,11 @@ url = "https://user:ghp_expected@example.com/org/repo.git?password=expected_secr
 fn status_remote_mismatch_takes_precedence_over_dirty_worktree() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
-    let initial_config = ctx.write_config(&format!(
-        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
-        remote.url()
-    ));
+    let initial_config = ctx.write_single_repository_config("blog", &remote.url(), None);
     ctx.cli().arg("--config").arg(&initial_config).arg("sync").assert().success();
     std::fs::write(ctx.workspace().join("blog/draft.txt"), "dirty\n").unwrap();
-    let mismatched_config = ctx.write_config(
-        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"git@example.com:other.git\"\n",
-    );
+    let mismatched_config =
+        ctx.write_single_repository_config("blog", "git@example.com:other.git", None);
 
     ctx.cli()
         .arg("--config")
@@ -330,19 +294,16 @@ fn status_remote_mismatch_takes_precedence_over_dirty_worktree() {
 fn status_fetch_never_contacts_a_mismatched_remote() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
-    let initial_config = ctx.write_config(&format!(
-        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
-        remote.url()
-    ));
+    let initial_config = ctx.write_single_repository_config("blog", &remote.url(), None);
     ctx.cli().arg("--config").arg(&initial_config).arg("sync").assert().success();
     let repository = ctx.workspace().join("blog");
     run_git(&repository, &["remote", "set-url", "origin", "https://example.com/actual.git"]);
-    let config = ctx.write_config(
-        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"https://example.com/expected.git\"\n",
-    );
+    let config =
+        ctx.write_single_repository_config("blog", "https://example.com/expected.git", None);
     let marker = ctx.root().join("fetch-ran");
-    let path = install_git_wrapper(
+    let path = path_with_wrapper(
         &ctx,
+        "status",
         "if [ \"$1\" = fetch ]; then : > \"$GROVE_FETCH_MARKER\"; exit 91; fi",
     );
 
@@ -366,15 +327,13 @@ fn status_fetch_never_contacts_a_mismatched_remote() {
 fn status_fetch_reports_missing_origin_without_fetching() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
-    let config = ctx.write_config(&format!(
-        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
-        remote.url()
-    ));
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
     ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
     run_git(&ctx.workspace().join("blog"), &["remote", "remove", "origin"]);
     let marker = ctx.root().join("fetch-ran");
-    let path = install_git_wrapper(
+    let path = path_with_wrapper(
         &ctx,
+        "status",
         "if [ \"$1\" = fetch ]; then : > \"$GROVE_FETCH_MARKER\"; exit 91; fi",
     );
 
@@ -398,13 +357,11 @@ fn status_fetch_reports_missing_origin_without_fetching() {
 fn status_fetch_surfaces_common_directory_failures() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
-    let config = ctx.write_config(&format!(
-        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
-        remote.url()
-    ));
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
     ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
-    let path = install_git_wrapper(
+    let path = path_with_wrapper(
         &ctx,
+        "status",
         "if [ \"$1\" = rev-parse ] && [ \"$2\" = --git-common-dir ]; then echo common-directory-failed >&2; exit 42; fi",
     );
 
@@ -424,16 +381,7 @@ fn status_fetch_surfaces_common_directory_failures() {
 fn status_target_reports_missing_local_default_branch() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
-    let config = ctx.write_config(&format!(
-        r#"
-version = 1
-
-[repos.blog]
-path = "blog"
-url = "{}"
-"#,
-        remote.url()
-    ));
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
 
     ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
     let repository = ctx.workspace().join("blog");
@@ -458,16 +406,7 @@ url = "{}"
 fn status_target_reports_missing_remote_default_branch() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
-    let config = ctx.write_config(&format!(
-        r#"
-version = 1
-
-[repos.blog]
-path = "blog"
-url = "{}"
-"#,
-        remote.url()
-    ));
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
 
     ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
     run_git(&ctx.workspace().join("blog"), &["update-ref", "-d", "refs/remotes/origin/main"]);
@@ -490,21 +429,11 @@ url = "{}"
 fn status_table_preserves_fetch_failure_message() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
-    let config = ctx.write_config(&format!(
-        r#"
-version = 1
-
-[repos.blog]
-path = "blog"
-url = "{}"
-"#,
-        remote.url()
-    ));
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
 
     ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
     run_git(&ctx.workspace().join("blog"), &["remote", "set-url", "origin", "/does/not/exist"]);
-    let config =
-        ctx.write_config("version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"/does/not/exist\"\n");
+    let config = ctx.write_single_repository_config("blog", "/does/not/exist", None);
 
     ctx.cli()
         .arg("--config")
@@ -543,28 +472,16 @@ url = "git@example.com:blog.git"
 #[cfg(unix)]
 #[test]
 fn status_rejects_git_older_than_required_version_before_inspection() {
-    use std::os::unix::fs::PermissionsExt;
-
     let ctx = TestContext::new();
-    let config = ctx.write_config(
-        r#"
-version = 1
-
-[repos.blog]
-path = "blog"
-url = "git@example.com:blog.git"
-"#,
+    let config = ctx.write_single_repository_config("blog", "git@example.com:blog.git", None);
+    let path = path_with_wrapper(
+        &ctx,
+        "old-version",
+        "if [ \"$1\" = --version ]; then echo 'git version 2.22.0'; exit 0; fi",
     );
-    let bin = ctx.root().join("old-git-bin");
-    std::fs::create_dir(&bin).unwrap();
-    let git = bin.join("git");
-    std::fs::write(&git, "#!/bin/sh\necho 'git version 2.22.0'\n").unwrap();
-    let mut permissions = std::fs::metadata(&git).unwrap().permissions();
-    permissions.set_mode(0o755);
-    std::fs::set_permissions(&git, permissions).unwrap();
 
     ctx.cli()
-        .env("PATH", bin)
+        .env("PATH", path)
         .arg("--config")
         .arg(config)
         .arg("status")
@@ -613,24 +530,4 @@ fn status_reports_missing_git_before_inspection() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("git is not available"));
-}
-
-#[cfg(unix)]
-fn install_git_wrapper(ctx: &TestContext, behavior: &str) -> std::ffi::OsString {
-    use std::os::unix::fs::PermissionsExt;
-
-    let output = std::process::Command::new("sh").args(["-c", "command -v git"]).output().unwrap();
-    assert!(output.status.success());
-    let real_git = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let bin = ctx.root().join("status-git-bin");
-    std::fs::create_dir_all(&bin).unwrap();
-    let wrapper = bin.join("git");
-    std::fs::write(&wrapper, format!("#!/bin/sh\n{behavior}\nexec \"{real_git}\" \"$@\"\n"))
-        .unwrap();
-    let mut permissions = std::fs::metadata(&wrapper).unwrap().permissions();
-    permissions.set_mode(0o755);
-    std::fs::set_permissions(&wrapper, permissions).unwrap();
-    let mut paths = vec![bin];
-    paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()));
-    std::env::join_paths(paths).unwrap()
 }

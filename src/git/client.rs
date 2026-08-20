@@ -62,7 +62,7 @@ pub trait RepositoryProbe: Sync {
         &self,
         repository: &Path,
         configured: Option<&BranchName>,
-    ) -> Result<Option<String>, AppError>;
+    ) -> Result<Option<BranchName>, AppError>;
 
     fn branch_tracking(
         &self,
@@ -125,18 +125,22 @@ pub trait CacheEntry: Sync {
     ) -> Result<(), AppError>;
 }
 
-/// Advancing and switching a repository's local default branch.
+/// Advancing and switching a repository's local default branch. Callers pass
+/// the Git common directory they already resolved during their check phase; it
+/// is the lock target, so the serialization key and the lock always agree.
 pub trait DefaultBranch: Sync {
     fn update_default_branch(
         &self,
         repository: &Path,
-        branch: &str,
+        common_directory: &Path,
+        branch: &BranchName,
     ) -> Result<GitUpdateOutcome, AppError>;
 
     fn refresh_default_branch(
         &self,
         repository: &Path,
-        branch: &str,
+        common_directory: &Path,
+        branch: &BranchName,
     ) -> Result<GitRefreshOutcome, AppError>;
 }
 

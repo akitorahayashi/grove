@@ -10,6 +10,7 @@ use crate::app::status::{BranchTrackingStatus, DefaultBranchStatus, StatusCondit
 
 use crate::cli::Completion;
 use crate::cli::output::{Output, terminal_text};
+use crate::cli::tty::report::safe_message;
 use crate::cli::tty::table::{Cell, Paint, Table};
 
 #[derive(Args)]
@@ -223,9 +224,7 @@ fn table_state(entry: &StatusEntry) -> String {
 }
 
 fn sanitize_summary(value: &str) -> String {
-    let escaped = terminal_text(value);
-    let single_line = escaped.split_whitespace().collect::<Vec<_>>().join(" ");
-    crate::repositories::redact_urls_for_display(&single_line)
+    safe_message(value).split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn state_paint(condition: &StatusCondition) -> Paint {

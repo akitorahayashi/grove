@@ -3,15 +3,15 @@ use std::path::{Path, PathBuf};
 use crate::AppError;
 use crate::git::{GitClient, GitUpdateBlock, GitUpdateOutcome, Restoration};
 use crate::phases::Task as PhaseTask;
-use crate::repositories::RepositoryDefinition;
+use crate::repositories::{BranchName, RepositoryDefinition};
 
-use super::{BlockedReason, Entry, Outcome};
+use super::{BlockedReason, Entry, Outcome, SkippedReason};
 
 pub(super) struct Task<'a> {
     index: usize,
     repository: &'a RepositoryDefinition,
     common_directory: PathBuf,
-    default_branch: String,
+    default_branch: BranchName,
 }
 
 impl<'a> Task<'a> {
@@ -19,13 +19,17 @@ impl<'a> Task<'a> {
         index: usize,
         repository: &'a RepositoryDefinition,
         common_directory: PathBuf,
-        default_branch: String,
+        default_branch: BranchName,
     ) -> Self {
         Self { index, repository, common_directory, default_branch }
     }
 
     pub(super) fn index(&self) -> usize {
         self.index
+    }
+
+    pub(super) fn common_directory(&self) -> &Path {
+        &self.common_directory
     }
 }
 
@@ -50,55 +54,14 @@ pub(super) fn repository(git: &impl GitClient, task: &Task<'_>) -> Entry {
 }
 
 fn update_repository(git: &impl GitClient, task: &Task<'_>) -> Result<Entry, AppError> {
-    let result = git.update_default_branch(task.repository.path(), &task.default_branch)?;
+    let result = git.update_default_branch(
+        task.repository.path(),
+        &task.common_directory,
+        &task.default_branch,
+    )?;
     let (update, restoration) = match result {
-        GitUpdateOutcome::Blocked(GitUpdateBlock::DetachedHead) => {
-            return Ok(Entry::new(
-                task.repository,
-                Outcome::Blocked { reason: BlockedReason::DetachedHead },
-            ));
-        }
-        GitUpdateOutcome::Blocked(GitUpdateBlock::DirtyWorkingTree) => {
-            return Ok(Entry::new(
-                task.repository,
-                Outcome::Skipped { reason: super::SkippedReason::DirtyWorkingTree },
-            ));
-        }
-        GitUpdateOutcome::Blocked(GitUpdateBlock::MissingLocalBranch) => {
-            return Ok(Entry::new(
-                task.repository,
-                Outcome::Blocked {
-                    reason: BlockedReason::MissingLocalBranch {
-                        branch: task.default_branch.clone(),
-                    },
-                },
-            ));
-        }
-        GitUpdateOutcome::Blocked(GitUpdateBlock::MissingRemoteBranch) => {
-            return Ok(Entry::new(
-                task.repository,
-                Outcome::Blocked {
-                    reason: BlockedReason::MissingRemoteBranch {
-                        branch: task.default_branch.clone(),
-                    },
-                },
-            ));
-        }
-        GitUpdateOutcome::Blocked(GitUpdateBlock::Diverged) => {
-            return Ok(Entry::new(
-                task.repository,
-                Outcome::Blocked {
-                    reason: BlockedReason::Diverged { branch: task.default_branch.clone() },
-                },
-            ));
-        }
-        GitUpdateOutcome::Blocked(GitUpdateBlock::AheadOfOrigin) => {
-            return Ok(Entry::new(
-                task.repository,
-                Outcome::Blocked {
-                    reason: BlockedReason::AheadOfOrigin { branch: task.default_branch.clone() },
-                },
-            ));
+        GitUpdateOutcome::Blocked(block) => {
+            return Ok(Entry::new(task.repository, blocked_outcome(block, &task.default_branch)));
         }
         GitUpdateOutcome::Failed { primary, restoration } => {
             let message = restoration_message(primary, restoration);
@@ -115,7 +78,7 @@ fn update_repository(git: &impl GitClient, task: &Task<'_>) -> Result<Entry, App
             return Ok(Entry::new(
                 task.repository,
                 Outcome::UpdatedButRestorationFailed {
-                    branch: task.default_branch.clone(),
+                    branch: task.default_branch.to_string(),
                     before: update.before().to_string(),
                     after: update.after().to_string(),
                     message,
@@ -125,7 +88,7 @@ fn update_repository(git: &impl GitClient, task: &Task<'_>) -> Result<Entry, App
         Ok(Entry::new(
             task.repository,
             Outcome::Updated {
-                branch: task.default_branch.clone(),
+                branch: task.default_branch.to_string(),
                 before: update.before().to_string(),
                 after: update.after().to_string(),
             },
@@ -142,8 +105,28 @@ fn update_repository(git: &impl GitClient, task: &Task<'_>) -> Result<Entry, App
             )),
             Restoration::NotNeeded | Restoration::Restored => Ok(Entry::new(
                 task.repository,
-                Outcome::Current { branch: task.default_branch.clone() },
+                Outcome::Current { branch: task.default_branch.to_string() },
             )),
+        }
+    }
+}
+
+fn blocked_outcome(block: GitUpdateBlock, default_branch: &BranchName) -> Outcome {
+    let branch = default_branch.to_string();
+    match block {
+        GitUpdateBlock::DetachedHead => Outcome::Blocked { reason: BlockedReason::DetachedHead },
+        GitUpdateBlock::DirtyWorkingTree => {
+            Outcome::Skipped { reason: SkippedReason::DirtyWorkingTree }
+        }
+        GitUpdateBlock::MissingLocalBranch => {
+            Outcome::Blocked { reason: BlockedReason::MissingLocalBranch { branch } }
+        }
+        GitUpdateBlock::MissingRemoteBranch => {
+            Outcome::Blocked { reason: BlockedReason::MissingRemoteBranch { branch } }
+        }
+        GitUpdateBlock::Diverged => Outcome::Blocked { reason: BlockedReason::Diverged { branch } },
+        GitUpdateBlock::AheadOfOrigin => {
+            Outcome::Blocked { reason: BlockedReason::AheadOfOrigin { branch } }
         }
     }
 }

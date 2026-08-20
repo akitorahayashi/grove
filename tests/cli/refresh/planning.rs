@@ -1,13 +1,12 @@
 use predicates::prelude::*;
 
-use super::{current_branch, git_stdout, single_repository_config};
-use crate::harness::{TestContext, commit_file, run_git};
+use crate::harness::{TestContext, commit_file, current_branch, git_stdout, run_git};
 
 #[test]
 fn refresh_dry_run_does_not_fetch_or_switch() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
-    let config = single_repository_config(&ctx, "blog", &remote.url(), None);
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
     ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
     let repository = ctx.workspace().join("blog");
     run_git(&repository, &["switch", "-c", "feature"]);
@@ -34,7 +33,7 @@ fn refresh_dry_run_does_not_fetch_or_switch() {
 fn refresh_dry_run_blocks_locally_visible_ahead_branch() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
-    let config = single_repository_config(&ctx, "blog", &remote.url(), None);
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
     ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
     let repository = ctx.workspace().join("blog");
     commit_file(&repository, "local.txt");

@@ -1,6 +1,6 @@
 use predicates::prelude::*;
 
-use crate::harness::{TestContext, run_git};
+use crate::harness::{TestContext, commit_file, run_git};
 
 #[cfg(unix)]
 #[test]
@@ -16,10 +16,7 @@ fn sync_seeds_cache_for_existing_uncached_repository() {
         "no cache entry exists before sync",
     );
 
-    let config = ctx.write_config(&format!(
-        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
-        remote.url()
-    ));
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
 
     ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
 
@@ -40,10 +37,7 @@ fn sync_seeds_cache_from_dirty_existing_repository() {
     run_git(ctx.workspace(), &["clone", &remote.url(), destination.to_str().unwrap()]);
     std::fs::write(destination.join("README.md"), "local edit\n").unwrap();
 
-    let config = ctx.write_config(&format!(
-        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
-        remote.url()
-    ));
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
 
     ctx.cli()
         .arg("--config")
@@ -70,17 +64,9 @@ fn sync_seeds_cache_from_diverged_existing_repository() {
 
     let destination = ctx.workspace().join("blog");
     run_git(ctx.workspace(), &["clone", &remote.url(), destination.to_str().unwrap()]);
-    std::fs::write(destination.join("local.txt"), "local\n").unwrap();
-    run_git(&destination, &["add", "local.txt"]);
-    run_git(
-        &destination,
-        &["-c", "user.name=T", "-c", "user.email=t@e.x", "commit", "-m", "local"],
-    );
+    commit_file(&destination, "local.txt");
 
-    let config = ctx.write_config(&format!(
-        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
-        remote.url()
-    ));
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
 
     ctx.cli()
         .arg("--config")
@@ -107,10 +93,7 @@ fn sync_seeds_cache_from_detached_head_existing_repository() {
     run_git(ctx.workspace(), &["clone", &remote.url(), destination.to_str().unwrap()]);
     run_git(&destination, &["checkout", "--detach"]);
 
-    let config = ctx.write_config(&format!(
-        "version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"{}\"\n",
-        remote.url()
-    ));
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
 
     ctx.cli()
         .arg("--config")

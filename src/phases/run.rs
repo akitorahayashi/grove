@@ -44,12 +44,7 @@ where
     events.emit(Event::PhaseStarted { phase, total: repositories.len() })?;
     let started = Instant::now();
     let results = match workers::map(repositories, parallelism, |repository| {
-        emit_repository_started(events, repository, phase)?;
-        let result = check(repository);
-        match (result, emit_repository_finished(events, repository, phase)) {
-            (Err(error), _) | (Ok(_), Err(error)) => Err(error),
-            (Ok(decision), Ok(())) => Ok(decision),
-        }
+        instrumented(events, phase, repository, || check(repository))
     }) {
         Ok(results) => results,
         Err(error) => return phase_failed(events, phase, error),
@@ -96,14 +91,7 @@ where
         tasks,
         parallelism,
         |task| task.resource().to_path_buf(),
-        |task| {
-            emit_repository_started(events, task.repository(), phase)?;
-            let result = action(task);
-            match (result, emit_repository_finished(events, task.repository(), phase)) {
-                (Err(error), _) | (Ok(_), Err(error)) => Err(error),
-                (Ok(result), Ok(())) => Ok(result),
-            }
-        },
+        |task| instrumented(events, phase, task.repository(), || action(task)),
     ) {
         Ok(results) => results,
         Err(error) => return phase_failed(events, phase, error),
@@ -120,6 +108,21 @@ where
         return phase_failed(events, phase, error);
     }
     Ok((results, summary))
+}
+
+/// Wrap one repository action in its started/finished event pair. The action's
+/// own error stays primary over a failure to emit the finished event.
+fn instrumented<P: Copy, R>(
+    events: &impl EventSink<P>,
+    phase: P,
+    repository: &RepositoryDefinition,
+    action: impl FnOnce() -> Result<R, AppError>,
+) -> Result<R, AppError> {
+    emit_repository_started(events, repository, phase)?;
+    match (action(), emit_repository_finished(events, repository, phase)) {
+        (Err(error), _) | (Ok(_), Err(error)) => Err(error),
+        (Ok(result), Ok(())) => Ok(result),
+    }
 }
 
 fn phase_failed<P: Copy, T>(

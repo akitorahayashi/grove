@@ -549,11 +549,11 @@ fn touch_updated(container: &Path) -> Result<(), AppError> {
 mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::process::Command;
 
     use tempfile::TempDir;
 
     use super::{LOCK_DIRECTORY, LockMode, Outcome, Store, entry_directory_name, temporary_path};
+    use crate::git::process_fixtures::{git_stdout, run_git};
     use crate::git::{CommandGitClient, NoopGitProgressSink};
     use crate::repositories::{BranchName, RemoteUrl};
 
@@ -584,17 +584,6 @@ mod tests {
         let entries = result.expect("listing should not inspect repository contents");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].url(), "https://example.com/repository.git");
-    }
-
-    fn run_git(directory: &Path, args: &[&str]) {
-        let output =
-            Command::new("git").current_dir(directory).args(args).output().expect("run git");
-        assert!(
-            output.status.success(),
-            "git {} failed: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&output.stderr)
-        );
     }
 
     fn make_remote(base: &Path, feature: bool) -> PathBuf {
@@ -768,14 +757,8 @@ mod tests {
 
         // `single_entry` asserts the two forms did not create separate entries.
         let bare = single_entry(&cache_root).join("git");
-        let output = Command::new("git")
-            .current_dir(&bare)
-            .args(["remote", "get-url", "origin"])
-            .output()
-            .expect("run git remote get-url");
-        assert!(output.status.success());
         assert_eq!(
-            String::from_utf8_lossy(&output.stdout).trim(),
+            git_stdout(&bare, &["remote", "get-url", "origin"]),
             file_form.as_process_argument(),
             "reuse must repoint the entry's origin at the requested URL",
         );
@@ -1047,12 +1030,6 @@ mod tests {
     }
 
     fn git_rev(directory: &Path, reference: &str) -> String {
-        let output = Command::new("git")
-            .current_dir(directory)
-            .args(["rev-parse", reference])
-            .output()
-            .expect("run git rev-parse");
-        assert!(output.status.success(), "git rev-parse {reference} failed");
-        String::from_utf8_lossy(&output.stdout).trim().to_string()
+        git_stdout(directory, &["rev-parse", reference])
     }
 }

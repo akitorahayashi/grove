@@ -165,7 +165,8 @@ update phase, each reachable existing repository whose URL has no entry — one
 that was fetched, or that was left untouched for a dirty working tree or a
 detached HEAD — has an entry built from its local objects, borrowed and
 dissociated like any placement and tracking the remote's default branch, so
-later clones of that URL transfer only the difference. Each URL is seeded once.
+later clones of that URL transfer only the difference. Each repository
+identity — the transport-independent key the cache uses — is seeded once.
 Seeding runs as its own phase and is best-effort: a failure is reported as a
 note without changing the repository's own result.
 

@@ -35,9 +35,7 @@ impl CommandGitClient {
     ) -> Result<Output, AppError> {
         let mut command = self.command();
         command.current_dir(repository).args(args);
-        let display =
-            redact_urls_for_display(&format!("git -C {} {}", repository.display(), args.join(" ")));
-        run_required(command, display)
+        run_required(command, format_probe(repository, args))
     }
 
     pub(super) fn git_progress_required(
@@ -48,9 +46,7 @@ impl CommandGitClient {
     ) -> Result<(), AppError> {
         let mut command = self.command();
         command.current_dir(repository).args(args);
-        let display =
-            redact_urls_for_display(&format!("git -C {} {}", repository.display(), args.join(" ")));
-        run_with_progress(command, display, progress)
+        run_with_progress(command, format_probe(repository, args), progress)
     }
 
     pub(super) fn git_probe(&self, repository: &Path, args: &[&str]) -> Result<Output, AppError> {
@@ -236,11 +232,11 @@ pub(super) fn format_probe(repository: &Path, args: &[&str]) -> String {
 }
 
 /// Also owns the Git repository and wrapper fixtures that the probe,
-/// cache-entry, branch-update, and client test modules import: they drive the
-/// same `git` process boundary this module owns, and each sibling needs nearly
-/// the identical set.
+/// cache-entry, branch-update, client, and cache-store test modules import:
+/// they drive the same `git` process boundary this module owns, and each needs
+/// nearly the identical set.
 #[cfg(test)]
-pub(in crate::git) mod tests {
+pub(crate) mod tests {
     use std::path::Path;
     use std::process::Command;
 
@@ -309,7 +305,7 @@ pub(in crate::git) mod tests {
         assert!(completed.exists());
     }
 
-    pub(in crate::git) fn create_updatable_repository(root: &Path) -> std::path::PathBuf {
+    pub(crate) fn create_updatable_repository(root: &Path) -> std::path::PathBuf {
         let remote = root.join("remote.git");
         let seed = root.join("seed");
         let repository = root.join("repository");
@@ -327,7 +323,7 @@ pub(in crate::git) mod tests {
         repository
     }
 
-    pub(in crate::git) fn initialize_committed_repository(repository: &Path) {
+    pub(crate) fn initialize_committed_repository(repository: &Path) {
         run_git(
             repository.parent().unwrap(),
             &["init", "-b", "main", repository.to_str().unwrap()],
@@ -337,7 +333,7 @@ pub(in crate::git) mod tests {
         commit(repository, "initial");
     }
 
-    pub(in crate::git) fn commit(repository: &Path, message: &str) {
+    pub(crate) fn commit(repository: &Path, message: &str) {
         run_git(
             repository,
             &[
@@ -352,14 +348,14 @@ pub(in crate::git) mod tests {
         );
     }
 
-    pub(in crate::git) fn git_stdout(directory: &Path, args: &[&str]) -> String {
+    pub(crate) fn git_stdout(directory: &Path, args: &[&str]) -> String {
         let output = Command::new("git").current_dir(directory).args(args).output().unwrap();
         assert!(output.status.success(), "git {} failed", args.join(" "));
         String::from_utf8_lossy(&output.stdout).trim().to_string()
     }
 
     #[cfg(unix)]
-    pub(in crate::git) fn git_wrapper(directory: &Path, behavior: &str) -> std::path::PathBuf {
+    pub(crate) fn git_wrapper(directory: &Path, behavior: &str) -> std::path::PathBuf {
         use std::os::unix::fs::PermissionsExt;
 
         let output = Command::new("sh").args(["-c", "command -v git"]).output().unwrap();
@@ -374,7 +370,7 @@ pub(in crate::git) mod tests {
         wrapper
     }
 
-    pub(in crate::git) fn run_git(directory: &Path, args: &[&str]) {
+    pub(crate) fn run_git(directory: &Path, args: &[&str]) {
         let output = Command::new("git").current_dir(directory).args(args).output().unwrap();
         assert!(
             output.status.success(),

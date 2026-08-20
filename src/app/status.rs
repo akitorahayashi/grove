@@ -4,10 +4,10 @@ use crate::AppError;
 use crate::app::AppContext;
 use crate::config;
 use crate::git::{GitClient, NoopGitProgressSink, RepositoryProbe};
-use crate::inspection::{self, BranchReadiness};
-use crate::phases::workers;
-use crate::repositories::RepositoryDefinition;
+use crate::inspection::{self, BranchReadiness, Ownership};
+use crate::phases::{Slots, workers};
 use crate::repositories::select_repositories;
+use crate::repositories::{BranchName, RemoteUrl, RepositoryDefinition};
 
 #[derive(Debug, Clone)]
 pub struct StatusReport {
@@ -200,18 +200,18 @@ fn collect_entries(
 ) -> Result<Vec<StatusEntry>, AppError> {
     if !fetch {
         let results = workers::map(repositories, parallelism, |repository| {
-            status_for_repository(git, repository)
+            status_for_repository(git, repository, None)
         })?;
         return results.into_iter().collect();
     }
 
     let preflights =
         workers::map(repositories, parallelism, |repository| fetch_preflight(git, repository))?;
-    let mut entries = std::iter::repeat_with(|| None).take(repositories.len()).collect::<Vec<_>>();
+    let mut entries = Slots::new(repositories.len());
     let mut tasks = Vec::new();
     for (index, preflight) in preflights.into_iter().enumerate() {
         match preflight? {
-            FetchPreflight::Entry(entry) => entries[index] = Some(*entry),
+            FetchPreflight::Entry(entry) => entries.fill(index, *entry),
             FetchPreflight::Task { common_directory } => {
                 tasks.push(FetchTask { index, repository: repositories[index], common_directory });
             }
@@ -226,12 +226,9 @@ fn collect_entries(
     )?;
     for result in fetched {
         let (index, entry) = result?;
-        entries[index] = Some(entry);
+        entries.fill(index, entry);
     }
-    entries
-        .into_iter()
-        .map(|entry| entry.ok_or_else(|| AppError::internal("status preflight omitted an entry")))
-        .collect()
+    entries.into_complete()
 }
 
 struct FetchTask<'a> {
@@ -259,30 +256,27 @@ fn fetch_preflight(
         ))));
     }
 
-    if !repository.path().is_dir() || !git.is_work_tree(repository.path())? {
-        return Ok(FetchPreflight::Entry(Box::new(StatusEntry::from_repository(
-            repository,
-            None,
-            StatusCondition::Invalid(inspection::destination_not_git_repository().to_string()),
-            None,
-            None,
-        ))));
-    }
-
-    let Some(actual) = git.remote_url(repository.path())? else {
-        return Ok(FetchPreflight::Entry(Box::new(StatusEntry::from_repository(
-            repository,
-            None,
-            StatusCondition::Invalid(inspection::missing_origin().to_string()),
-            None,
-            None,
-        ))));
+    let condition = match inspection::ownership(git, repository)? {
+        Ownership::NotAWorkTree => {
+            StatusCondition::Invalid(inspection::destination_not_git_repository().to_string())
+        }
+        Ownership::MissingOrigin => {
+            StatusCondition::Invalid(inspection::missing_origin().to_string())
+        }
+        Ownership::UrlMismatch { .. } => {
+            return Ok(FetchPreflight::Entry(Box::new(status_for_repository(
+                git, repository, None,
+            )?)));
+        }
+        Ownership::Owned => {
+            return Ok(FetchPreflight::Task {
+                common_directory: git.common_directory(repository.path())?,
+            });
+        }
     };
-    if !actual.matches(repository.url()) {
-        return Ok(FetchPreflight::Entry(Box::new(status_for_repository(git, repository)?)));
-    }
-
-    Ok(FetchPreflight::Task { common_directory: git.common_directory(repository.path())? })
+    Ok(FetchPreflight::Entry(Box::new(StatusEntry::from_repository(
+        repository, None, condition, None, None,
+    ))))
 }
 
 fn fetch_status(
@@ -303,7 +297,7 @@ fn fetch_status(
         ));
     };
     if !actual.matches(task.repository.url()) {
-        return Ok((task.index, status_for_repository(git, task.repository)?));
+        return Ok((task.index, status_for_repository(git, task.repository, Some(actual))?));
     }
 
     let mut progress = NoopGitProgressSink;
@@ -313,18 +307,21 @@ fn fetch_status(
             StatusEntry::from_repository(
                 task.repository,
                 None,
-                StatusCondition::FetchFailed(error.to_string()),
+                StatusCondition::FetchFailed(error.demote()?),
                 None,
                 None,
             ),
         ));
     }
-    Ok((task.index, status_for_repository(git, task.repository)?))
+    Ok((task.index, status_for_repository(git, task.repository, Some(actual))?))
 }
 
+/// `known_remote` carries the origin URL a caller already probed under lock, so
+/// the fetch path does not repeat the probe; the no-fetch path passes `None`.
 fn status_for_repository(
     git: &impl RepositoryProbe,
     repository: &RepositoryDefinition,
+    known_remote: Option<RemoteUrl>,
 ) -> Result<StatusEntry, AppError> {
     if !repository.path().exists() {
         return Ok(StatusEntry::from_repository(
@@ -346,13 +343,16 @@ fn status_for_repository(
         ));
     };
     let branch = worktree.branch().map(str::to_string);
-    let actual = git.remote_url(repository.path())?;
+    let actual = match known_remote {
+        Some(actual) => Some(actual),
+        None => git.remote_url(repository.path())?,
+    };
     let remote_mismatch = actual.as_ref().and_then(|actual| {
         (!actual.matches(repository.url()))
             .then(|| RemoteUrlMismatch::new(actual.to_string(), repository.url().to_string()))
     });
     let default_branch = git.default_branch(repository.path(), repository.default_branch())?;
-    let default_branch = if let Some(branch) = default_branch.as_deref() {
+    let default_branch = if let Some(branch) = default_branch.as_ref() {
         default_branch_status(git, repository, branch)?
     } else {
         None
@@ -373,13 +373,19 @@ fn status_for_repository(
 fn default_branch_status(
     git: &impl RepositoryProbe,
     repository: &RepositoryDefinition,
-    branch: &str,
+    branch: &BranchName,
 ) -> Result<Option<DefaultBranchStatus>, AppError> {
     let tracking = match inspection::branch_readiness(git, repository, branch)? {
         BranchReadiness::MissingLocal => BranchTrackingStatus::MissingLocalBranch,
         BranchReadiness::MissingRemote => BranchTrackingStatus::MissingRemoteBranch,
-        BranchReadiness::Divergence { ahead, behind } => {
+        BranchReadiness::Diverged { ahead, behind } => {
             BranchTrackingStatus::Divergence { ahead, behind }
+        }
+        BranchReadiness::AheadOfOrigin { ahead } => {
+            BranchTrackingStatus::Divergence { ahead, behind: 0 }
+        }
+        BranchReadiness::FastForwardable { behind } => {
+            BranchTrackingStatus::Divergence { ahead: 0, behind }
         }
     };
     Ok(Some(DefaultBranchStatus::new(branch.to_string(), tracking)))
@@ -463,8 +469,8 @@ mod tests {
             &self,
             _repository: &Path,
             _configured: Option<&BranchName>,
-        ) -> Result<Option<String>, AppError> {
-            Ok(Some("main".to_string()))
+        ) -> Result<Option<BranchName>, AppError> {
+            Ok(Some(BranchName::new("main").unwrap()))
         }
 
         fn branch_tracking(

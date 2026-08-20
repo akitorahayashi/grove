@@ -12,10 +12,10 @@ impl DefaultBranch for CommandGitClient {
     fn update_default_branch(
         &self,
         repository: &Path,
-        branch: &str,
+        common_directory: &Path,
+        branch: &BranchName,
     ) -> Result<GitUpdateOutcome, AppError> {
-        let common_directory = self.common_directory(repository)?;
-        let _lock = self.lock_repository(&common_directory)?;
+        let _lock = self.lock_repository(common_directory)?;
         let preparation = match self.prepare_default_branch(repository, branch)? {
             Ok(preparation) => preparation,
             Err(block) => return Ok(GitUpdateOutcome::Blocked(block)),
@@ -39,10 +39,10 @@ impl DefaultBranch for CommandGitClient {
     fn refresh_default_branch(
         &self,
         repository: &Path,
-        branch: &str,
+        common_directory: &Path,
+        branch: &BranchName,
     ) -> Result<GitRefreshOutcome, AppError> {
-        let common_directory = self.common_directory(repository)?;
-        let _lock = self.lock_repository(&common_directory)?;
+        let _lock = self.lock_repository(common_directory)?;
         let preparation = match self.prepare_default_branch(repository, branch)? {
             Ok(preparation) => preparation,
             Err(block) => return Ok(GitRefreshOutcome::Blocked(block)),
@@ -81,9 +81,8 @@ impl CommandGitClient {
     fn prepare_default_branch(
         &self,
         repository: &Path,
-        branch: &str,
+        branch: &BranchName,
     ) -> Result<Result<Preparation, GitUpdateBlock>, AppError> {
-        let branch = BranchName::new(branch)?;
         let status_args = ["status", "--porcelain=v2", "--branch", "--no-ahead-behind"];
         let status = self.worktree_status(repository)?.ok_or_else(|| {
             AppError::git_command_failed(
@@ -98,14 +97,14 @@ impl CommandGitClient {
             return Ok(Err(GitUpdateBlock::DirtyWorkingTree));
         }
 
-        let revisions = self.branch_revisions(repository, &branch)?;
+        let revisions = self.branch_revisions(repository, branch)?;
         let Some(before) = revisions.local() else {
             return Ok(Err(GitUpdateBlock::MissingLocalBranch));
         };
         let Some(after) = revisions.remote() else {
             return Ok(Err(GitUpdateBlock::MissingRemoteBranch));
         };
-        let (ahead, behind) = self.divergence_counts(repository, &branch)?;
+        let (ahead, behind) = self.divergence_counts(repository, branch)?;
         if ahead > 0 && behind > 0 {
             return Ok(Err(GitUpdateBlock::Diverged));
         }
@@ -121,17 +120,21 @@ impl CommandGitClient {
     fn switch_default_branch(
         &self,
         repository: &Path,
-        branch: &str,
+        branch: &BranchName,
         current_branch: &str,
     ) -> Result<bool, AppError> {
-        let switched = current_branch != branch;
+        let switched = current_branch != branch.as_str();
         if switched {
-            self.git_required(repository, &["switch", "--", branch])?;
+            self.git_required(repository, &["switch", "--", branch.as_str()])?;
         }
         Ok(switched)
     }
 
-    fn fast_forward_default_branch(&self, repository: &Path, branch: &str) -> Result<(), AppError> {
+    fn fast_forward_default_branch(
+        &self,
+        repository: &Path,
+        branch: &BranchName,
+    ) -> Result<(), AppError> {
         let merge_target = format!("origin/{branch}");
         self.git_required(repository, &["merge", "--ff-only", "--", &merge_target])?;
         Ok(())
@@ -151,6 +154,7 @@ impl CommandGitClient {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
     use std::process::Command;
 
     use tempfile::TempDir;
@@ -161,8 +165,23 @@ mod tests {
     };
     use crate::git::{
         CommandGitClient, DefaultBranch, GitRefreshOutcome, GitUpdateBlock, GitUpdateOutcome,
-        Restoration,
+        RepositoryProbe, Restoration,
     };
+    use crate::repositories::BranchName;
+
+    fn update(client: &CommandGitClient, repository: &Path) -> GitUpdateOutcome {
+        let common = CommandGitClient::default().common_directory(repository).unwrap();
+        client
+            .update_default_branch(repository, &common, &BranchName::new("main").unwrap())
+            .unwrap()
+    }
+
+    fn refresh(client: &CommandGitClient, repository: &Path) -> GitRefreshOutcome {
+        let common = CommandGitClient::default().common_directory(repository).unwrap();
+        client
+            .refresh_default_branch(repository, &common, &BranchName::new("main").unwrap())
+            .unwrap()
+    }
 
     #[test]
     fn update_rechecks_detached_and_dirty_preconditions() {
@@ -173,13 +192,13 @@ mod tests {
 
         std::fs::write(repository.join("dirty.txt"), "dirty\n").unwrap();
         assert_eq!(
-            client.update_default_branch(&repository, "main").unwrap(),
+            update(&client, &repository),
             GitUpdateOutcome::Blocked(GitUpdateBlock::DirtyWorkingTree)
         );
         std::fs::remove_file(repository.join("dirty.txt")).unwrap();
         run_git(&repository, &["checkout", "--detach"]);
         assert_eq!(
-            client.update_default_branch(&repository, "main").unwrap(),
+            update(&client, &repository),
             GitUpdateOutcome::Blocked(GitUpdateBlock::DetachedHead)
         );
     }
@@ -190,8 +209,7 @@ mod tests {
         let repository = root.path().join("repo");
         initialize_committed_repository(&repository);
 
-        let result =
-            CommandGitClient::default().update_default_branch(&repository, "main").unwrap();
+        let result = update(&CommandGitClient::default(), &repository);
 
         assert_eq!(result, GitUpdateOutcome::Blocked(GitUpdateBlock::MissingRemoteBranch));
     }
@@ -201,8 +219,7 @@ mod tests {
         let root = TempDir::new().unwrap();
         let repository = create_updatable_repository(root.path());
 
-        let outcome =
-            CommandGitClient::default().update_default_branch(&repository, "main").unwrap();
+        let outcome = update(&CommandGitClient::default(), &repository);
 
         assert!(matches!(
             outcome,
@@ -225,13 +242,13 @@ mod tests {
 
         std::fs::write(repository.join("dirty.txt"), "dirty\n").unwrap();
         assert_eq!(
-            client.refresh_default_branch(&repository, "main").unwrap(),
+            refresh(&client, &repository),
             GitRefreshOutcome::Blocked(GitUpdateBlock::DirtyWorkingTree)
         );
         std::fs::remove_file(repository.join("dirty.txt")).unwrap();
         run_git(&repository, &["checkout", "--detach"]);
         assert_eq!(
-            client.refresh_default_branch(&repository, "main").unwrap(),
+            refresh(&client, &repository),
             GitRefreshOutcome::Blocked(GitUpdateBlock::DetachedHead)
         );
     }
@@ -241,8 +258,7 @@ mod tests {
         let root = TempDir::new().unwrap();
         let repository = create_updatable_repository(root.path());
 
-        let outcome =
-            CommandGitClient::default().refresh_default_branch(&repository, "main").unwrap();
+        let outcome = refresh(&CommandGitClient::default(), &repository);
 
         assert!(matches!(
             outcome,
@@ -269,9 +285,7 @@ mod tests {
             "if [ \"$1\" = merge ]; then echo merge-failed >&2; exit 42; fi",
         );
 
-        let outcome = CommandGitClient::with_executable(wrapper)
-            .refresh_default_branch(&repository, "main")
-            .unwrap();
+        let outcome = refresh(&CommandGitClient::with_executable(wrapper), &repository);
 
         assert!(matches!(
             outcome,
@@ -294,8 +308,7 @@ mod tests {
         let before = git_stdout(&repository, &["rev-parse", "main"]);
         run_git(&repository, &["switch", "feature"]);
 
-        let outcome =
-            CommandGitClient::default().update_default_branch(&repository, "main").unwrap();
+        let outcome = update(&CommandGitClient::default(), &repository);
 
         assert_eq!(outcome, GitUpdateOutcome::Blocked(GitUpdateBlock::Diverged));
         assert_eq!(git_stdout(&repository, &["branch", "--show-current"]), "feature");
@@ -325,9 +338,7 @@ mod tests {
         permissions.set_mode(0o755);
         std::fs::set_permissions(&wrapper, permissions).unwrap();
 
-        let outcome = CommandGitClient::with_executable(&wrapper)
-            .update_default_branch(&repository, "main")
-            .unwrap();
+        let outcome = update(&CommandGitClient::with_executable(&wrapper), &repository);
 
         assert!(matches!(
             outcome,
@@ -353,9 +364,7 @@ mod tests {
             "if [ \"$1\" = for-each-ref ] && [ \"$(git rev-parse main)\" = \"$(git rev-parse origin/main)\" ]; then\n  echo post-merge-probe-failed >&2\n  exit 42\nfi",
         );
 
-        let outcome = CommandGitClient::with_executable(wrapper)
-            .update_default_branch(&repository, "main")
-            .unwrap();
+        let outcome = update(&CommandGitClient::with_executable(wrapper), &repository);
 
         assert!(matches!(
             outcome,
