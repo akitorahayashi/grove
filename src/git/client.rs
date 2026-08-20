@@ -125,21 +125,20 @@ pub trait CacheEntry: Sync {
     ) -> Result<(), AppError>;
 }
 
-/// Advancing and switching a repository's local default branch. Callers pass
-/// the Git common directory they already resolved during their check phase; it
-/// is the lock target, so the serialization key and the lock always agree.
+/// Advancing and switching a repository's local default branch. Both methods
+/// resolve the Git common directory at mutation time and take the advisory
+/// lock there, so a repository whose `.git` indirection changed after
+/// scheduling is never mutated under a stale lock.
 pub trait DefaultBranch: Sync {
     fn update_default_branch(
         &self,
         repository: &Path,
-        common_directory: &Path,
         branch: &BranchName,
     ) -> Result<GitUpdateOutcome, AppError>;
 
     fn refresh_default_branch(
         &self,
         repository: &Path,
-        common_directory: &Path,
         branch: &BranchName,
     ) -> Result<GitRefreshOutcome, AppError>;
 }

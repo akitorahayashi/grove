@@ -54,11 +54,7 @@ pub(super) fn repository(git: &impl GitClient, task: &Task<'_>) -> Entry {
 }
 
 fn update_repository(git: &impl GitClient, task: &Task<'_>) -> Result<Entry, AppError> {
-    let result = git.update_default_branch(
-        task.repository.path(),
-        &task.common_directory,
-        &task.default_branch,
-    )?;
+    let result = git.update_default_branch(task.repository.path(), &task.default_branch)?;
     let (update, restoration) = match result {
         GitUpdateOutcome::Blocked(block) => {
             return Ok(Entry::new(task.repository, blocked_outcome(block, &task.default_branch)));

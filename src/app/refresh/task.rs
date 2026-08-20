@@ -31,10 +31,6 @@ impl<'a> Task<'a> {
     pub(super) fn default_branch(&self) -> &BranchName {
         &self.default_branch
     }
-
-    pub(super) fn common_directory(&self) -> &Path {
-        &self.common_directory
-    }
 }
 
 impl PhaseTask for Task<'_> {

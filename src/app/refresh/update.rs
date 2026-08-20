@@ -19,7 +19,7 @@ pub(super) fn repository(git: &impl GitClient, task: &Task<'_>) -> Entry {
 fn refresh_repository(git: &impl GitClient, task: &Task<'_>) -> Result<Entry, AppError> {
     let repository = task.repository();
     let default_branch = task.default_branch();
-    match git.refresh_default_branch(repository.path(), task.common_directory(), default_branch)? {
+    match git.refresh_default_branch(repository.path(), default_branch)? {
         GitRefreshOutcome::Blocked(block) => {
             Ok(Entry::new(repository, blocked_outcome(block, default_branch)))
         }

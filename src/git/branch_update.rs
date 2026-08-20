@@ -12,10 +12,10 @@ impl DefaultBranch for CommandGitClient {
     fn update_default_branch(
         &self,
         repository: &Path,
-        common_directory: &Path,
         branch: &BranchName,
     ) -> Result<GitUpdateOutcome, AppError> {
-        let _lock = self.lock_repository(common_directory)?;
+        let common_directory = self.common_directory(repository)?;
+        let _lock = self.lock_repository(&common_directory)?;
         let preparation = match self.prepare_default_branch(repository, branch)? {
             Ok(preparation) => preparation,
             Err(block) => return Ok(GitUpdateOutcome::Blocked(block)),
@@ -39,10 +39,10 @@ impl DefaultBranch for CommandGitClient {
     fn refresh_default_branch(
         &self,
         repository: &Path,
-        common_directory: &Path,
         branch: &BranchName,
     ) -> Result<GitRefreshOutcome, AppError> {
-        let _lock = self.lock_repository(common_directory)?;
+        let common_directory = self.common_directory(repository)?;
+        let _lock = self.lock_repository(&common_directory)?;
         let preparation = match self.prepare_default_branch(repository, branch)? {
             Ok(preparation) => preparation,
             Err(block) => return Ok(GitRefreshOutcome::Blocked(block)),
@@ -165,22 +165,16 @@ mod tests {
     };
     use crate::git::{
         CommandGitClient, DefaultBranch, GitRefreshOutcome, GitUpdateBlock, GitUpdateOutcome,
-        RepositoryProbe, Restoration,
+        Restoration,
     };
     use crate::repositories::BranchName;
 
     fn update(client: &CommandGitClient, repository: &Path) -> GitUpdateOutcome {
-        let common = CommandGitClient::default().common_directory(repository).unwrap();
-        client
-            .update_default_branch(repository, &common, &BranchName::new("main").unwrap())
-            .unwrap()
+        client.update_default_branch(repository, &BranchName::new("main").unwrap()).unwrap()
     }
 
     fn refresh(client: &CommandGitClient, repository: &Path) -> GitRefreshOutcome {
-        let common = CommandGitClient::default().common_directory(repository).unwrap();
-        client
-            .refresh_default_branch(repository, &common, &BranchName::new("main").unwrap())
-            .unwrap()
+        client.refresh_default_branch(repository, &BranchName::new("main").unwrap()).unwrap()
     }
 
     #[test]

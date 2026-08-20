@@ -14,6 +14,7 @@ impl<T> Slots<T> {
     }
 
     pub(crate) fn fill(&mut self, index: usize, value: T) {
+        debug_assert!(self.slots[index].is_none(), "slot {index} was already filled");
         self.slots[index] = Some(value);
     }
 

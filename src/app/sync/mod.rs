@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -25,30 +25,37 @@ pub use report::{
 
 pub type Entry = crate::app::entry::Entry<Outcome>;
 
-/// An existing repository eligible to seed the clone cache from its objects.
-/// A task descending from the update phase carries the common directory its
-/// check phase already resolved; one born from an untouched repository derives
-/// it when seeding runs.
-struct SeedTask<'a> {
+/// One existing repository whose objects can seed the cache entry for its
+/// identity. A candidate descending from the update phase carries the common
+/// directory its check phase already resolved; one born from an untouched
+/// repository derives it when seeding runs.
+struct SeedCandidate<'a> {
     index: usize,
     repository: &'a RepositoryDefinition,
     common_directory: Option<PathBuf>,
 }
 
+/// The seed sources sharing one repository identity, tried in order until one
+/// seeds the entry, so a failing source never suppresses a working sibling.
+struct SeedTask<'a> {
+    candidates: Vec<SeedCandidate<'a>>,
+}
+
 impl PhaseTask for SeedTask<'_> {
     fn repository(&self) -> &RepositoryDefinition {
-        self.repository
+        self.candidates[0].repository
     }
 
     fn resource(&self) -> &Path {
-        self.repository.path()
+        self.candidates[0].repository.path()
     }
 }
 
-/// The result of seeding one repository: the note to attach when seeding failed.
+/// The result of seeding one repository identity: whether an entry now exists,
+/// and a note per candidate whose seeding failed.
 struct SeedOutcome {
-    index: usize,
-    warning: Option<String>,
+    seeded: bool,
+    warnings: Vec<(usize, String)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -136,12 +143,16 @@ pub(crate) fn execute_with_events(
 
     // Repositories that reached the update phase fetched successfully, so their
     // remote is reachable and can be seeded; this covers cleanly updated,
-    // up-to-date, and diverged repositories alike.
-    seeds.extend(
-        updates.iter().map(|task| (task.index(), Some(task.common_directory().to_path_buf()))),
-    );
+    // up-to-date, and diverged repositories alike. They lead their identity's
+    // candidate list so seeding prefers a transport that just proved reachable
+    // over an untouched dirty or detached sibling.
+    let mut candidates = updates
+        .iter()
+        .map(|task| (task.index(), Some(task.common_directory().to_path_buf())))
+        .collect::<Vec<_>>();
+    candidates.extend(seeds);
     let seeded = if let Some(cache) = cache {
-        seed_phase(ctx.git(), cache, &repositories, seeds, &mut entries, parallelism, events)?
+        seed_phase(ctx.git(), cache, &repositories, candidates, &mut entries, parallelism, events)?
     } else {
         PhaseSummary::default()
     };
@@ -232,30 +243,36 @@ fn update_phase(
 /// the already-final entry, never as a repository failure. Repositories left
 /// untouched for a dirty working tree or detached HEAD are seeded here too,
 /// since seeding reads only the object store. Each distinct repository
-/// identity is seeded once.
+/// identity is seeded once, from its first working candidate.
 fn seed_phase(
     git: &impl GitClient,
     cache: &Store,
     repositories: &[&RepositoryDefinition],
-    seeds: Vec<(usize, Option<PathBuf>)>,
+    candidates: Vec<(usize, Option<PathBuf>)>,
     entries: &mut Slots<Entry>,
     parallelism: usize,
     events: &impl EventSink<Phase>,
 ) -> Result<PhaseSummary, AppError> {
     // One task per distinct repository identity — the key cache entries use —
     // and only for identities not already cached, so an all-cached run resolves
-    // no seed sources and skips the phase entirely.
-    let mut seen = HashSet::new();
-    let tasks = seeds
-        .into_iter()
-        .filter(|(index, _)| seen.insert(repositories[*index].url().identity()))
-        .filter(|(index, _)| !cache.is_cached(repositories[*index].url()))
-        .map(|(index, common_directory)| SeedTask {
-            index,
-            repository: repositories[index],
-            common_directory,
-        })
-        .collect::<Vec<_>>();
+    // no seed sources and skips the phase entirely. Same-identity candidates
+    // stay on the task as fallback sources.
+    let mut task_by_identity = HashMap::<String, usize>::new();
+    let mut tasks: Vec<SeedTask<'_>> = Vec::new();
+    for (index, common_directory) in candidates {
+        let repository = repositories[index];
+        if cache.is_cached(repository.url()) {
+            continue;
+        }
+        let candidate = SeedCandidate { index, repository, common_directory };
+        match task_by_identity.get(&repository.url().identity()) {
+            Some(&task) => tasks[task].candidates.push(candidate),
+            None => {
+                task_by_identity.insert(repository.url().identity(), tasks.len());
+                tasks.push(SeedTask { candidates: vec![candidate] });
+            }
+        }
+    }
 
     let (outcomes, summary) = phases::run_workers(
         events,
@@ -263,39 +280,45 @@ fn seed_phase(
         &tasks,
         parallelism,
         |task| seed_repository(git, cache, task, events),
-        |outcome| outcome.warning.is_none(),
+        |outcome| outcome.seeded,
     )?;
 
     for outcome in outcomes {
-        if let Some(message) = outcome.warning
-            && let Some(entry) = entries.get_mut(outcome.index)
-        {
-            entry.set_warning(message);
+        for (index, message) in outcome.warnings {
+            if let Some(entry) = entries.get_mut(index) {
+                entry.set_warning(message);
+            }
         }
     }
     Ok(summary)
 }
 
 /// Seeding failures become a note on the already-final entry; only a genuine
-/// internal error propagates, matching the prepare phase's error taxonomy.
+/// internal error propagates, matching the prepare phase's error taxonomy. A
+/// failed candidate keeps its note even when a sibling seeds the entry.
 fn seed_repository(
     git: &impl GitClient,
     cache: &Store,
     task: &SeedTask<'_>,
     events: &impl EventSink<Phase>,
 ) -> Result<SeedOutcome, AppError> {
-    let mut progress = EventProgress::new(task.repository, events);
-    let source = match &task.common_directory {
-        Some(source) => source.clone(),
-        None => match git.common_directory(task.repository.path()) {
-            Ok(source) => source,
-            Err(error) => {
-                return Ok(SeedOutcome { index: task.index, warning: Some(error.demote()?) });
-            }
-        },
-    };
-    match cache.seed_from_local(git, task.repository.url(), &source, &mut progress) {
-        Ok(_) => Ok(SeedOutcome { index: task.index, warning: None }),
-        Err(error) => Ok(SeedOutcome { index: task.index, warning: Some(error.demote()?) }),
+    let mut warnings = Vec::new();
+    for candidate in &task.candidates {
+        let mut progress = EventProgress::new(candidate.repository, events);
+        let source = match &candidate.common_directory {
+            Some(source) => source.clone(),
+            None => match git.common_directory(candidate.repository.path()) {
+                Ok(source) => source,
+                Err(error) => {
+                    warnings.push((candidate.index, error.demote()?));
+                    continue;
+                }
+            },
+        };
+        match cache.seed_from_local(git, candidate.repository.url(), &source, &mut progress) {
+            Ok(_) => return Ok(SeedOutcome { seeded: true, warnings }),
+            Err(error) => warnings.push((candidate.index, error.demote()?)),
+        }
     }
+    Ok(SeedOutcome { seeded: false, warnings })
 }

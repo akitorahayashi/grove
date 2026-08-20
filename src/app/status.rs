@@ -313,11 +313,14 @@ fn fetch_status(
             ),
         ));
     }
-    Ok((task.index, status_for_repository(git, task.repository, Some(actual))?))
+    // The entry deliberately reflects the repository as it stands after the
+    // fetch, so the origin is re-observed along with the rest of the state.
+    Ok((task.index, status_for_repository(git, task.repository, None)?))
 }
 
-/// `known_remote` carries the origin URL a caller already probed under lock, so
-/// the fetch path does not repeat the probe; the no-fetch path passes `None`.
+/// `known_remote` short-circuits the origin probe only when the caller just
+/// observed it with nothing run in between; a caller that fetched passes
+/// `None` so the origin is re-observed.
 fn status_for_repository(
     git: &impl RepositoryProbe,
     repository: &RepositoryDefinition,
