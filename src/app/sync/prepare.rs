@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use crate::cache::Store;
 use crate::git::GitClient;
 use crate::phases::{EventProgress, EventSink, Task as PhaseTask};
-use crate::repositories::RepositoryDefinition;
+use crate::repositories::{BranchName, RepositoryDefinition};
 
 use super::update;
 use super::{BlockedReason, Entry, Outcome, Phase};
@@ -17,7 +17,7 @@ pub(super) enum Task<'a> {
         index: usize,
         repository: &'a RepositoryDefinition,
         common_directory: PathBuf,
-        default_branch: String,
+        default_branch: BranchName,
     },
 }
 
@@ -80,14 +80,11 @@ pub(super) fn repository<'a>(
                         ),
                         prepared: true,
                     },
-                    Err(err) if err.is_internal() => return Err(err),
                     Err(err) => Completion::Entry {
                         index: *index,
                         entry: Entry::new(
                             repository,
-                            Outcome::Blocked {
-                                reason: BlockedReason::CloneFailed(err.to_string()),
-                            },
+                            Outcome::Blocked { reason: BlockedReason::CloneFailed(err.demote()?) },
                         ),
                         prepared: false,
                     },
@@ -103,12 +100,11 @@ pub(super) fn repository<'a>(
                     common_directory.clone(),
                     default_branch.clone(),
                 )),
-                Err(err) if err.is_internal() => return Err(err),
                 Err(err) => Completion::Entry {
                     index: *index,
                     entry: Entry::new(
                         repository,
-                        Outcome::Blocked { reason: BlockedReason::FetchFailed(err.to_string()) },
+                        Outcome::Blocked { reason: BlockedReason::FetchFailed(err.demote()?) },
                     ),
                     prepared: false,
                 },

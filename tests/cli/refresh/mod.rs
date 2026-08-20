@@ -1,8 +1,6 @@
-use std::path::Path;
-
 use predicates::prelude::*;
 
-use crate::harness::{TestContext, commit_file, run_git};
+use crate::harness::{TestContext, commit_file, current_branch, git_stdout, run_git};
 
 mod planning;
 mod safety;
@@ -11,7 +9,7 @@ mod safety;
 fn refresh_missing_repository_fails_without_cloning() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
-    let config = single_repository_config(&ctx, "blog", &remote.url(), None);
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
 
     ctx.cli()
         .arg("--config")
@@ -33,7 +31,7 @@ fn refresh_runs_without_the_cache_environment() {
     // the cache environment.
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
-    let config = single_repository_config(&ctx, "blog", &remote.url(), None);
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
 
     ctx.cli()
         .env_remove("XDG_CACHE_HOME")
@@ -104,7 +102,7 @@ url = "{}"
 fn refresh_switches_to_equal_default_branch_and_reports_switch() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
-    let config = single_repository_config(&ctx, "blog", &remote.url(), None);
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
     ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
     let repository = ctx.workspace().join("blog");
     run_git(&repository, &["switch", "-c", "feature/login"]);
@@ -128,7 +126,7 @@ fn refresh_switches_to_equal_default_branch_and_reports_switch() {
 fn refresh_fast_forwards_default_branch_that_is_already_checked_out() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
-    let config = single_repository_config(&ctx, "blog", &remote.url(), None);
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
     ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
     let repository = ctx.workspace().join("blog");
     remote.add_commit("remote.txt", "remote\n");
@@ -153,7 +151,7 @@ fn refresh_fast_forwards_default_branch_that_is_already_checked_out() {
 fn refresh_omits_current_default_branch_from_report() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
-    let config = single_repository_config(&ctx, "blog", &remote.url(), None);
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
     ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
 
     ctx.cli()
@@ -211,7 +209,7 @@ url = "{}"
 fn refresh_blocks_detached_head_without_mutation() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
-    let config = single_repository_config(&ctx, "blog", &remote.url(), None);
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
     ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
     let repository = ctx.workspace().join("blog");
     let revision = git_stdout(&repository, &["rev-parse", "HEAD"]);
@@ -276,9 +274,9 @@ url = "{}"
 fn refresh_blocks_missing_configured_branch_without_creating_it() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
-    let initial_config = single_repository_config(&ctx, "blog", &remote.url(), None);
+    let initial_config = ctx.write_single_repository_config("blog", &remote.url(), None);
     ctx.cli().arg("--config").arg(&initial_config).arg("sync").assert().success();
-    let configured = single_repository_config(&ctx, "blog", &remote.url(), Some("trunk"));
+    let configured = ctx.write_single_repository_config("blog", &remote.url(), Some("trunk"));
 
     ctx.cli()
         .arg("--config")
@@ -295,12 +293,12 @@ fn refresh_blocks_missing_configured_branch_without_creating_it() {
 fn refresh_blocks_missing_remote_configured_branch_without_switching() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
-    let initial_config = single_repository_config(&ctx, "blog", &remote.url(), None);
+    let initial_config = ctx.write_single_repository_config("blog", &remote.url(), None);
     ctx.cli().arg("--config").arg(&initial_config).arg("sync").assert().success();
     let repository = ctx.workspace().join("blog");
     run_git(&repository, &["switch", "-c", "trunk"]);
     run_git(&repository, &["switch", "main"]);
-    let configured = single_repository_config(&ctx, "blog", &remote.url(), Some("trunk"));
+    let configured = ctx.write_single_repository_config("blog", &remote.url(), Some("trunk"));
 
     ctx.cli()
         .arg("--config")
@@ -318,7 +316,7 @@ fn refresh_blocks_missing_remote_configured_branch_without_switching() {
 fn refresh_reports_invalid_destinations_origin_and_default_branch() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("remote");
-    let initial_config = single_repository_config(&ctx, "no-default", &remote.url(), None);
+    let initial_config = ctx.write_single_repository_config("no-default", &remote.url(), None);
     ctx.cli().arg("--config").arg(&initial_config).arg("sync").assert().success();
     run_git(
         &ctx.workspace().join("no-default"),
@@ -372,7 +370,7 @@ url = "{}"
 fn refresh_redacts_remote_url_mismatch_details() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
-    let initial_config = single_repository_config(&ctx, "blog", &remote.url(), None);
+    let initial_config = ctx.write_single_repository_config("blog", &remote.url(), None);
     ctx.cli().arg("--config").arg(&initial_config).arg("sync").assert().success();
     let repository = ctx.workspace().join("blog");
     run_git(
@@ -384,8 +382,7 @@ fn refresh_redacts_remote_url_mismatch_details() {
             "https://user:actual-secret@example.com/org/repo.git?token=actual-token",
         ],
     );
-    let config = single_repository_config(
-        &ctx,
+    let config = ctx.write_single_repository_config(
         "blog",
         "https://user:expected-secret@example.com/org/repo.git?token=expected-token",
         None,
@@ -403,36 +400,4 @@ fn refresh_redacts_remote_url_mismatch_details() {
         .stderr(predicate::str::contains("actual-token").not())
         .stderr(predicate::str::contains("expected-secret").not())
         .stderr(predicate::str::contains("expected-token").not());
-}
-
-fn single_repository_config(
-    ctx: &TestContext,
-    name: &str,
-    url: &str,
-    default_branch: Option<&str>,
-) -> std::path::PathBuf {
-    let configured_branch =
-        default_branch.map(|branch| format!("default_branch = \"{branch}\"\n")).unwrap_or_default();
-    ctx.write_config(&format!(
-        "version = 1\n[repos.{name}]\npath = \"{name}\"\nurl = \"{url}\"\n{configured_branch}"
-    ))
-}
-
-fn current_branch(repository: &Path) -> String {
-    git_stdout(repository, &["branch", "--show-current"])
-}
-
-fn git_stdout(repository: &Path, args: &[&str]) -> String {
-    let output = std::process::Command::new("git")
-        .current_dir(repository)
-        .args(args)
-        .output()
-        .expect("failed to inspect Git repository");
-    assert!(
-        output.status.success(),
-        "git {} failed: {}",
-        args.join(" "),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8_lossy(&output.stdout).trim().to_string()
 }

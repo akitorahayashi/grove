@@ -6,7 +6,7 @@ use crate::AppError;
 use crate::app::AppContext;
 use crate::config;
 use crate::git::GitClient;
-use crate::phases::{self, DiscardEvents, EventSink, Task as PhaseTask};
+use crate::phases::{self, DiscardEvents, EventSink, Slots, Task as PhaseTask};
 use crate::repositories::{RepositoryDefinition, select_repositories};
 
 mod check;
@@ -66,8 +66,7 @@ pub(crate) fn execute_with_events(
     let repositories = select_repositories(config.repositories(), targets)?;
     let parallelism = std::thread::available_parallelism()?.get();
     let started = Instant::now();
-    let total = repositories.len();
-    let mut entries = std::iter::repeat_with(|| None).take(total).collect::<Vec<_>>();
+    let mut entries = Slots::new(repositories.len());
 
     let (decisions, checked) =
         check_phase(ctx.git(), &repositories, parallelism, options.dry_run(), events)?;
@@ -76,7 +75,7 @@ pub(crate) fn execute_with_events(
     let mut dry_runs = Vec::new();
     for (index, (repository, decision)) in repositories.iter().copied().zip(decisions).enumerate() {
         match decision {
-            check::Decision::Entry(entry) => entries[index] = Some(entry),
+            check::Decision::Entry(entry) => entries.fill(index, entry),
             check::Decision::Fetch { common_directory, default_branch } => {
                 fetches.push(Task::new(index, repository, common_directory, default_branch));
             }
@@ -90,14 +89,8 @@ pub(crate) fn execute_with_events(
     let (refreshes, fetched) = fetch_phase(ctx.git(), &fetches, &mut entries, parallelism, events)?;
     let refreshed = refresh_phase(ctx.git(), &refreshes, &mut entries, parallelism, events)?;
 
-    let entries = entries
-        .into_iter()
-        .map(|entry| {
-            entry.ok_or_else(|| AppError::internal("selected repository produced no outcome"))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
     let phases = PhaseSummaries::new(checked, fetched, refreshed);
-    Ok(Report::new(entries, started.elapsed(), phases))
+    Ok(Report::new(entries.into_complete()?, started.elapsed(), phases))
 }
 
 fn check_phase(
@@ -115,7 +108,7 @@ fn check_phase(
 fn fetch_phase<'a>(
     git: &impl GitClient,
     tasks: &[Task<'a>],
-    entries: &mut [Option<Entry>],
+    entries: &mut Slots<Entry>,
     parallelism: usize,
     events: &impl EventSink<Phase>,
 ) -> Result<(Vec<Task<'a>>, PhaseSummary), AppError> {
@@ -131,7 +124,7 @@ fn fetch_phase<'a>(
     let mut refreshes = Vec::new();
     for completion in completions {
         match completion {
-            fetch::Completion::Entry { index, entry } => entries[index] = Some(entry),
+            fetch::Completion::Entry { index, entry } => entries.fill(index, entry),
             fetch::Completion::Refresh(task) => refreshes.push(task),
         }
     }
@@ -141,7 +134,7 @@ fn fetch_phase<'a>(
 fn refresh_phase(
     git: &impl GitClient,
     tasks: &[Task<'_>],
-    entries: &mut [Option<Entry>],
+    entries: &mut Slots<Entry>,
     parallelism: usize,
     events: &impl EventSink<Phase>,
 ) -> Result<PhaseSummary, AppError> {
@@ -163,22 +156,24 @@ fn refresh_phase(
     )?;
 
     for (index, entry) in outcomes {
-        entries[index] = Some(entry);
+        entries.fill(index, entry);
     }
     Ok(summary)
 }
 
 fn refreshable_tasks<'a, 'b>(
     tasks: &'b [Task<'a>],
-    entries: &mut [Option<Entry>],
+    entries: &mut Slots<Entry>,
 ) -> Vec<&'b Task<'a>> {
     let conflicts = linked_worktree_conflicts(tasks);
 
     let mut refreshable = Vec::new();
     for task in tasks {
         if conflicts.contains(&worktree_branch_key(task)) {
-            entries[task.index()] =
-                Some(Entry::new(task.repository(), linked_worktree_conflict_outcome(task)));
+            entries.fill(
+                task.index(),
+                Entry::new(task.repository(), linked_worktree_conflict_outcome(task)),
+            );
         } else {
             refreshable.push(task);
         }
@@ -186,7 +181,7 @@ fn refreshable_tasks<'a, 'b>(
     refreshable
 }
 
-fn plan_dry_runs(tasks: &[Task<'_>], entries: &mut [Option<Entry>]) {
+fn plan_dry_runs(tasks: &[Task<'_>], entries: &mut Slots<Entry>) {
     let conflicts = linked_worktree_conflicts(tasks);
 
     for task in tasks {
@@ -195,7 +190,7 @@ fn plan_dry_runs(tasks: &[Task<'_>], entries: &mut [Option<Entry>]) {
         } else {
             Outcome::Planned(Plan::new(task.default_branch().to_string()))
         };
-        entries[task.index()] = Some(Entry::new(task.repository(), outcome));
+        entries.fill(task.index(), Entry::new(task.repository(), outcome));
     }
 }
 

@@ -6,6 +6,8 @@ use std::sync::mpsc;
 
 use crate::AppError;
 
+use super::Slots;
+
 const MAX_WORKERS: usize = 8;
 
 pub(crate) fn map<T, R>(
@@ -48,20 +50,14 @@ where
     });
     drop(sender);
 
-    let mut ordered = std::iter::repeat_with(|| None).take(items.len()).collect::<Vec<_>>();
+    let mut ordered = Slots::new(items.len());
     for _ in 0..items.len() {
         let (index, result) = receiver
             .recv()
             .map_err(|_| AppError::internal("repository worker result channel disconnected"))?;
-        ordered[index] = Some(result?);
+        ordered.fill(index, result?);
     }
-
-    ordered
-        .into_iter()
-        .map(|result| {
-            result.ok_or_else(|| AppError::internal("repository worker omitted a result"))
-        })
-        .collect()
+    ordered.into_complete()
 }
 
 pub(crate) fn map_keyed<T, R, K>(
@@ -88,14 +84,11 @@ where
     let grouped = map(&groups, parallelism, |group| {
         group.iter().map(|&index| (index, action(&items[index]))).collect::<Vec<_>>()
     })?;
-    let mut ordered = std::iter::repeat_with(|| None).take(items.len()).collect::<Vec<_>>();
+    let mut ordered = Slots::new(items.len());
     for (index, result) in grouped.into_iter().flatten() {
-        ordered[index] = Some(result);
+        ordered.fill(index, result);
     }
-    ordered
-        .into_iter()
-        .map(|result| result.ok_or_else(|| AppError::internal("keyed worker omitted a result")))
-        .collect()
+    ordered.into_complete()
 }
 
 #[cfg(test)]

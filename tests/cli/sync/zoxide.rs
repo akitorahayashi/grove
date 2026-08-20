@@ -7,16 +7,7 @@ fn sync_register_zoxide_adds_existing_repository_when_missing_from_zoxide() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
     let zoxide = FakeZoxide::new(&ctx);
-    let config = ctx.write_config(&format!(
-        r#"
-version = 1
-
-[repos.blog]
-path = "blog"
-url = "{}"
-"#,
-        remote.url()
-    ));
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
     ctx.cli().arg("--config").arg(&config).arg("sync").arg("blog").assert().success();
 
     zoxide
@@ -45,16 +36,7 @@ fn sync_register_zoxide_reports_when_add_does_not_register_repository() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
     let zoxide = FakeZoxide::new(&ctx);
-    let config = ctx.write_config(&format!(
-        r#"
-version = 1
-
-[repos.blog]
-path = "blog"
-url = "{}"
-"#,
-        remote.url()
-    ));
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
 
     zoxide
         .command(ctx.cli())
@@ -78,16 +60,7 @@ fn sync_register_zoxide_reports_unavailable_zoxide() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
     let zoxide = FakeZoxide::new(&ctx).unavailable();
-    let config = ctx.write_config(&format!(
-        r#"
-version = 1
-
-[repos.blog]
-path = "blog"
-url = "{}"
-"#,
-        remote.url()
-    ));
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
 
     zoxide
         .command(ctx.cli())
@@ -108,16 +81,7 @@ fn sync_dry_run_register_zoxide_reports_planned_registration_without_running_zox
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
     let zoxide = FakeZoxide::new(&ctx).unavailable();
-    let config = ctx.write_config(&format!(
-        r#"
-version = 1
-
-[repos.blog]
-path = "blog"
-url = "{}"
-"#,
-        remote.url()
-    ));
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
 
     zoxide
         .command(ctx.cli())
@@ -141,16 +105,7 @@ fn sync_dry_run_register_zoxide_reports_existing_repository_without_running_zoxi
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
     let zoxide = FakeZoxide::new(&ctx).unavailable();
-    let config = ctx.write_config(&format!(
-        r#"
-version = 1
-
-[repos.blog]
-path = "blog"
-url = "{}"
-"#,
-        remote.url()
-    ));
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
     ctx.cli().arg("--config").arg(&config).arg("sync").arg("blog").assert().success();
 
     zoxide
@@ -201,16 +156,7 @@ fn sync_rejects_zoxide_missing_required_add_capability_before_add() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
     let zoxide = FakeZoxide::new(&ctx).missing_add_capability();
-    let config = ctx.write_config(&format!(
-        r#"
-version = 1
-
-[repos.blog]
-path = "blog"
-url = "{}"
-"#,
-        remote.url()
-    ));
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
 
     zoxide
         .command(ctx.cli())
@@ -232,16 +178,7 @@ fn sync_register_zoxide_adds_cloned_repository() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
     let zoxide = FakeZoxide::new(&ctx);
-    let config = ctx.write_config(&format!(
-        r#"
-version = 1
-
-[repos.blog]
-path = "blog"
-url = "{}"
-"#,
-        remote.url()
-    ));
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
 
     zoxide
         .command(ctx.cli())
@@ -269,16 +206,7 @@ fn sync_register_zoxide_reports_existing_entry_without_adding() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
     let zoxide = FakeZoxide::new(&ctx);
-    let config = ctx.write_config(&format!(
-        r#"
-version = 1
-
-[repos.blog]
-path = "blog"
-url = "{}"
-"#,
-        remote.url()
-    ));
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
     std::fs::create_dir_all(&zoxide.data).expect("failed to create fake zoxide data");
     std::fs::write(
         zoxide.database(),

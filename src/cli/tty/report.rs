@@ -9,6 +9,7 @@ use crate::cache::Outcome as CacheOutcome;
 use crate::repositories::redact_urls_for_display;
 
 use crate::cli::output::{Output, terminal_text};
+use crate::cli::tty::table::Paint;
 
 pub(in crate::cli) fn cache_annotation(cache: CacheOutcome) -> &'static str {
     match cache {
@@ -83,6 +84,28 @@ pub(in crate::cli) fn write_line(
 
 pub(in crate::cli) fn safe_message(value: &str) -> String {
     terminal_text(&redact_urls_for_display(value))
+}
+
+/// One report line: a colored marker, the bold repository, and a dimmed
+/// detail. Owns the escaping of the raw repository name; `detail` arrives
+/// display-ready because callers choose between `terminal_text` (local text)
+/// and `safe_message` (text that may echo remote URLs).
+pub(in crate::cli) fn entry_line(
+    output: &mut Output<'_>,
+    marker: &str,
+    paint: Paint,
+    repository: &str,
+    detail: &str,
+) -> io::Result<()> {
+    write_line(
+        output,
+        format_args!(
+            " {} {} {}",
+            paint.apply(marker),
+            terminal_text(repository).bold(),
+            detail.dimmed()
+        ),
+    )
 }
 
 pub(in crate::cli) fn print_blocked_details(

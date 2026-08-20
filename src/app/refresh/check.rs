@@ -3,14 +3,14 @@ use std::path::PathBuf;
 use crate::AppError;
 use crate::git::GitClient;
 use crate::inspection::{self, BranchReadiness, Readiness};
-use crate::repositories::RepositoryDefinition;
+use crate::repositories::{BranchName, RepositoryDefinition};
 
 use super::{BlockedReason, BlockedReasonDetails, Entry, Outcome, SkippedReason};
 
 pub(super) enum Decision {
     Entry(Entry),
-    Fetch { common_directory: PathBuf, default_branch: String },
-    DryRun { common_directory: PathBuf, default_branch: String },
+    Fetch { common_directory: PathBuf, default_branch: BranchName },
+    DryRun { common_directory: PathBuf, default_branch: BranchName },
 }
 
 pub(super) fn repository(
@@ -68,23 +68,14 @@ fn blocked(repository: &RepositoryDefinition, reason: BlockedReason) -> Result<D
 pub(super) fn refresh_block_reason(
     git: &impl GitClient,
     repository: &RepositoryDefinition,
-    default_branch: &str,
+    default_branch: &BranchName,
 ) -> Result<Option<BlockedReason>, AppError> {
-    match inspection::branch_readiness(git, repository, default_branch)? {
-        BranchReadiness::MissingLocal => {
-            Ok(Some(BlockedReason::MissingLocalBranch { branch: default_branch.to_string() }))
-        }
-        BranchReadiness::MissingRemote => {
-            Ok(Some(BlockedReason::MissingRemoteBranch { branch: default_branch.to_string() }))
-        }
-        BranchReadiness::Divergence { ahead, behind } => {
-            if ahead > 0 && behind > 0 {
-                Ok(Some(BlockedReason::Diverged { branch: default_branch.to_string() }))
-            } else if ahead > 0 {
-                Ok(Some(BlockedReason::AheadOfOrigin { branch: default_branch.to_string() }))
-            } else {
-                Ok(None)
-            }
-        }
-    }
+    let branch = default_branch.to_string();
+    Ok(match inspection::branch_readiness(git, repository, default_branch)? {
+        BranchReadiness::MissingLocal => Some(BlockedReason::MissingLocalBranch { branch }),
+        BranchReadiness::MissingRemote => Some(BlockedReason::MissingRemoteBranch { branch }),
+        BranchReadiness::Diverged { .. } => Some(BlockedReason::Diverged { branch }),
+        BranchReadiness::AheadOfOrigin { .. } => Some(BlockedReason::AheadOfOrigin { branch }),
+        BranchReadiness::FastForwardable { .. } => None,
+    })
 }

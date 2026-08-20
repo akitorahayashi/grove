@@ -9,7 +9,9 @@ pub(crate) mod workers;
 
 mod events;
 mod run;
+mod slots;
 
 pub use events::Summary;
 pub(crate) use events::{DiscardEvents, Event, EventProgress, EventSink};
 pub(crate) use run::{Task, run_check, run_workers};
+pub(crate) use slots::Slots;

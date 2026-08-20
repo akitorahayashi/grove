@@ -1,14 +1,13 @@
 use predicates::prelude::*;
 
-use super::{current_branch, git_stdout, single_repository_config};
-use crate::harness::{TestContext, path_with_wrapper, run_git};
+use crate::harness::{TestContext, current_branch, git_stdout, path_with_wrapper, run_git};
 
 #[cfg(unix)]
 #[test]
 fn refresh_fetch_failure_leaves_original_branch_checked_out() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
-    let config = single_repository_config(&ctx, "blog", &remote.url(), None);
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
     ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
     let repository = ctx.workspace().join("blog");
     run_git(&repository, &["switch", "-c", "feature"]);
@@ -35,7 +34,7 @@ fn refresh_fetch_failure_leaves_original_branch_checked_out() {
 fn refresh_switch_failure_is_blocked_on_the_original_branch() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
-    let config = single_repository_config(&ctx, "blog", &remote.url(), None);
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
     ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
     let repository = ctx.workspace().join("blog");
     run_git(&repository, &["switch", "-c", "feature"]);
@@ -63,7 +62,7 @@ fn refresh_switch_failure_is_blocked_on_the_original_branch() {
 fn refresh_merge_failure_does_not_restore_original_branch() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
-    let config = single_repository_config(&ctx, "blog", &remote.url(), None);
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
     ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
     let repository = ctx.workspace().join("blog");
     run_git(&repository, &["switch", "-c", "feature"]);
@@ -93,7 +92,7 @@ fn refresh_merge_failure_does_not_restore_original_branch() {
 fn refresh_blocks_multiple_linked_worktrees_before_switching() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("shared");
-    let initial_config = single_repository_config(&ctx, "primary", &remote.url(), None);
+    let initial_config = ctx.write_single_repository_config("primary", &remote.url(), None);
     ctx.cli().arg("--config").arg(&initial_config).arg("sync").assert().success();
 
     let primary = ctx.workspace().join("primary");

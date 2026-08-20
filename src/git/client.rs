@@ -62,7 +62,7 @@ pub trait RepositoryProbe: Sync {
         &self,
         repository: &Path,
         configured: Option<&BranchName>,
-    ) -> Result<Option<String>, AppError>;
+    ) -> Result<Option<BranchName>, AppError>;
 
     fn branch_tracking(
         &self,
@@ -125,18 +125,21 @@ pub trait CacheEntry: Sync {
     ) -> Result<(), AppError>;
 }
 
-/// Advancing and switching a repository's local default branch.
+/// Advancing and switching a repository's local default branch. Both methods
+/// resolve the Git common directory at mutation time and take the advisory
+/// lock there, so a repository whose `.git` indirection changed after
+/// scheduling is never mutated under a stale lock.
 pub trait DefaultBranch: Sync {
     fn update_default_branch(
         &self,
         repository: &Path,
-        branch: &str,
+        branch: &BranchName,
     ) -> Result<GitUpdateOutcome, AppError>;
 
     fn refresh_default_branch(
         &self,
         repository: &Path,
-        branch: &str,
+        branch: &BranchName,
     ) -> Result<GitRefreshOutcome, AppError>;
 }
 

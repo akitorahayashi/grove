@@ -93,8 +93,10 @@ impl<P: ProgressPhase> RepositoryProgress<P> {
             return;
         };
 
-        child.numeric = true;
-        child.progress.set_style(numeric_style(self.name_width));
+        if !child.numeric {
+            child.numeric = true;
+            child.progress.set_style(numeric_style(self.name_width));
+        }
         child.progress.set_length(length);
         child.progress.set_position(position.min(length));
         child.progress.tick();

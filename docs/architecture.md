@@ -73,6 +73,7 @@ src/
     events.rs
     mod.rs
     run.rs
+    slots.rs
     workers.rs
   config/
     discovery.rs
@@ -150,11 +151,13 @@ stable lock files and only real entry directories are inspected. The sync, clone
 
 `phases` owns phase-structured bounded-parallel execution. `events` owns the
 phase-generic event, sink, and progress adapter; `run` owns the check and worker
-phase envelopes; `workers` owns the bounded worker pool. Each use case supplies
-its own phase marker, per-repository action, and change predicate. Worker
-execution is bounded by the selected work, available parallelism, and a ceiling
-of eight. Work sharing a Git common directory is serialized. Worker panics and
-channel disconnects become application errors.
+phase envelopes; `workers` owns the bounded worker pool; `slots` owns the
+selection-ordered result slots and the invariant that every selected item ends
+with exactly one result. Each use case supplies its own phase marker,
+per-repository action, and change predicate. Worker execution is bounded by the
+selected work, available parallelism, and a ceiling of eight. Work sharing a Git
+common directory is serialized. Worker panics and channel disconnects become
+application errors.
 
 `inspection` owns repository readiness probing and the canonical diagnostics for
 the conditions the use cases share, so their reason vocabularies map from one

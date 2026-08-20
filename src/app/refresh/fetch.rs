@@ -25,12 +25,11 @@ pub(super) fn repository<'a>(
 
     Ok(match git.fetch(task.repository().path(), &mut progress) {
         Ok(()) => Completion::Refresh(task.clone()),
-        Err(error) if error.is_internal() => return Err(error),
         Err(error) => Completion::Entry {
             index: task.index(),
             entry: Entry::new(
                 task.repository(),
-                Outcome::Blocked { reason: BlockedReason::FetchFailed(error.to_string()) },
+                Outcome::Blocked { reason: BlockedReason::FetchFailed(error.demote()?) },
             ),
         },
     })

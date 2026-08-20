@@ -2,7 +2,6 @@ use std::io;
 use std::path::PathBuf;
 
 use clap::Args;
-use owo_colors::OwoColorize;
 
 use crate::AppError;
 use crate::app::api;
@@ -12,9 +11,10 @@ use crate::cli::Completion;
 use crate::cli::output::{Output, terminal_text};
 use crate::cli::tty::progress::{ProgressPhase, run_with_progress};
 use crate::cli::tty::report::{
-    print_blocked_details, print_count, print_count_with_elapsed, print_phase, safe_message,
-    write_line,
+    entry_line, print_blocked_details, print_count, print_count_with_elapsed, print_phase,
+    safe_message, write_line,
 };
+use crate::cli::tty::table::Paint;
 
 #[derive(Args)]
 pub(in crate::cli) struct RefreshCommand {
@@ -101,58 +101,50 @@ fn print_entries(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
         match entry.outcome() {
             Outcome::Planned(_) | Outcome::Current { .. } => {}
             Outcome::Refreshed { branch, before, after, previous_branch } => {
-                let repository = terminal_text(entry.repository());
                 let mut change = format!("{branch} {before} -> {after}");
                 if let Some(previous_branch) = previous_branch {
                     change.push_str(&format!(" from {previous_branch}"));
                 }
-                write_line(
+                entry_line(
                     output,
-                    format_args!(
-                        " {} {} {}",
-                        "~".yellow(),
-                        repository.bold(),
-                        terminal_text(&change).dimmed()
-                    ),
+                    "~",
+                    Paint::Yellow,
+                    entry.repository(),
+                    &terminal_text(&change),
                 )?;
             }
             Outcome::Switched { branch, previous_branch } => {
-                let repository = terminal_text(entry.repository());
-                let change = terminal_text(&format!("{branch} from {previous_branch}"));
-                write_line(
+                entry_line(
                     output,
-                    format_args!(" {} {} {}", ">".cyan(), repository.bold(), change.dimmed()),
+                    ">",
+                    Paint::Cyan,
+                    entry.repository(),
+                    &terminal_text(&format!("{branch} from {previous_branch}")),
                 )?;
             }
             Outcome::SwitchedAndBlocked { branch, previous_branch, reason } => {
-                let repository = terminal_text(entry.repository());
                 let message = safe_message(&format!(
                     "switched to {branch} from {previous_branch}; update failed: {}",
                     reason.message()
                 ));
-                write_line(
-                    output,
-                    format_args!(" {} {} {}", "x".red(), repository.bold(), message.dimmed()),
-                )?;
+                entry_line(output, "x", Paint::Red, entry.repository(), &message)?;
             }
             Outcome::Skipped { reason } => {
-                let repository = terminal_text(entry.repository());
-                write_line(
+                entry_line(
                     output,
-                    format_args!(
-                        " {} {} {}",
-                        "!".yellow(),
-                        repository.bold(),
-                        terminal_text(reason.message()).dimmed()
-                    ),
+                    "!",
+                    Paint::Yellow,
+                    entry.repository(),
+                    &terminal_text(reason.message()),
                 )?;
             }
             Outcome::Blocked { reason } => {
-                let repository = terminal_text(entry.repository());
-                let message = safe_message(&reason.message());
-                write_line(
+                entry_line(
                     output,
-                    format_args!(" {} {} {}", "x".red(), repository.bold(), message.dimmed()),
+                    "x",
+                    Paint::Red,
+                    entry.repository(),
+                    &safe_message(&reason.message()),
                 )?;
                 print_blocked_details(entry.blocked_details(), output)?;
             }

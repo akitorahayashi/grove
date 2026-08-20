@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::phases::Task as PhaseTask;
-use crate::repositories::RepositoryDefinition;
+use crate::repositories::{BranchName, RepositoryDefinition};
 
 /// A repository that passed the check phase and flows through the fetch and
 /// refresh phases as a single value. The fetch phase hands it onward on success
@@ -11,7 +11,7 @@ pub(super) struct Task<'a> {
     index: usize,
     repository: &'a RepositoryDefinition,
     common_directory: PathBuf,
-    default_branch: String,
+    default_branch: BranchName,
 }
 
 impl<'a> Task<'a> {
@@ -19,7 +19,7 @@ impl<'a> Task<'a> {
         index: usize,
         repository: &'a RepositoryDefinition,
         common_directory: PathBuf,
-        default_branch: String,
+        default_branch: BranchName,
     ) -> Self {
         Self { index, repository, common_directory, default_branch }
     }
@@ -28,7 +28,7 @@ impl<'a> Task<'a> {
         self.index
     }
 
-    pub(super) fn default_branch(&self) -> &str {
+    pub(super) fn default_branch(&self) -> &BranchName {
         &self.default_branch
     }
 }

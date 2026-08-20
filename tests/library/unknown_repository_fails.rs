@@ -3,15 +3,8 @@ use crate::harness::TestContext;
 #[test]
 fn status_fails_for_unknown_repository_target() {
     let ctx = TestContext::new();
-    let config = ctx.write_config(
-        r#"
-version = 1
-
-[repos.frontend]
-path = "frontend"
-url = "git@example.com:frontend.git"
-"#,
-    );
+    let config =
+        ctx.write_single_repository_config("frontend", "git@example.com:frontend.git", None);
 
     let result = grove::status(Some(config), vec!["backend".to_string()], false);
 
@@ -23,15 +16,8 @@ url = "git@example.com:frontend.git"
 #[test]
 fn refresh_fails_for_unknown_repository_target() {
     let ctx = TestContext::new();
-    let config = ctx.write_config(
-        r#"
-version = 1
-
-[repos.frontend]
-path = "frontend"
-url = "git@example.com:frontend.git"
-"#,
-    );
+    let config =
+        ctx.write_single_repository_config("frontend", "git@example.com:frontend.git", None);
 
     let result = grove::refresh(
         Some(config),

@@ -63,35 +63,33 @@ pub(super) fn register(
     };
 
     let mut outcomes = Vec::with_capacity(targets.len());
-    let mut outcome_repositories = Vec::with_capacity(targets.len());
     let mut pending = Vec::new();
     for repository in targets {
-        outcome_repositories.push(repository);
         let path = match zoxide_path(repository.path(), resolve_symlinks) {
             Ok(path) => path,
             Err(err) => {
-                outcomes.push(Some(ZoxideEntry::new(
-                    repository,
-                    ZoxideOutcome::Failed(err.to_string()),
-                )));
+                outcomes.push(ZoxideEntry::new(repository, ZoxideOutcome::Failed(err.to_string())));
                 continue;
             }
         };
 
         if registered.contains(&path) {
-            outcomes.push(Some(ZoxideEntry::new(repository, ZoxideOutcome::AlreadyRegistered)));
+            outcomes.push(ZoxideEntry::new(repository, ZoxideOutcome::AlreadyRegistered));
             continue;
         }
 
         match zoxide.add(&path) {
             Ok(()) => {
-                outcomes.push(None);
+                // Provisional classification; the verification snapshot below
+                // upgrades it to Added when the entry actually landed.
+                outcomes.push(ZoxideEntry::new(
+                    repository,
+                    ZoxideOutcome::Failed("zoxide did not register the repository".to_string()),
+                ));
                 pending.push((outcomes.len() - 1, repository, path));
             }
-            Err(err) => outcomes.push(Some(ZoxideEntry::new(
-                repository,
-                ZoxideOutcome::Failed(failure_message(err)),
-            ))),
+            Err(err) => outcomes
+                .push(ZoxideEntry::new(repository, ZoxideOutcome::Failed(failure_message(err)))),
         }
     }
 
@@ -100,40 +98,22 @@ pub(super) fn register(
             Ok(paths) => {
                 let final_paths = registered_paths(paths, resolve_symlinks);
                 for (index, repository, path) in pending {
-                    let outcome = if final_paths.contains(&path) {
-                        ZoxideOutcome::Added
-                    } else {
-                        ZoxideOutcome::Failed("zoxide did not register the repository".to_string())
-                    };
-                    outcomes[index] = Some(ZoxideEntry::new(repository, outcome));
+                    if final_paths.contains(&path) {
+                        outcomes[index] = ZoxideEntry::new(repository, ZoxideOutcome::Added);
+                    }
                 }
             }
             Err(err) => {
                 let message = failure_message(err);
                 for (index, repository, _) in pending {
                     outcomes[index] =
-                        Some(ZoxideEntry::new(repository, ZoxideOutcome::Failed(message.clone())));
+                        ZoxideEntry::new(repository, ZoxideOutcome::Failed(message.clone()));
                 }
             }
         }
     }
 
-    ZoxideReport::new(
-        outcomes
-            .into_iter()
-            .zip(outcome_repositories)
-            .map(|(outcome, repository)| {
-                outcome.unwrap_or_else(|| {
-                    ZoxideEntry::new(
-                        repository,
-                        ZoxideOutcome::Failed(
-                            "zoxide registration produced no final classification".to_string(),
-                        ),
-                    )
-                })
-            })
-            .collect(),
-    )
+    ZoxideReport::new(outcomes)
 }
 
 fn registered_paths(paths: Vec<PathBuf>, resolve_symlinks: bool) -> HashSet<PathBuf> {

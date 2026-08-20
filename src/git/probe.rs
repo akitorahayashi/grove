@@ -132,9 +132,9 @@ impl RepositoryProbe for CommandGitClient {
         &self,
         repository: &Path,
         configured: Option<&BranchName>,
-    ) -> Result<Option<String>, AppError> {
+    ) -> Result<Option<BranchName>, AppError> {
         if let Some(configured) = configured {
-            return Ok(Some(configured.as_str().to_string()));
+            return Ok(Some(configured.clone()));
         }
 
         let args = ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"];
@@ -146,10 +146,10 @@ impl RepositoryProbe for CommandGitClient {
         let Some(parsed) = default_branch::parse_origin_head(&value) else {
             return Err(malformed_output(repository, &args, &value));
         };
-        if BranchName::new(&parsed).is_err() {
+        let Ok(branch) = BranchName::new(&parsed) else {
             return Err(malformed_output(repository, &args, &value));
-        }
-        Ok(Some(parsed))
+        };
+        Ok(Some(branch))
     }
 
     fn branch_tracking(
@@ -237,7 +237,11 @@ fn optional_probe(
     }
 }
 
-fn required_line(repository: &Path, args: &[&str], output: &Output) -> Result<String, AppError> {
+pub(super) fn required_line(
+    repository: &Path,
+    args: &[&str],
+    output: &Output,
+) -> Result<String, AppError> {
     let value = stdout(output);
     let trimmed = value.trim();
     if trimmed.is_empty() || trimmed.split_whitespace().count() != 1 {
@@ -408,7 +412,7 @@ mod tests {
         let branch =
             CommandGitClient::default().default_branch(&repository, Some(&configured)).unwrap();
 
-        assert_eq!(branch.as_deref(), Some("release/stable"));
+        assert_eq!(branch, Some(configured));
     }
 
     #[cfg(unix)]
