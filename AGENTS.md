@@ -21,7 +21,7 @@ src/
   app/           One use case per subcommand, plus the default dependency wiring, the external-boundary context, and the report row sync and refresh share
   cache/         The local clone cache store: entry layout, identity keying, locking, placement, seeding
   phases/        Bounded-parallel phase execution shared by the repository use cases
-  config/        grove.toml discovery, include loading, and validation
+  config/        grove.toml discovery, sibling override merging, include loading, and validation
   repositories/  Validated repository values: name, path, URL, branch, selection
   git/           The system `git` boundary: probes, process runner, cache entries, branch updates
   zoxide/        The optional zoxide boundary

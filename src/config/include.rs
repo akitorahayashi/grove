@@ -1,5 +1,7 @@
 use std::collections::HashSet;
+use std::ffi::OsString;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use super::file::{self, RawConfigFile};
@@ -66,9 +68,65 @@ fn load_one(path: &Path) -> Result<LoadedConfigFile, AppError> {
         .parent()
         .ok_or_else(|| AppError::config_error(format!("{} has no parent", path.display())))?
         .to_path_buf();
+    let label = path.display().to_string();
     let contents = fs::read_to_string(path)?;
-    let raw = file::parse(&contents, &path.display().to_string())?;
+    let mut table = file::parse_table(&contents, &label)?;
+
+    if let Some((override_path, override_contents)) = read_sibling_override(path)? {
+        let override_label = override_path.display().to_string();
+        let override_table = file::parse_table(&override_contents, &override_label)?;
+        // Standalone decode first, so a schema error confined to the override
+        // (unknown field, wrong type) is attributed to it, not to the base
+        // file it's about to merge into.
+        file::decode(override_table.clone(), &override_label)?;
+        file::merge_tables(&mut table, override_table);
+    }
+
+    let raw = file::decode(table, &label)?;
     Ok(LoadedConfigFile { path: path.to_path_buf(), directory, raw })
+}
+
+/// `grove.toml` pairs with `grove.override.toml`; an arbitrarily named
+/// `--config`/include target pairs the same way from its own stem. Built
+/// through `OsString` rather than `to_string_lossy()`, which would corrupt a
+/// non-UTF-8 byte in the base name (valid on Unix) into a name matching no
+/// file on disk.
+fn sibling_override_path(path: &Path) -> PathBuf {
+    let stem = path.file_stem().unwrap_or_default();
+    let mut file_name = OsString::from(stem);
+    file_name.push(".override");
+    if let Some(extension) = path.extension() {
+        file_name.push(".");
+        file_name.push(extension);
+    }
+    path.with_file_name(file_name)
+}
+
+/// Mirrors `discovery::locate`'s symlink handling: a missing override is a
+/// normal, silent absence, but a broken symlink, a non-regular file, or a
+/// permission failure must surface rather than be treated as "no override" and
+/// silently ignored.
+fn read_sibling_override(path: &Path) -> Result<Option<(PathBuf, String)>, AppError> {
+    let override_path = sibling_override_path(path);
+    match fs::symlink_metadata(&override_path) {
+        Ok(_) => {
+            let resolved = override_path.canonicalize().map_err(|err| {
+                AppError::config_source(format!("{}: {err}", override_path.display()), err)
+            })?;
+            if !resolved.is_file() {
+                return Err(AppError::config_error(format!(
+                    "{}: not a regular file",
+                    override_path.display()
+                )));
+            }
+            let contents = fs::read_to_string(&resolved)?;
+            Ok(Some((resolved, contents)))
+        }
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(err) => {
+            Err(AppError::config_source(format!("{}: {err}", override_path.display()), err))
+        }
+    }
 }
 
 fn resolve_include(base: &Path, include: &str) -> Result<PathBuf, AppError> {
@@ -85,4 +143,26 @@ fn resolve_include(base: &Path, include: &str) -> Result<PathBuf, AppError> {
         )));
     }
     candidate.canonicalize().map_err(AppError::from)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::Path;
+
+    use super::sibling_override_path;
+
+    #[test]
+    fn sibling_override_path_preserves_a_non_utf8_byte_in_the_stem() {
+        let mut name = b"gro\xFFve".to_vec();
+        name.extend_from_slice(b".toml");
+        let path = Path::new(OsStr::from_bytes(&name));
+
+        let override_path = sibling_override_path(path);
+
+        let mut expected = b"gro\xFFve".to_vec();
+        expected.extend_from_slice(b".override.toml");
+        assert_eq!(override_path.file_name().unwrap().as_bytes(), expected.as_slice());
+    }
 }

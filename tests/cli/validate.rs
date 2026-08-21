@@ -614,3 +614,359 @@ url = "git@example.com:blog.git"
         .stderr(predicate::str::contains("grove.toml"))
         .stderr(predicate::str::contains("Validated").not());
 }
+
+#[test]
+fn validate_override_merges_scalar_fields_into_matching_repository() {
+    let ctx = TestContext::new();
+    let config = ctx.write_config(
+        r#"
+version = 1
+
+[repos.a]
+path = "shared"
+url = "git@example.com:a.git"
+
+[repos.b]
+path = "other"
+url = "git@example.com:b.git"
+"#,
+    );
+    ctx.write_config_at(
+        "grove.override.toml",
+        r#"
+[repos.b]
+path = "shared"
+"#,
+    );
+
+    // Proven through the duplicate-path check rather than a new observability
+    // hook: `b`'s path only collides with `a`'s if the override actually
+    // replaced it.
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("validate")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("duplicate repository path"));
+}
+
+#[test]
+fn validate_override_adds_a_repository_absent_from_the_base_file() {
+    let ctx = TestContext::new();
+    let config = ctx.write_config(
+        r#"
+version = 1
+
+[repos.frontend]
+url = "git@example.com:frontend.git"
+"#,
+    );
+    ctx.write_config_at(
+        "grove.override.toml",
+        r#"
+[repos.personal]
+url = "git@example.com:personal.git"
+"#,
+    );
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("validate")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Validated 2 repositories"));
+}
+
+#[test]
+fn validate_override_replaces_the_include_array_instead_of_concatenating() {
+    let ctx = TestContext::new();
+    let config = ctx.write_config(
+        r#"
+version = 1
+include = ["work/grove.toml", "personal/grove.toml"]
+"#,
+    );
+    ctx.write_config_at(
+        "work/grove.toml",
+        r#"
+version = 1
+
+[repos.frontend]
+url = "git@example.com:frontend.git"
+"#,
+    );
+    ctx.write_config_at(
+        "personal/grove.toml",
+        r#"
+version = 1
+
+[repos.blog]
+url = "git@example.com:blog.git"
+"#,
+    );
+    ctx.write_config_at(
+        "grove.override.toml",
+        r#"
+include = ["work/grove.toml"]
+"#,
+    );
+
+    // A naive concatenation would list "work/grove.toml" twice and fail with
+    // "duplicate configuration file" instead.
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("validate")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Validated 1 repository"));
+}
+
+#[test]
+fn validate_override_may_omit_version_and_inherit_the_base_version() {
+    let ctx = TestContext::new();
+    let config = ctx.write_config(
+        r#"
+version = 1
+
+[repos.blog]
+url = "git@example.com:blog.git"
+"#,
+    );
+    ctx.write_config_at(
+        "grove.override.toml",
+        r#"
+[repos.blog]
+path = "local-blog"
+"#,
+    );
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("validate")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Validated 1 repository"));
+}
+
+#[test]
+fn validate_override_version_replaces_the_base_version() {
+    let ctx = TestContext::new();
+    let config = ctx.write_config(
+        r#"
+version = 1
+
+[repos.blog]
+url = "git@example.com:blog.git"
+"#,
+    );
+    ctx.write_config_at("grove.override.toml", "version = 2\n");
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("validate")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unsupported config version 2"));
+}
+
+#[test]
+fn validate_override_malformed_toml_fails() {
+    let ctx = TestContext::new();
+    let config = ctx.write_config(
+        r#"
+version = 1
+
+[repos.blog]
+url = "git@example.com:blog.git"
+"#,
+    );
+    ctx.write_config_at("grove.override.toml", "[repos.blog\npath = \"x\"\n");
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("validate")
+        .assert()
+        .failure()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("grove.override.toml"))
+        .stderr(predicate::str::contains("invalid TOML"));
+}
+
+#[test]
+fn validate_override_schema_violation_is_attributed_to_the_override_file() {
+    let ctx = TestContext::new();
+    let config = ctx.write_config(
+        r#"
+version = 1
+
+[repos.blog]
+url = "git@example.com:blog.git"
+"#,
+    );
+    ctx.write_config_at(
+        "grove.override.toml",
+        r#"
+[repos.blog]
+bogus = "unsupported"
+"#,
+    );
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("validate")
+        .assert()
+        .failure()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("grove.override.toml"))
+        .stderr(predicate::str::contains("unknown field"));
+}
+
+#[cfg(unix)]
+#[test]
+fn validate_override_broken_symlink_fails() {
+    let ctx = TestContext::new();
+    let config = ctx.write_config(
+        r#"
+version = 1
+
+[repos.blog]
+url = "git@example.com:blog.git"
+"#,
+    );
+    std::os::unix::fs::symlink(
+        ctx.workspace().join("missing-override-target.toml"),
+        ctx.workspace().join("grove.override.toml"),
+    )
+    .expect("failed to create broken override symlink");
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("validate")
+        .assert()
+        .failure()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("grove.override.toml"))
+        .stderr(predicate::str::contains("Validated").not());
+}
+
+#[test]
+fn validate_override_non_regular_file_fails() {
+    let ctx = TestContext::new();
+    let config = ctx.write_config(
+        r#"
+version = 1
+
+[repos.blog]
+url = "git@example.com:blog.git"
+"#,
+    );
+    std::fs::create_dir(ctx.workspace().join("grove.override.toml"))
+        .expect("failed to create directory shadowing the override file");
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("validate")
+        .assert()
+        .failure()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("not a regular file"));
+}
+
+#[test]
+fn validate_override_applies_to_included_child_configs_too() {
+    let ctx = TestContext::new();
+    let config = ctx.write_config(
+        r#"
+version = 1
+include = ["work/grove.toml"]
+
+[repos.root_repo]
+path = "shared"
+url = "git@example.com:root.git"
+"#,
+    );
+    ctx.write_config_at(
+        "work/grove.toml",
+        r#"
+version = 1
+
+[repos.child_repo]
+path = "other"
+url = "git@example.com:child.git"
+"#,
+    );
+    ctx.write_config_at(
+        "work/grove.override.toml",
+        r#"
+[repos.child_repo]
+path = "../shared"
+"#,
+    );
+
+    // child_repo's path resolves relative to work/, so "../shared" collides
+    // with root_repo's "shared" only if work/grove.override.toml was applied.
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("validate")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("duplicate repository path"));
+}
+
+#[test]
+fn validate_override_file_name_follows_an_arbitrary_config_files_stem() {
+    let ctx = TestContext::new();
+    let config = ctx.write_config_at(
+        "custom.toml",
+        r#"
+version = 1
+
+[repos.a]
+path = "x"
+url = "git@example.com:a.git"
+
+[repos.b]
+path = "y"
+url = "git@example.com:b.git"
+"#,
+    );
+    ctx.write_config_at(
+        "custom.override.toml",
+        r#"
+[repos.b]
+path = "x"
+"#,
+    );
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("validate")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("duplicate repository path"));
+}
+
+#[test]
+fn validate_discovery_ignores_a_standalone_override_file() {
+    let ctx = TestContext::new();
+    std::fs::write(ctx.workspace().join("grove.override.toml"), "[repos.blog]\n")
+        .expect("failed to write standalone override file");
+
+    ctx.cli()
+        .arg("validate")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("grove.toml was not found in"))
+        .stderr(predicate::str::contains("or any parent directory"));
+}
