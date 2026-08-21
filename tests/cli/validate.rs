@@ -798,6 +798,36 @@ url = "git@example.com:blog.git"
         .stderr(predicate::str::contains("invalid TOML"));
 }
 
+#[test]
+fn validate_override_schema_violation_is_attributed_to_the_override_file() {
+    let ctx = TestContext::new();
+    let config = ctx.write_config(
+        r#"
+version = 1
+
+[repos.blog]
+url = "git@example.com:blog.git"
+"#,
+    );
+    ctx.write_config_at(
+        "grove.override.toml",
+        r#"
+[repos.blog]
+bogus = "unsupported"
+"#,
+    );
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("validate")
+        .assert()
+        .failure()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("grove.override.toml"))
+        .stderr(predicate::str::contains("unknown field"));
+}
+
 #[cfg(unix)]
 #[test]
 fn validate_override_broken_symlink_fails() {

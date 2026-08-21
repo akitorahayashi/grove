@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::ffi::OsString;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -72,8 +73,12 @@ fn load_one(path: &Path) -> Result<LoadedConfigFile, AppError> {
     let mut table = file::parse_table(&contents, &label)?;
 
     if let Some((override_path, override_contents)) = read_sibling_override(path)? {
-        let override_table =
-            file::parse_table(&override_contents, &override_path.display().to_string())?;
+        let override_label = override_path.display().to_string();
+        let override_table = file::parse_table(&override_contents, &override_label)?;
+        // Standalone decode first, so a schema error confined to the override
+        // (unknown field, wrong type) is attributed to it, not to the base
+        // file it's about to merge into.
+        file::decode(override_table.clone(), &override_label)?;
         file::merge_tables(&mut table, override_table);
     }
 
@@ -81,19 +86,19 @@ fn load_one(path: &Path) -> Result<LoadedConfigFile, AppError> {
     Ok(LoadedConfigFile { path: path.to_path_buf(), directory, raw })
 }
 
-/// The sibling override file for `grove.toml` is `grove.override.toml`; for an
-/// arbitrarily named `--config`/include target `custom.toml` it is
-/// `custom.override.toml`. Naming it from the loaded file's stem, rather than
-/// hardcoding `grove.override.toml`, keeps `--config` and `include` targets
-/// overridable the same way the default file is.
+/// `grove.toml` pairs with `grove.override.toml`; an arbitrarily named
+/// `--config`/include target pairs the same way from its own stem. Built
+/// through `OsString` rather than `to_string_lossy()`, which would corrupt a
+/// non-UTF-8 byte in the base name (valid on Unix) into a name matching no
+/// file on disk.
 fn sibling_override_path(path: &Path) -> PathBuf {
     let stem = path.file_stem().unwrap_or_default();
-    let file_name = match path.extension() {
-        Some(extension) => {
-            format!("{}.override.{}", stem.to_string_lossy(), extension.to_string_lossy())
-        }
-        None => format!("{}.override", stem.to_string_lossy()),
-    };
+    let mut file_name = OsString::from(stem);
+    file_name.push(".override");
+    if let Some(extension) = path.extension() {
+        file_name.push(".");
+        file_name.push(extension);
+    }
     path.with_file_name(file_name)
 }
 
@@ -138,4 +143,26 @@ fn resolve_include(base: &Path, include: &str) -> Result<PathBuf, AppError> {
         )));
     }
     candidate.canonicalize().map_err(AppError::from)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::Path;
+
+    use super::sibling_override_path;
+
+    #[test]
+    fn sibling_override_path_preserves_a_non_utf8_byte_in_the_stem() {
+        let mut name = b"gro\xFFve".to_vec();
+        name.extend_from_slice(b".toml");
+        let path = Path::new(OsStr::from_bytes(&name));
+
+        let override_path = sibling_override_path(path);
+
+        let mut expected = b"gro\xFFve".to_vec();
+        expected.extend_from_slice(b".override.toml");
+        assert_eq!(override_path.file_name().unwrap().as_bytes(), expected.as_slice());
+    }
 }

@@ -68,7 +68,14 @@ same way an unsupported base `version` does.
 Overrides never affect discovery: a `grove.override.toml` without a sibling
 `grove.toml` is not a grove root. An override that exists but cannot be
 resolved — malformed TOML, a broken symlink, or a non-file — fails validation
-instead of being silently ignored.
+instead of being silently ignored. A schema violation confined to the
+override itself (an unknown field, a wrong type) is reported against the
+override file; a violation that survives the merge — including one only
+reachable through the base file's own value — is reported against the base
+file, consistent with [path resolution](#path-resolution) and includes
+treating the base file's canonicalized location as the pair's identity. A
+symlinked `grove.toml` therefore pairs with an override beside its resolved
+target, not beside the symlink.
 
 ## Includes
 
