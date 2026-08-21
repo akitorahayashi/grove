@@ -51,6 +51,25 @@ are rejected. Symlinks are valid when their canonical targets remain inside
 the root. Symlink aliases share one operational identity for duplicate and
 nested path validation.
 
+## Overrides
+
+Loading a configuration file — the root file or an include target — also looks
+for a sibling override file named after that file's stem: `grove.toml` pairs
+with `grove.override.toml`, and a `--config custom.toml` file pairs with
+`custom.override.toml`. When the sibling exists, it is deep merged into the
+file it overrides before schema decoding: tables merge key by key, recursing
+into nested tables, while scalars and arrays — including `include` — are
+replaced outright rather than concatenated. A key present only in the override
+is added; a key present only in the base file is kept. The override's
+`version` is optional; when present it replaces the base file's `version` like
+any other scalar, so an unsupported override `version` fails validation the
+same way an unsupported base `version` does.
+
+Overrides never affect discovery: a `grove.override.toml` without a sibling
+`grove.toml` is not a grove root. An override that exists but cannot be
+resolved — malformed TOML, a broken symlink, or a non-file — fails validation
+instead of being silently ignored.
+
 ## Includes
 
 Root configuration files can include one level of child configuration files.
@@ -82,3 +101,5 @@ field types, plus:
 - an absolute path, or a path outside the canonical grove root, for a
   repository's `path`
 - an absolute, nonexistent, duplicate, or nested include path
+- a sibling override file that is malformed TOML, a broken symlink, or not a
+  regular file

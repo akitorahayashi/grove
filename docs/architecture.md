@@ -162,10 +162,16 @@ probe and their shared messages cannot drift.
 
 `config` discovers the root file by ascending from the current directory to the
 nearest `grove.toml`, resolves one include level, decodes TOML, and
-validates the complete catalog without invoking Git or zoxide. It rejects schema
-violations, unsupported versions, duplicate or nested includes, invalid names
-and branch refs, duplicate or nested repository identities, absolute paths, and
-paths outside the canonical grove root.
+validates the complete catalog without invoking Git or zoxide. Each loaded
+file — root or include target — is deep merged in TOML-table form with a
+sibling override named after its stem before decoding, so `grove.toml` pairs
+with `grove.override.toml` and an arbitrarily named `--config` target pairs
+the same way; tables merge recursively while scalars and arrays are replaced.
+Discovery itself never treats a standalone override as a root. It rejects
+schema violations, unsupported versions, duplicate or nested includes, invalid
+names and branch refs, duplicate or nested repository identities, absolute
+paths, paths outside the canonical grove root, and an override that exists but
+cannot be resolved.
 
 `repositories` owns validated repository values. `RemoteUrl` exposes raw text
 only through its process-argument accessor; `Display` and `Debug` are redacted,
