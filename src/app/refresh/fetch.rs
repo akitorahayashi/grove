@@ -1,4 +1,4 @@
-use crate::git::GitClient;
+use crate::git::RepositoryProbe;
 use crate::phases::{EventProgress, EventSink, Task as PhaseTask};
 
 use super::task::Task;
@@ -16,7 +16,7 @@ impl Completion<'_> {
 }
 
 pub(super) fn repository<'a>(
-    git: &impl GitClient,
+    git: &impl RepositoryProbe,
     task: &Task<'a>,
     events: &impl EventSink<Phase>,
 ) -> Result<Completion<'a>, crate::AppError> {

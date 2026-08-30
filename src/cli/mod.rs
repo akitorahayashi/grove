@@ -12,8 +12,8 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand, error::ErrorKind};
 
 use crate::AppError;
-use crate::repositories::redact_urls_for_display;
-use output::{Output, terminal_multiline_text, terminal_text};
+use output::{Output, terminal_multiline_text};
+use tty::report::safe_message;
 
 #[derive(Parser)]
 #[command(name = "gv")]
@@ -120,7 +120,7 @@ fn render_completion(result: Result<Completion, AppError>, output: &mut Output<'
             ExitCode::SUCCESS
         }
         Err(error) => {
-            let message = terminal_text(&redact_urls_for_display(&error.to_string()));
+            let message = safe_message(&error.to_string());
             if output.stderr(format_args!("error: {message}\n")).is_err() {
                 return ExitCode::FAILURE;
             }

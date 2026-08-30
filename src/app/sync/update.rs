@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::AppError;
-use crate::git::{GitClient, GitUpdateBlock, GitUpdateOutcome, Restoration};
+use crate::git::{DefaultBranch, GitUpdateBlock, GitUpdateOutcome, Restoration};
 use crate::phases::Task as PhaseTask;
 use crate::repositories::{BranchName, RepositoryDefinition};
 
@@ -43,7 +43,7 @@ impl PhaseTask for Task<'_> {
     }
 }
 
-pub(super) fn repository(git: &impl GitClient, task: &Task<'_>) -> Entry {
+pub(super) fn repository(git: &impl DefaultBranch, task: &Task<'_>) -> Entry {
     match update_repository(git, task) {
         Ok(entry) => entry,
         Err(err) => Entry::new(
@@ -53,7 +53,7 @@ pub(super) fn repository(git: &impl GitClient, task: &Task<'_>) -> Entry {
     }
 }
 
-fn update_repository(git: &impl GitClient, task: &Task<'_>) -> Result<Entry, AppError> {
+fn update_repository(git: &impl DefaultBranch, task: &Task<'_>) -> Result<Entry, AppError> {
     let result = git.update_default_branch(task.repository.path(), &task.default_branch)?;
     let (update, restoration) = match result {
         GitUpdateOutcome::Blocked(block) => {

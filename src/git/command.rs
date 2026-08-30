@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::io::{self, Read};
 use std::path::Path;
@@ -91,8 +92,7 @@ pub(super) fn run_with_progress(
         }
     };
     let mut buffer = [0; 4096];
-    let mut pending = Vec::new();
-    let mut pending_truncated = false;
+    let mut pending = BoundedDiagnosticBytes::default();
     let mut diagnostics = DiagnosticTail::default();
     let mut processing_error = None;
 
@@ -113,8 +113,9 @@ pub(super) fn run_with_progress(
         }
         for byte in &buffer[..read] {
             if *byte == b'\r' || *byte == b'\n' {
+                let pending_truncated = pending.truncated();
                 if let Some(error) = process_progress_line(
-                    &pending,
+                    pending.as_slice(),
                     pending_truncated,
                     progress,
                     &mut diagnostics,
@@ -123,19 +124,14 @@ pub(super) fn run_with_progress(
                     processing_error = Some(error);
                 }
                 pending.clear();
-                pending_truncated = false;
             } else {
                 pending.push(*byte);
-                if pending.len() > MAX_DIAGNOSTIC_BYTES {
-                    let excess = pending.len() - MAX_DIAGNOSTIC_BYTES;
-                    pending.drain(..excess);
-                    pending_truncated = true;
-                }
             }
         }
     }
+    let pending_truncated = pending.truncated();
     if let Some(error) = process_progress_line(
-        &pending,
+        pending.as_slice(),
         pending_truncated,
         progress,
         &mut diagnostics,
@@ -167,9 +163,51 @@ pub(super) fn run_with_progress(
 const MAX_DIAGNOSTIC_BYTES: usize = 64 * 1024;
 
 #[derive(Default)]
-struct DiagnosticTail {
-    bytes: Vec<u8>,
+struct BoundedDiagnosticBytes {
+    bytes: VecDeque<u8>,
     truncated: bool,
+}
+
+impl BoundedDiagnosticBytes {
+    fn push(&mut self, byte: u8) {
+        if self.bytes.len() == MAX_DIAGNOSTIC_BYTES {
+            self.bytes.pop_front();
+            self.truncated = true;
+        }
+        self.bytes.push_back(byte);
+    }
+
+    fn extend(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.push(*byte);
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.bytes.is_empty()
+    }
+
+    fn truncated(&self) -> bool {
+        self.truncated
+    }
+
+    fn include_truncation(&mut self, truncated: bool) {
+        self.truncated |= truncated;
+    }
+
+    fn as_slice(&mut self) -> &[u8] {
+        self.bytes.make_contiguous()
+    }
+
+    fn clear(&mut self) {
+        self.bytes.clear();
+        self.truncated = false;
+    }
+}
+
+#[derive(Default)]
+struct DiagnosticTail {
+    bytes: BoundedDiagnosticBytes,
 }
 
 impl DiagnosticTail {
@@ -177,18 +215,14 @@ impl DiagnosticTail {
         if !self.bytes.is_empty() {
             self.bytes.push(b'\n');
         }
-        self.bytes.extend_from_slice(line);
-        if self.bytes.len() > MAX_DIAGNOSTIC_BYTES {
-            let excess = self.bytes.len() - MAX_DIAGNOSTIC_BYTES;
-            self.bytes.drain(..excess);
-            self.truncated = true;
-        }
-        self.truncated |= line_truncated;
+        self.bytes.extend(line);
+        self.bytes.include_truncation(line_truncated);
     }
 
-    fn render(&self) -> String {
-        let message = String::from_utf8_lossy(&self.bytes).trim().to_string();
-        match (self.truncated, message.is_empty()) {
+    fn render(&mut self) -> String {
+        let truncated = self.bytes.truncated();
+        let message = String::from_utf8_lossy(self.bytes.as_slice()).trim().to_string();
+        match (truncated, message.is_empty()) {
             (true, true) => "[Git diagnostic output truncated]".to_string(),
             (true, false) => format!("[Git diagnostic output truncated]\n{message}"),
             (false, true) => "Git command failed without diagnostic output".to_string(),

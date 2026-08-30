@@ -345,11 +345,7 @@ impl Store {
     }
 
     fn format_is_current(&self) -> Result<bool, AppError> {
-        match fs::read_to_string(self.root.join(FORMAT_FILE)) {
-            Ok(recorded) => Ok(recorded == FORMAT_VERSION),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-            Err(error) => Err(error.into()),
-        }
+        Ok(read_metadata(&self.root, FORMAT_FILE)?.as_deref() == Some(FORMAT_VERSION))
     }
 
     fn entry_lock(&self, key: &str) -> Result<CacheLock, AppError> {

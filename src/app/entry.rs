@@ -35,12 +35,7 @@ impl<O> Entry<O> {
         outcome: O,
         blocked_details: BlockedReasonDetails,
     ) -> Self {
-        Self {
-            repository: repository.display_path().to_string(),
-            outcome,
-            blocked_details: Some(blocked_details),
-            warning: None,
-        }
+        Self { blocked_details: Some(blocked_details), ..Self::new(repository, outcome) }
     }
 
     /// Attach a non-fatal note to an outcome (for example, a repository whose

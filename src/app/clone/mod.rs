@@ -10,7 +10,8 @@ use crate::AppError;
 use crate::app::AppContext;
 use crate::cache::Outcome as CacheOutcome;
 use crate::git::{
-    CloneCacheDecision, CloneCommand, CloneInvocation, GitClient, NoopGitProgressSink,
+    CacheEntry, CloneCacheDecision, CloneCommand, CloneInvocation, NoopGitProgressSink,
+    RepositoryProbe,
 };
 use crate::repositories::RemoteUrl;
 
@@ -69,8 +70,8 @@ impl Report {
     }
 }
 
-pub fn execute(
-    ctx: &AppContext<impl GitClient, impl crate::zoxide::ZoxideClient>,
+pub fn execute<G: CacheEntry + RepositoryProbe, Z>(
+    ctx: &AppContext<G, Z>,
     url: &str,
     destination: Option<PathBuf>,
 ) -> Result<Report, AppError> {
@@ -84,8 +85,8 @@ pub fn execute(
     Ok(Report { destination, url: url.to_string(), cache, elapsed: started.elapsed() })
 }
 
-pub(crate) fn execute_command(
-    ctx: &AppContext<impl GitClient + CloneCommand>,
+pub(crate) fn execute_command<G: CacheEntry + CloneCommand, Z>(
+    ctx: &AppContext<G, Z>,
     arguments: Vec<OsString>,
 ) -> Result<CommandReport, AppError> {
     let invocation = CloneInvocation::new(arguments);

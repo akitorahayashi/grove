@@ -5,7 +5,7 @@ use std::time::Instant;
 use crate::AppError;
 use crate::app::AppContext;
 use crate::config;
-use crate::git::GitClient;
+use crate::git::{DefaultBranch, RepositoryProbe};
 use crate::phases::{self, DiscardEvents, EventSink, Slots, Task as PhaseTask};
 use crate::repositories::{RepositoryDefinition, select_repositories};
 
@@ -45,8 +45,8 @@ impl RefreshOptions {
     }
 }
 
-pub fn execute_with_options(
-    ctx: &AppContext<impl GitClient>,
+pub fn execute_with_options<G: RepositoryProbe + DefaultBranch, Z>(
+    ctx: &AppContext<G, Z>,
     config_path: Option<&Path>,
     targets: &[String],
     options: RefreshOptions,
@@ -54,8 +54,8 @@ pub fn execute_with_options(
     execute_with_events(ctx, config_path, targets, options, &DiscardEvents)
 }
 
-pub(crate) fn execute_with_events(
-    ctx: &AppContext<impl GitClient>,
+pub(crate) fn execute_with_events<G: RepositoryProbe + DefaultBranch, Z>(
+    ctx: &AppContext<G, Z>,
     config_path: Option<&Path>,
     targets: &[String],
     options: RefreshOptions,
@@ -71,30 +71,32 @@ pub(crate) fn execute_with_events(
     let (decisions, checked) =
         check_phase(ctx.git(), &repositories, parallelism, options.dry_run(), events)?;
 
-    let mut fetches = Vec::new();
-    let mut dry_runs = Vec::new();
+    let mut tasks = Vec::new();
     for (index, (repository, decision)) in repositories.iter().copied().zip(decisions).enumerate() {
         match decision {
             check::Decision::Entry(entry) => entries.fill(index, entry),
-            check::Decision::Fetch { common_directory, default_branch } => {
-                fetches.push(Task::new(index, repository, common_directory, default_branch));
-            }
-            check::Decision::DryRun { common_directory, default_branch } => {
-                dry_runs.push(Task::new(index, repository, common_directory, default_branch));
+            check::Decision::Ready { common_directory, default_branch } => {
+                tasks.push(Task::new(index, repository, common_directory, default_branch));
             }
         }
     }
 
-    plan_dry_runs(&dry_runs, &mut entries);
-    let (refreshes, fetched) = fetch_phase(ctx.git(), &fetches, &mut entries, parallelism, events)?;
-    let refreshed = refresh_phase(ctx.git(), &refreshes, &mut entries, parallelism, events)?;
+    let (fetched, refreshed) = if options.dry_run() {
+        plan_dry_runs(&tasks, &mut entries);
+        (PhaseSummary::default(), PhaseSummary::default())
+    } else {
+        let (refreshes, fetched) =
+            fetch_phase(ctx.git(), &tasks, &mut entries, parallelism, events)?;
+        let refreshed = refresh_phase(ctx.git(), &refreshes, &mut entries, parallelism, events)?;
+        (fetched, refreshed)
+    };
 
     let phases = PhaseSummaries::new(checked, fetched, refreshed);
     Ok(Report::new(entries.into_complete()?, started.elapsed(), phases))
 }
 
 fn check_phase(
-    git: &impl GitClient,
+    git: &impl RepositoryProbe,
     repositories: &[&RepositoryDefinition],
     parallelism: usize,
     dry_run: bool,
@@ -106,7 +108,7 @@ fn check_phase(
 }
 
 fn fetch_phase<'a>(
-    git: &impl GitClient,
+    git: &impl RepositoryProbe,
     tasks: &[Task<'a>],
     entries: &mut Slots<Entry>,
     parallelism: usize,
@@ -132,7 +134,7 @@ fn fetch_phase<'a>(
 }
 
 fn refresh_phase(
-    git: &impl GitClient,
+    git: &impl DefaultBranch,
     tasks: &[Task<'_>],
     entries: &mut Slots<Entry>,
     parallelism: usize,

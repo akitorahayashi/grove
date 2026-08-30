@@ -300,21 +300,7 @@ mod tests {
         let main = root.path().join("main");
         let linked = root.path().join("linked");
 
-        run_git(root.path(), &["init", "-b", "main", main.to_str().unwrap()]);
-        std::fs::write(main.join("README.md"), "initial\n").unwrap();
-        run_git(&main, &["add", "README.md"]);
-        run_git(
-            &main,
-            &[
-                "-c",
-                "user.name=Grove Test",
-                "-c",
-                "user.email=grove@example.com",
-                "commit",
-                "-m",
-                "initial",
-            ],
-        );
+        initialize_committed_repository(&main);
         run_git(&main, &["worktree", "add", "-b", "linked", linked.to_str().unwrap()]);
 
         let client = CommandGitClient::default();

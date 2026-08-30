@@ -20,23 +20,27 @@ pub(crate) fn resolve_operational_path(
     let mut ancestor = candidate;
     let mut suffix = Vec::new();
 
-    while !ancestor.try_exists()? {
-        let component = ancestor.file_name().ok_or_else(|| {
-            ResolutionError::Io(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("path '{}' has no existing ancestor", candidate.display()),
-            ))
-        })?;
-        suffix.push(component.to_os_string());
-        ancestor = ancestor.parent().ok_or_else(|| {
-            ResolutionError::Io(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("path '{}' has no existing ancestor", candidate.display()),
-            ))
-        })?;
-    }
-
-    let mut resolved = ancestor.canonicalize()?;
+    let mut resolved = loop {
+        match ancestor.canonicalize() {
+            Ok(resolved) => break resolved,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                let component = ancestor.file_name().ok_or_else(|| {
+                    ResolutionError::Io(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("path '{}' has no existing ancestor", candidate.display()),
+                    ))
+                })?;
+                suffix.push(component.to_os_string());
+                ancestor = ancestor.parent().ok_or_else(|| {
+                    ResolutionError::Io(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("path '{}' has no existing ancestor", candidate.display()),
+                    ))
+                })?;
+            }
+            Err(error) => return Err(error.into()),
+        }
+    };
     for component in suffix.iter().rev() {
         resolved.push(component);
     }
