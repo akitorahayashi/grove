@@ -155,7 +155,6 @@ impl CommandGitClient {
 #[cfg(test)]
 mod tests {
     use std::path::Path;
-    use std::process::Command;
 
     use tempfile::TempDir;
 
@@ -312,25 +311,12 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn completed_fast_forward_reports_restoration_failure() {
-        use std::os::unix::fs::PermissionsExt;
-
         let root = TempDir::new().unwrap();
         let repository = create_updatable_repository(root.path());
-        let output = Command::new("sh").args(["-c", "command -v git"]).output().unwrap();
-        assert!(output.status.success());
-        let real_git = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let wrapper = root.path().join("git-wrapper");
-        std::fs::write(
-            &wrapper,
-            format!(
-                "#!/bin/sh\nif [ \"$1\" = switch ] && [ \"${{3:-}}\" = feature ]; then\n  echo restoration-failed >&2\n  exit 42\nfi\nexec \"{}\" \"$@\"\n",
-                real_git
-            ),
-        )
-        .unwrap();
-        let mut permissions = std::fs::metadata(&wrapper).unwrap().permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(&wrapper, permissions).unwrap();
+        let wrapper = git_wrapper(
+            root.path(),
+            "if [ \"$1\" = switch ] && [ \"${3:-}\" = feature ]; then\n  echo restoration-failed >&2\n  exit 42\nfi",
+        );
 
         let outcome = update(&CommandGitClient::with_executable(&wrapper), &repository);
 

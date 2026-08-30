@@ -51,15 +51,10 @@ where
     };
     let elapsed = started.elapsed();
 
-    let mut decisions = Vec::with_capacity(results.len());
-    for result in results {
-        match result {
-            Ok(decision) => decisions.push(decision),
-            Err(error) => {
-                return phase_failed(events, phase, error);
-            }
-        }
-    }
+    let decisions = match results.into_iter().collect::<Result<Vec<D>, AppError>>() {
+        Ok(decisions) => decisions,
+        Err(error) => return phase_failed(events, phase, error),
+    };
 
     let summary = Summary::new(decisions.len(), elapsed);
     if let Err(error) = events.emit(Event::PhaseCompleted { phase, summary }) {
@@ -90,7 +85,7 @@ where
     let results = match workers::map_keyed(
         tasks,
         parallelism,
-        |task| task.resource().to_path_buf(),
+        |task| task.resource(),
         |task| instrumented(events, phase, task.repository(), || action(task)),
     ) {
         Ok(results) => results,

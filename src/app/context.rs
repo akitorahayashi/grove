@@ -2,8 +2,7 @@ use std::cell::OnceCell;
 
 use crate::AppError;
 use crate::cache::Store;
-use crate::git::GitClient;
-use crate::zoxide::{CommandZoxideClient, ZoxideClient};
+use crate::zoxide::CommandZoxideClient;
 
 /// Application context holding grove's external boundaries: the Git and zoxide
 /// command clients and the local clone cache.
@@ -11,19 +10,19 @@ use crate::zoxide::{CommandZoxideClient, ZoxideClient};
 /// The cache is resolved from the environment lazily, on first access, so that
 /// operations which never place or seed clones (`status`, `refresh`) do not
 /// require `XDG_CACHE_HOME` or `HOME` to be set.
-pub struct AppContext<G: GitClient, Z: ZoxideClient = CommandZoxideClient> {
+pub struct AppContext<G, Z = CommandZoxideClient> {
     git: G,
     zoxide: Z,
     cache: OnceCell<Store>,
 }
 
-impl<G: GitClient> AppContext<G, CommandZoxideClient> {
+impl<G> AppContext<G, CommandZoxideClient> {
     pub fn new(git: G) -> Self {
         Self { git, zoxide: CommandZoxideClient, cache: OnceCell::new() }
     }
 }
 
-impl<G: GitClient, Z: ZoxideClient> AppContext<G, Z> {
+impl<G, Z> AppContext<G, Z> {
     pub fn git(&self) -> &G {
         &self.git
     }

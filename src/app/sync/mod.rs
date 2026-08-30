@@ -6,7 +6,7 @@ use crate::AppError;
 use crate::app::AppContext;
 use crate::cache::Store;
 use crate::config;
-use crate::git::GitClient;
+use crate::git::{CacheEntry, DefaultBranch, GitClient, RepositoryProbe};
 use crate::phases::{self, DiscardEvents, EventProgress, EventSink, Slots, Task as PhaseTask};
 use crate::repositories::{RepositoryDefinition, select_repositories};
 
@@ -172,7 +172,7 @@ pub(crate) fn execute_with_events(
 }
 
 fn check_phase(
-    git: &impl GitClient,
+    git: &impl RepositoryProbe,
     repositories: &[&RepositoryDefinition],
     parallelism: usize,
     dry_run: bool,
@@ -184,7 +184,7 @@ fn check_phase(
 }
 
 fn prepare_phase<'a>(
-    git: &impl GitClient,
+    git: &(impl CacheEntry + RepositoryProbe),
     cache: Option<&Store>,
     tasks: &[prepare::Task<'a>],
     entries: &mut Slots<Entry>,
@@ -211,7 +211,7 @@ fn prepare_phase<'a>(
 }
 
 fn update_phase(
-    git: &impl GitClient,
+    git: &impl DefaultBranch,
     tasks: &[update::Task<'_>],
     entries: &mut Slots<Entry>,
     parallelism: usize,
@@ -245,7 +245,7 @@ fn update_phase(
 /// since seeding reads only the object store. Each distinct repository
 /// identity is seeded once, from its first working candidate.
 fn seed_phase(
-    git: &impl GitClient,
+    git: &(impl CacheEntry + RepositoryProbe),
     cache: &Store,
     repositories: &[&RepositoryDefinition],
     candidates: Vec<(usize, Option<PathBuf>)>,
@@ -265,13 +265,13 @@ fn seed_phase(
             continue;
         }
         let candidate = SeedCandidate { index, repository, common_directory };
-        match task_by_identity.get(&repository.url().identity()) {
-            Some(&task) => tasks[task].candidates.push(candidate),
-            None => {
-                task_by_identity.insert(repository.url().identity(), tasks.len());
-                tasks.push(SeedTask { candidates: vec![candidate] });
-            }
-        }
+        let identity = repository.url().identity();
+        let task = *task_by_identity.entry(identity).or_insert_with(|| {
+            let task = tasks.len();
+            tasks.push(SeedTask { candidates: Vec::with_capacity(1) });
+            task
+        });
+        tasks[task].candidates.push(candidate);
     }
 
     let (outcomes, summary) = phases::run_workers(
@@ -297,7 +297,7 @@ fn seed_phase(
 /// internal error propagates, matching the prepare phase's error taxonomy. A
 /// failed candidate keeps its note even when a sibling seeds the entry.
 fn seed_repository(
-    git: &impl GitClient,
+    git: &(impl CacheEntry + RepositoryProbe),
     cache: &Store,
     task: &SeedTask<'_>,
     events: &impl EventSink<Phase>,

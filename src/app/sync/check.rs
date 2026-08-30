@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::AppError;
-use crate::git::GitClient;
+use crate::git::RepositoryProbe;
 use crate::inspection::{self, BranchReadiness, Readiness};
 use crate::repositories::{BranchName, RepositoryDefinition};
 
@@ -23,7 +23,7 @@ pub(super) enum Decision {
 }
 
 pub(super) fn repository(
-    git: &impl GitClient,
+    git: &impl RepositoryProbe,
     repository: &RepositoryDefinition,
     dry_run: bool,
 ) -> Result<Decision, AppError> {
@@ -96,7 +96,7 @@ fn seed_only_or_terminal(entry: Entry, dry_run: bool) -> Decision {
 }
 
 fn default_branch_block_reason(
-    git: &impl GitClient,
+    git: &impl RepositoryProbe,
     repository: &RepositoryDefinition,
     default_branch: &BranchName,
 ) -> Result<Option<BlockedReason>, AppError> {

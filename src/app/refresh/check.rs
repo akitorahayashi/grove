@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::AppError;
-use crate::git::GitClient;
+use crate::git::RepositoryProbe;
 use crate::inspection::{self, BranchReadiness, Readiness};
 use crate::repositories::{BranchName, RepositoryDefinition};
 
@@ -9,12 +9,11 @@ use super::{BlockedReason, BlockedReasonDetails, Entry, Outcome, SkippedReason};
 
 pub(super) enum Decision {
     Entry(Entry),
-    Fetch { common_directory: PathBuf, default_branch: BranchName },
-    DryRun { common_directory: PathBuf, default_branch: BranchName },
+    Ready { common_directory: PathBuf, default_branch: BranchName },
 }
 
 pub(super) fn repository(
-    git: &impl GitClient,
+    git: &impl RepositoryProbe,
     repository: &RepositoryDefinition,
     dry_run: bool,
 ) -> Result<Decision, AppError> {
@@ -47,18 +46,12 @@ pub(super) fn repository(
         Readiness::Ready { default_branch } => default_branch,
     };
 
-    if dry_run {
-        if let Some(reason) = refresh_block_reason(git, repository, &default_branch)? {
-            return Ok(Decision::Entry(Entry::new(repository, Outcome::Blocked { reason })));
-        }
-        return Ok(Decision::DryRun {
-            common_directory: git.common_directory(repository.path())?,
-            default_branch,
-        });
+    if dry_run && let Some(reason) = refresh_block_reason(git, repository, &default_branch)? {
+        return Ok(Decision::Entry(Entry::new(repository, Outcome::Blocked { reason })));
     }
 
     let common_directory = git.common_directory(repository.path())?;
-    Ok(Decision::Fetch { common_directory, default_branch })
+    Ok(Decision::Ready { common_directory, default_branch })
 }
 
 fn blocked(repository: &RepositoryDefinition, reason: BlockedReason) -> Result<Decision, AppError> {
@@ -66,7 +59,7 @@ fn blocked(repository: &RepositoryDefinition, reason: BlockedReason) -> Result<D
 }
 
 pub(super) fn refresh_block_reason(
-    git: &impl GitClient,
+    git: &impl RepositoryProbe,
     repository: &RepositoryDefinition,
     default_branch: &BranchName,
 ) -> Result<Option<BlockedReason>, AppError> {

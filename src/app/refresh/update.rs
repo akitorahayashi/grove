@@ -1,12 +1,12 @@
 use crate::AppError;
-use crate::git::{GitClient, GitRefreshOutcome, GitUpdateBlock};
+use crate::git::{DefaultBranch, GitRefreshOutcome, GitUpdateBlock};
 use crate::phases::Task as PhaseTask;
 use crate::repositories::BranchName;
 
 use super::task::Task;
 use super::{BlockedReason, Entry, Outcome, SkippedReason};
 
-pub(super) fn repository(git: &impl GitClient, task: &Task<'_>) -> Entry {
+pub(super) fn repository(git: &impl DefaultBranch, task: &Task<'_>) -> Entry {
     match refresh_repository(git, task) {
         Ok(entry) => entry,
         Err(error) => Entry::new(
@@ -16,7 +16,7 @@ pub(super) fn repository(git: &impl GitClient, task: &Task<'_>) -> Entry {
     }
 }
 
-fn refresh_repository(git: &impl GitClient, task: &Task<'_>) -> Result<Entry, AppError> {
+fn refresh_repository(git: &impl DefaultBranch, task: &Task<'_>) -> Result<Entry, AppError> {
     let repository = task.repository();
     let default_branch = task.default_branch();
     match git.refresh_default_branch(repository.path(), default_branch)? {

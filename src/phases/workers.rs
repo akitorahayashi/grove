@@ -63,13 +63,13 @@ where
 pub(crate) fn map_keyed<T, R, K>(
     items: &[T],
     parallelism: usize,
-    key: impl Fn(&T) -> K,
+    key: impl for<'a> Fn(&'a T) -> &'a K,
     action: impl Fn(&T) -> R + Sync,
 ) -> Result<Vec<R>, AppError>
 where
     T: Sync,
     R: Send,
-    K: Eq + Hash,
+    K: Eq + Hash + ?Sized,
 {
     let mut group_by_key = HashMap::new();
     let mut groups = Vec::<Vec<usize>>::new();
@@ -131,7 +131,7 @@ mod tests {
         map_keyed(
             &[('a', 1), ('a', 2), ('b', 3), ('b', 4)],
             8,
-            |item| item.0,
+            |item| &item.0,
             |item| {
                 let active = if item.0 == 'a' { &active_a } else { &active_b };
                 assert_eq!(active.fetch_add(1, Ordering::SeqCst), 0);

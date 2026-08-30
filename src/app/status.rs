@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use crate::AppError;
 use crate::app::AppContext;
 use crate::config;
-use crate::git::{GitClient, NoopGitProgressSink, RepositoryProbe};
+use crate::git::{NoopGitProgressSink, RepositoryProbe};
 use crate::inspection::{self, BranchReadiness, Ownership};
 use crate::phases::{Slots, workers};
 use crate::repositories::select_repositories;
@@ -174,8 +174,8 @@ impl RemoteUrlMismatch {
     }
 }
 
-pub fn execute(
-    ctx: &AppContext<impl GitClient>,
+pub fn execute<G: RepositoryProbe, Z>(
+    ctx: &AppContext<G, Z>,
     config_path: Option<&Path>,
     targets: &[String],
     fetch: bool,
@@ -221,7 +221,7 @@ fn collect_entries(
     let fetched = workers::map_keyed(
         &tasks,
         parallelism,
-        |task| task.common_directory.clone(),
+        |task| task.common_directory.as_path(),
         |task| fetch_status(git, task),
     )?;
     for result in fetched {
@@ -356,7 +356,7 @@ fn status_for_repository(
     });
     let default_branch = git.default_branch(repository.path(), repository.default_branch())?;
     let default_branch = if let Some(branch) = default_branch.as_ref() {
-        default_branch_status(git, repository, branch)?
+        Some(default_branch_status(git, repository, branch)?)
     } else {
         None
     };
@@ -377,7 +377,7 @@ fn default_branch_status(
     git: &impl RepositoryProbe,
     repository: &RepositoryDefinition,
     branch: &BranchName,
-) -> Result<Option<DefaultBranchStatus>, AppError> {
+) -> Result<DefaultBranchStatus, AppError> {
     let tracking = match inspection::branch_readiness(git, repository, branch)? {
         BranchReadiness::MissingLocal => BranchTrackingStatus::MissingLocalBranch,
         BranchReadiness::MissingRemote => BranchTrackingStatus::MissingRemoteBranch,
@@ -391,7 +391,7 @@ fn default_branch_status(
             BranchTrackingStatus::Divergence { ahead: 0, behind }
         }
     };
-    Ok(Some(DefaultBranchStatus::new(branch.to_string(), tracking)))
+    Ok(DefaultBranchStatus::new(branch.to_string(), tracking))
 }
 
 #[cfg(test)]
