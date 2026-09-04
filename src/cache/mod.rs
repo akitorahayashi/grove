@@ -9,6 +9,7 @@
 //! placed clone is self-contained and correct even when the entry is stale or
 //! narrow — the entry only reduces network transfer.
 
+use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -38,6 +39,7 @@ pub enum Outcome {
 pub(crate) struct EntryInfo {
     url: String,
     modified: Option<SystemTime>,
+    size: u64,
 }
 
 impl EntryInfo {
@@ -47,6 +49,10 @@ impl EntryInfo {
 
     pub(crate) fn modified(&self) -> Option<SystemTime> {
         self.modified
+    }
+
+    pub(crate) fn size(&self) -> u64 {
+        self.size
     }
 }
 
@@ -166,6 +172,7 @@ impl Store {
             if !entry.file_type()?.is_dir() || entry.file_name() == LOCK_DIRECTORY {
                 continue;
             }
+            let _entry_lock = self.entry_directory_lock(&entry.file_name())?;
             let container = entry.path();
             let Some(url) = read_metadata(&container, "url")? else {
                 continue;
@@ -175,6 +182,7 @@ impl Store {
                 modified: fs::metadata(container.join("updated"))
                     .and_then(|meta| meta.modified())
                     .ok(),
+                size: allocated_bytes(&container)?,
             });
         }
         infos.sort_by(|left, right| left.url.cmp(&right.url));
@@ -349,8 +357,12 @@ impl Store {
     }
 
     fn entry_lock(&self, key: &str) -> Result<CacheLock, AppError> {
-        let mut name = entry_directory_name(key);
-        name.push_str(".lock");
+        self.entry_directory_lock(OsStr::new(&entry_directory_name(key)))
+    }
+
+    fn entry_directory_lock(&self, directory_name: &OsStr) -> Result<CacheLock, AppError> {
+        let mut name = directory_name.to_os_string();
+        name.push(".lock");
         CacheLock::acquire(&self.root.join(LOCK_DIRECTORY).join(name), LockMode::Exclusive)
     }
 
@@ -529,6 +541,44 @@ fn read_metadata(container: &Path, name: &str) -> Result<Option<String>, AppErro
     }
 }
 
+#[cfg(unix)]
+fn allocated_bytes(path: &Path) -> Result<u64, AppError> {
+    use std::collections::HashSet;
+    use std::os::unix::fs::MetadataExt;
+
+    fn visit(path: &Path, seen: &mut HashSet<(u64, u64)>) -> Result<u64, AppError> {
+        let metadata = fs::symlink_metadata(path)?;
+        if !seen.insert((metadata.dev(), metadata.ino())) {
+            return Ok(0);
+        }
+
+        let mut size = metadata.blocks().checked_mul(512).ok_or_else(|| {
+            AppError::cache_state(format!(
+                "allocated size exceeds the supported range for '{}'",
+                path.display()
+            ))
+        })?;
+        if metadata.file_type().is_dir() {
+            for child in fs::read_dir(path)? {
+                size = size.checked_add(visit(&child?.path(), seen)?).ok_or_else(|| {
+                    AppError::cache_state(format!(
+                        "allocated size exceeds the supported range for '{}'",
+                        path.display()
+                    ))
+                })?;
+            }
+        }
+        Ok(size)
+    }
+
+    visit(path, &mut HashSet::new())
+}
+
+#[cfg(not(unix))]
+fn allocated_bytes(_path: &Path) -> Result<u64, AppError> {
+    Err(AppError::cache_state("cache size reporting is unsupported on this platform"))
+}
+
 fn write_branch(container: &Path, branch: &str) -> Result<(), AppError> {
     fs::write(container.join("branch"), branch)?;
     Ok(())
@@ -555,31 +605,36 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn list_reads_metadata_without_traversing_repository_contents() {
-        use std::os::unix::fs::PermissionsExt;
+    fn list_reports_allocated_size_without_following_links_or_recounting_inodes() {
+        use std::os::unix::fs::{MetadataExt, symlink};
 
         let root = TempDir::new().unwrap();
         let store = Store::with_root(root.path().to_path_buf());
-        // Establish the current cache format before planting the fixture, so
-        // listing exercises metadata reading rather than invalidation.
         store.list().unwrap();
         let container = root.path().join("entry");
-        let inaccessible = container.join("git/objects/deep");
-        fs::create_dir_all(&inaccessible).unwrap();
+        let objects = container.join("git/objects");
+        fs::create_dir_all(&objects).unwrap();
         fs::write(container.join("url"), "https://example.com/repository.git").unwrap();
         fs::write(container.join("updated"), []).unwrap();
-        let mut permissions = fs::metadata(&inaccessible).unwrap().permissions();
-        permissions.set_mode(0o000);
-        fs::set_permissions(&inaccessible, permissions).unwrap();
+        let object = objects.join("object");
+        fs::write(&object, vec![0_u8; 8192]).unwrap();
+        let hard_link = objects.join("hard-link");
+        fs::hard_link(&object, &hard_link).unwrap();
+        let external = root.path().join("external");
+        fs::write(&external, vec![0_u8; 16384]).unwrap();
+        let symbolic_link = container.join("symbolic-link");
+        symlink(&external, &symbolic_link).unwrap();
 
-        let result = store.list();
+        let entries = store.list().unwrap();
 
-        let mut permissions = fs::metadata(&inaccessible).unwrap().permissions();
-        permissions.set_mode(0o700);
-        fs::set_permissions(&inaccessible, permissions).unwrap();
-        let entries = result.expect("listing should not inspect repository contents");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].url(), "https://example.com/repository.git");
+        let expected = [&container, &container.join("git"), &objects, &object]
+            .into_iter()
+            .chain([container.join("url"), container.join("updated"), symbolic_link].iter())
+            .map(|path| fs::symlink_metadata(path).unwrap().blocks() * 512)
+            .sum();
+        assert_eq!(entries[0].size(), expected);
     }
 
     fn make_remote(base: &Path, feature: bool) -> PathBuf {
