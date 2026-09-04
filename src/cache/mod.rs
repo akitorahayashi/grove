@@ -169,10 +169,15 @@ impl Store {
         let mut infos = Vec::new();
         for entry in fs::read_dir(&self.root)? {
             let entry = entry?;
-            if !entry.file_type()?.is_dir() || entry.file_name() == LOCK_DIRECTORY {
+            let directory_name = entry.file_name();
+            if !entry.file_type()?.is_dir()
+                || directory_name == LOCK_DIRECTORY
+                || is_temporary_entry_name(&directory_name)
+                || !is_entry_directory_name(&directory_name)
+            {
                 continue;
             }
-            let _entry_lock = self.entry_directory_lock(&entry.file_name())?;
+            let _entry_lock = self.entry_directory_lock(&directory_name)?;
             let container = entry.path();
             let Some(url) = read_metadata(&container, "url")? else {
                 continue;
@@ -373,6 +378,7 @@ impl Store {
 }
 
 const LOCK_DIRECTORY: &str = ".locks";
+const TEMPORARY_SUFFIX: &str = ".tmp";
 
 /// The cache root's on-disk format. "2" covers identity-keyed entries; the
 /// marker's absence identifies roots written before the marker existed, whose
@@ -529,8 +535,30 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 
 fn temporary_path(container: &Path) -> PathBuf {
     let mut name = container.file_name().unwrap_or_default().to_os_string();
-    name.push(".tmp");
+    name.push(TEMPORARY_SUFFIX);
     container.with_file_name(name)
+}
+
+fn is_temporary_entry_name(name: &OsStr) -> bool {
+    name.as_encoded_bytes().ends_with(TEMPORARY_SUFFIX.as_bytes())
+}
+
+fn is_entry_directory_name(name: &OsStr) -> bool {
+    let Some(name) = name.to_str() else {
+        return false;
+    };
+    let (slug, hash) = name.rsplit_once('-').unwrap_or(("", name));
+    let valid_slug = slug.is_empty()
+        || slug.len() <= 48
+            && slug.split('-').all(|segment| {
+                !segment.is_empty()
+                    && segment
+                        .bytes()
+                        .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+            });
+    valid_slug
+        && hash.len() == 16
+        && hash.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn read_metadata(container: &Path, name: &str) -> Result<Option<String>, AppError> {
@@ -603,6 +631,35 @@ mod tests {
     use crate::git::{CommandGitClient, NoopGitProgressSink};
     use crate::repositories::{BranchName, RemoteUrl};
 
+    #[test]
+    fn list_ignores_staging_and_noncanonical_directories() {
+        let root = TempDir::new().unwrap();
+        let store = Store::with_root(root.path().to_path_buf());
+        store.list().unwrap();
+
+        let final_url = "example.com/final";
+        let final_entry = root.path().join(entry_directory_name(final_url));
+        fs::create_dir(&final_entry).unwrap();
+        fs::write(final_entry.join("url"), final_url).unwrap();
+        fs::write(final_entry.join("updated"), []).unwrap();
+
+        let staged_url = "example.com/staged";
+        let staging = temporary_path(&root.path().join(entry_directory_name(staged_url)));
+        fs::create_dir(&staging).unwrap();
+        fs::write(staging.join("url"), staged_url).unwrap();
+        fs::write(staging.join("updated"), []).unwrap();
+
+        let noncanonical = root.path().join("unrecognized-entry");
+        fs::create_dir(&noncanonical).unwrap();
+        fs::write(noncanonical.join("url"), "example.com/unrecognized").unwrap();
+        fs::write(noncanonical.join("updated"), []).unwrap();
+
+        let entries = store.list().unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].url(), final_url);
+    }
+
     #[cfg(unix)]
     #[test]
     fn list_reports_allocated_size_without_following_links_or_recounting_inodes() {
@@ -611,10 +668,11 @@ mod tests {
         let root = TempDir::new().unwrap();
         let store = Store::with_root(root.path().to_path_buf());
         store.list().unwrap();
-        let container = root.path().join("entry");
+        let url = "example.com/repository";
+        let container = root.path().join(entry_directory_name(url));
         let objects = container.join("git/objects");
         fs::create_dir_all(&objects).unwrap();
-        fs::write(container.join("url"), "https://example.com/repository.git").unwrap();
+        fs::write(container.join("url"), url).unwrap();
         fs::write(container.join("updated"), []).unwrap();
         let object = objects.join("object");
         fs::write(&object, vec![0_u8; 8192]).unwrap();
@@ -628,7 +686,7 @@ mod tests {
         let entries = store.list().unwrap();
 
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].url(), "https://example.com/repository.git");
+        assert_eq!(entries[0].url(), url);
         let expected = [&container, &container.join("git"), &objects, &object]
             .into_iter()
             .chain([container.join("url"), container.join("updated"), symbolic_link].iter())
