@@ -17,8 +17,9 @@ fn cache_list_shows_headers_when_nothing_cached() {
             .unwrap()
             .split_whitespace()
             .collect::<Vec<_>>(),
-        ["URL", "UPDATED"]
+        ["URL", "UPDATED", "SIZE"]
     );
+    assert!(stdout.contains("Total: 0 entries, 0 B"));
 }
 
 #[test]
@@ -33,7 +34,8 @@ fn cache_list_shows_entry_after_clone() {
         .arg("list")
         .assert()
         .success()
-        .stdout(predicate::str::contains("blog.git"));
+        .stdout(predicate::str::contains("blog.git"))
+        .stdout(predicate::str::contains("Total: 1 entry, "));
 }
 
 #[test]
@@ -49,6 +51,7 @@ fn cache_list_orders_entries_by_url() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("cache list output should be UTF-8");
     assert!(stdout.find("alpha.git").unwrap() < stdout.find("zeta.git").unwrap());
+    assert!(stdout.contains("Total: 2 entries, "));
 }
 
 #[test]

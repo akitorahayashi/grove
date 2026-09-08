@@ -181,9 +181,10 @@ so the installed Git remains the authority for validation and future options.
 Failure to prepare the cache is reported and falls back to the unchanged Git
 invocation, while a failure from the final clone is returned without retrying.
 
-`gv cache list` reports cached repositories in `URL` and `UPDATED` columns. `gv
-cache clean` removes every entry; `gv cache clean <repo>...` removes the entries
-backing the named configured repositories.
+`gv cache list` reports cached repositories in `URL`, `UPDATED`, and `SIZE`
+columns, followed by the total allocated size of all listed entries. `gv cache
+clean` removes every entry; `gv cache clean <repo>...` removes the entries backing
+the named configured repositories.
 
 ## Requirements
 
