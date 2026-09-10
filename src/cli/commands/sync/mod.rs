@@ -36,7 +36,7 @@ pub(in crate::cli) fn run(
     command: SyncCommand,
     output: &mut Output<'_>,
 ) -> Result<Completion, AppError> {
-    let config = super::resolve_config(config, output)?;
+    let config = super::resolve_config(config, super::ConfigNotice::WhenAscended, output)?;
     let options = SyncOptions::new(command.dry_run, command.register_zoxide);
     let report = if command.dry_run {
         api::sync(Some(config), command.repositories, options)?

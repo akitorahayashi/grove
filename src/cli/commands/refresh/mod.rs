@@ -30,7 +30,7 @@ pub(in crate::cli) fn run(
     command: RefreshCommand,
     output: &mut Output<'_>,
 ) -> Result<Completion, AppError> {
-    let config = super::resolve_config(config, output)?;
+    let config = super::resolve_config(config, super::ConfigNotice::WhenAscended, output)?;
     let options = RefreshOptions::new(command.dry_run);
     let report = if command.dry_run {
         api::refresh(Some(config), command.repositories, options)?

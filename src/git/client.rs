@@ -54,6 +54,8 @@ pub trait RepositoryProbe: Sync {
 
     fn is_work_tree(&self, repository: &Path) -> Result<bool, AppError>;
 
+    fn worktree_root(&self, repository: &Path) -> Result<Option<PathBuf>, AppError>;
+
     fn worktree_status(&self, repository: &Path) -> Result<Option<WorktreeStatus>, AppError>;
 
     fn remote_url(&self, repository: &Path) -> Result<Option<RemoteUrl>, AppError>;

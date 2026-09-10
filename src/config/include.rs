@@ -21,7 +21,28 @@ pub(super) struct LoadedConfigTree {
 }
 
 pub(super) fn load_tree(root_path: &Path) -> Result<LoadedConfigTree, AppError> {
-    let root = load_one(&root_path.canonicalize()?)?;
+    load_tree_from(root_path, None)
+}
+
+pub(super) fn load_tree_with_replacement(
+    root_path: &Path,
+    replacement_path: &Path,
+    contents: &str,
+) -> Result<LoadedConfigTree, AppError> {
+    load_tree_from(root_path, Some(SourceReplacement { path: replacement_path, contents }))
+}
+
+#[derive(Clone, Copy)]
+struct SourceReplacement<'a> {
+    path: &'a Path,
+    contents: &'a str,
+}
+
+fn load_tree_from(
+    root_path: &Path,
+    replacement: Option<SourceReplacement<'_>>,
+) -> Result<LoadedConfigTree, AppError> {
+    let root = load_one(&root_path.canonicalize()?, replacement)?;
     let root_directory = root
         .path
         .parent()
@@ -45,7 +66,7 @@ pub(super) fn load_tree(root_path: &Path) -> Result<LoadedConfigTree, AppError> 
             )));
         }
 
-        let child = load_one(&child_path)?;
+        let child = load_one(&child_path, replacement)?;
         if !child.raw.include.is_empty() {
             return Err(AppError::config_error(format!(
                 "{}: nested includes are not allowed",
@@ -63,16 +84,19 @@ pub(super) fn load_tree(root_path: &Path) -> Result<LoadedConfigTree, AppError> 
     Ok(LoadedConfigTree { root_path, root_directory, files })
 }
 
-fn load_one(path: &Path) -> Result<LoadedConfigFile, AppError> {
+fn load_one(
+    path: &Path,
+    replacement: Option<SourceReplacement<'_>>,
+) -> Result<LoadedConfigFile, AppError> {
     let directory = path
         .parent()
         .ok_or_else(|| AppError::config_error(format!("{} has no parent", path.display())))?
         .to_path_buf();
     let label = path.display().to_string();
-    let contents = fs::read_to_string(path)?;
+    let contents = read_source(path, replacement)?;
     let mut table = file::parse_table(&contents, &label)?;
 
-    if let Some((override_path, override_contents)) = read_sibling_override(path)? {
+    if let Some((override_path, override_contents)) = read_sibling_override(path, replacement)? {
         let override_label = override_path.display().to_string();
         let override_table = file::parse_table(&override_contents, &override_label)?;
         // Standalone decode first, so a schema error confined to the override
@@ -91,7 +115,7 @@ fn load_one(path: &Path) -> Result<LoadedConfigFile, AppError> {
 /// through `OsString` rather than `to_string_lossy()`, which would corrupt a
 /// non-UTF-8 byte in the base name (valid on Unix) into a name matching no
 /// file on disk.
-fn sibling_override_path(path: &Path) -> PathBuf {
+pub(super) fn sibling_override_path(path: &Path) -> PathBuf {
     let stem = path.file_stem().unwrap_or_default();
     let mut file_name = OsString::from(stem);
     file_name.push(".override");
@@ -106,7 +130,7 @@ fn sibling_override_path(path: &Path) -> PathBuf {
 /// normal, silent absence, but a broken symlink, a non-regular file, or a
 /// permission failure must surface rather than be treated as "no override" and
 /// silently ignored.
-fn read_sibling_override(path: &Path) -> Result<Option<(PathBuf, String)>, AppError> {
+pub(super) fn resolve_sibling_override_path(path: &Path) -> Result<Option<PathBuf>, AppError> {
     let override_path = sibling_override_path(path);
     match fs::symlink_metadata(&override_path) {
         Ok(_) => {
@@ -119,13 +143,40 @@ fn read_sibling_override(path: &Path) -> Result<Option<(PathBuf, String)>, AppEr
                     override_path.display()
                 )));
             }
-            let contents = fs::read_to_string(&resolved)?;
-            Ok(Some((resolved, contents)))
+            Ok(Some(resolved))
         }
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(err) => {
             Err(AppError::config_source(format!("{}: {err}", override_path.display()), err))
         }
+    }
+}
+
+fn read_sibling_override(
+    path: &Path,
+    replacement: Option<SourceReplacement<'_>>,
+) -> Result<Option<(PathBuf, String)>, AppError> {
+    let expected = sibling_override_path(path);
+    match resolve_sibling_override_path(path)? {
+        Some(resolved) => {
+            let contents = read_source(&resolved, replacement)?;
+            Ok(Some((resolved, contents)))
+        }
+        None if replacement.is_some_and(|replacement| replacement.path == expected) => {
+            let contents = replacement.expect("replacement was checked").contents.to_string();
+            Ok(Some((expected, contents)))
+        }
+        None => Ok(None),
+    }
+}
+
+fn read_source(
+    path: &Path,
+    replacement: Option<SourceReplacement<'_>>,
+) -> Result<String, AppError> {
+    match replacement {
+        Some(replacement) if replacement.path == path => Ok(replacement.contents.to_string()),
+        _ => fs::read_to_string(path).map_err(AppError::from),
     }
 }
 

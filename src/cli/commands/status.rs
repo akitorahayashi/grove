@@ -27,7 +27,7 @@ pub(in crate::cli) fn run(
     command: StatusCommand,
     output: &mut Output<'_>,
 ) -> Result<Completion, AppError> {
-    let config = super::resolve_config(config, output)?;
+    let config = super::resolve_config(config, super::ConfigNotice::WhenAscended, output)?;
     let show_detail = command.repositories.len() == 1;
     let report = api::status(Some(config), command.repositories, command.fetch)?;
     let entries = report.entries();

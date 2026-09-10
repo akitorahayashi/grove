@@ -1,3 +1,4 @@
+mod add;
 mod cache;
 mod clone;
 mod init;

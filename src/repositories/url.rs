@@ -1,4 +1,5 @@
 use std::fmt;
+use std::path::Path;
 
 use crate::AppError;
 
@@ -20,6 +21,34 @@ impl RemoteUrl {
 
     pub fn as_process_argument(&self) -> &str {
         &self.0
+    }
+
+    pub(crate) fn as_config_value(&self) -> &str {
+        &self.0
+    }
+
+    pub(crate) fn ensure_safe_for_config(&self) -> Result<(), AppError> {
+        if self.0.chars().any(char::is_control) {
+            return Err(AppError::invalid_arguments(
+                "remote origin URL contains control characters; configure a safe origin URL",
+            ));
+        }
+        if has_uri_userinfo(&self.0) {
+            return Err(AppError::invalid_arguments(
+                "remote origin URL contains credentials; configure a credential-free origin URL",
+            ));
+        }
+        if has_secret_query_parameter(&self.0) {
+            return Err(AppError::invalid_arguments(
+                "remote origin URL contains a secret query parameter; configure a credential-free origin URL",
+            ));
+        }
+        if is_relative_local_path(&self.0) {
+            return Err(AppError::invalid_arguments(
+                "remote origin uses a relative local path; configure an absolute path or file:// URL",
+            ));
+        }
+        Ok(())
     }
 
     /// Whether two URLs name the same remote verbatim. This is exact, unlike
@@ -167,6 +196,38 @@ fn redact_authority_userinfo(value: &str) -> String {
     )
 }
 
+fn has_uri_userinfo(value: &str) -> bool {
+    let Some(scheme_end) = value.find("://") else {
+        return false;
+    };
+    let authority = &value[scheme_end + 3..];
+    let authority_end =
+        authority.find(|character| ['/', '?', '#'].contains(&character)).unwrap_or(authority.len());
+    authority[..authority_end].contains('@')
+}
+
+fn has_secret_query_parameter(value: &str) -> bool {
+    let Some(query_start) = value.find('?') else {
+        return false;
+    };
+    let query = value[query_start + 1..].split('#').next().unwrap_or_default();
+    query.split('&').any(|parameter| {
+        let key = parameter.split_once('=').map_or(parameter, |(key, _)| key);
+        is_secret_query_key(key)
+    })
+}
+
+fn is_relative_local_path(value: &str) -> bool {
+    if value.contains("://") {
+        return false;
+    }
+    let head = value.split('/').next().unwrap_or_default();
+    if head.contains(':') {
+        return false;
+    }
+    !Path::new(value).is_absolute()
+}
+
 fn redact_secret_query_parameters(value: &str) -> String {
     let Some(query_start) = value.find('?') else {
         return value.to_string();
@@ -257,6 +318,29 @@ mod tests {
         );
         assert!(!format!("{url:?}").contains("secret"));
         assert!(!format!("{url:?}").contains("value"));
+    }
+
+    #[test]
+    fn persistence_rejects_credentials_secrets_and_relative_local_paths() {
+        for url in [
+            "https://user@example.com/repo.git",
+            "https://example.com/repo.git?access_token=value",
+            "../repo.git",
+        ] {
+            assert!(RemoteUrl::new(url).unwrap().ensure_safe_for_config().is_err(), "{url}");
+        }
+    }
+
+    #[test]
+    fn persistence_accepts_stable_credential_free_urls() {
+        for url in [
+            "git@example.com:company/repo.git",
+            "https://example.com/company/repo.git",
+            "/srv/git/repo.git",
+            "file:///srv/git/repo.git",
+        ] {
+            assert!(RemoteUrl::new(url).unwrap().ensure_safe_for_config().is_ok(), "{url}");
+        }
     }
 
     #[test]

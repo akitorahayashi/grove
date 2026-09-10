@@ -12,6 +12,12 @@ Edit `grove.toml`: uncomment one `[repos.<name>]` block (or add your own) and
 replace its `REPLACE_WITH_*` placeholders. See
 [configuration](docs/config.md) for the schema.
 
+An existing local Git repository can also be registered from the grove root:
+
+```bash
+gv add path/to/repository
+```
+
 ```bash
 gv validate
 gv sync
