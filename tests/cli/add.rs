@@ -43,18 +43,19 @@ fn add_preserves_operand_order_and_stops_after_the_first_failure() {
     initialize_repository(&ctx, "missing-origin", "");
     initialize_repository(&ctx, "last", &remote.url());
 
-    ctx.cli()
+    let assertion = ctx
+        .cli()
         .args(["add", "first", "missing-origin", "last"])
         .assert()
         .failure()
         .stdout(predicate::str::is_empty())
-        .stderr(
-            predicate::str::contains("+ first first")
-                .and(predicate::str::contains("x missing-origin"))
-                .and(predicate::str::contains(
-                    "Stopped: 1 written, 0 unchanged, 1 failed, 1 not attempted",
-                )),
-        );
+        .stderr(predicate::str::contains(
+            "Stopped: 1 written, 0 unchanged, 1 failed, 1 not attempted",
+        ));
+    let stderr = String::from_utf8_lossy(&assertion.get_output().stderr);
+    let written = stderr.find("+ first first").expect("written entry should be logged");
+    let failed = stderr.find("x missing-origin").expect("failed entry should be logged");
+    assert!(written < failed, "stderr was not emitted in operand order:\n{stderr}");
 
     let contents = fs::read_to_string(ctx.config_path()).unwrap();
     assert!(contents.contains("[repos.first]"));
@@ -91,6 +92,39 @@ fn add_writes_custom_paths_and_is_idempotent() {
     let contents = fs::read_to_string(ctx.config_path()).unwrap();
     assert_eq!(contents.matches("[repos.backend]").count(), 1);
     assert!(contents.contains("path = \"services/backend\""));
+}
+
+#[test]
+fn add_displays_dot_when_the_repository_is_the_grove_root() {
+    let ctx = TestContext::new();
+    ctx.write_config("version = 1\n");
+    let remote = ctx.create_remote("root");
+    run_git(ctx.workspace(), &["init", "-b", "main"]);
+    run_git(ctx.workspace(), &["remote", "add", "origin", &remote.url()]);
+
+    ctx.cli().arg("add").assert().success();
+    ctx.cli()
+        .arg("add")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("= workspace already configured at ."));
+
+    assert!(fs::read_to_string(ctx.config_path()).unwrap().contains("path = \".\""));
+}
+
+#[test]
+fn add_accepts_username_only_ssh_origins() {
+    let ctx = TestContext::new();
+    ctx.write_config("version = 1\n");
+    initialize_repository(&ctx, "ssh-repository", "ssh://git@example.com/company/repo.git");
+
+    ctx.cli().args(["add", "ssh-repository"]).assert().success();
+
+    assert!(
+        fs::read_to_string(ctx.config_path())
+            .unwrap()
+            .contains("url = \"ssh://git@example.com/company/repo.git\"")
+    );
 }
 
 #[test]

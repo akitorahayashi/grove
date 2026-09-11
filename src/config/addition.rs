@@ -13,6 +13,7 @@ use crate::repositories::{RemoteUrl, RepositoryName};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Addition {
     Added { name: String, display_path: String },
+    DurabilityUnconfirmed { name: String, display_path: String, message: String },
     Unchanged { name: String, display_path: String },
 }
 
@@ -24,7 +25,7 @@ pub(crate) struct EditSession {
     baseline: Option<String>,
     resolved: ResolvedConfig,
     dry_run: bool,
-    _lock: DirectoryLock,
+    _locks: Vec<DirectoryLock>,
 }
 
 impl EditSession {
@@ -40,14 +41,26 @@ impl EditSession {
                 AppError::config_error(format!("{} has no parent", root_path.display()))
             })?
             .to_path_buf();
-        let lock = DirectoryLock::acquire(&root_directory, dry_run)?;
-        let resolved = load(Some(&root_path))?;
         let destination = if override_file {
             resolve_sibling_override_path(&root_path)?
                 .unwrap_or_else(|| sibling_override_path(&root_path))
         } else {
             root_path.clone()
         };
+        let destination_directory = destination
+            .parent()
+            .ok_or_else(|| {
+                AppError::config_error(format!("{} has no parent", destination.display()))
+            })?
+            .canonicalize()?;
+        let mut lock_directories = vec![root_directory.clone(), destination_directory];
+        lock_directories.sort();
+        lock_directories.dedup();
+        let locks = lock_directories
+            .iter()
+            .map(|directory| DirectoryLock::acquire(directory, dry_run))
+            .collect::<Result<Vec<_>, _>>()?;
+        let resolved = load(Some(&root_path))?;
         let baseline = match fs::read_to_string(&destination) {
             Ok(contents) => Some(contents),
             Err(error) if override_file && error.kind() == io::ErrorKind::NotFound => None,
@@ -72,7 +85,7 @@ impl EditSession {
             baseline,
             resolved,
             dry_run,
-            _lock: lock,
+            _locks: locks,
         })
     }
 
@@ -126,14 +139,27 @@ impl EditSession {
         let resolved =
             load_with_replacement(&self.root_path, &self.destination, &candidate_contents)?;
 
+        let persistence = if self.dry_run {
+            Persistence::Durable
+        } else {
+            persist(&self.destination, self.baseline.as_deref(), candidate_contents.as_bytes())?
+        };
         if !self.dry_run {
-            persist(&self.destination, self.baseline.as_deref(), candidate_contents.as_bytes())?;
             self.baseline = Some(candidate_contents);
         }
         self.document = candidate;
         self.resolved = resolved;
 
-        Ok(Addition::Added { name: name.as_str().to_string(), display_path })
+        match persistence {
+            Persistence::Durable => {
+                Ok(Addition::Added { name: name.as_str().to_string(), display_path })
+            }
+            Persistence::DurabilityUnconfirmed(message) => Ok(Addition::DurabilityUnconfirmed {
+                name: name.as_str().to_string(),
+                display_path,
+                message,
+            }),
+        }
     }
 }
 
@@ -232,7 +258,22 @@ fn insert_repository(
     Ok(())
 }
 
-fn persist(path: &Path, baseline: Option<&str>, contents: &[u8]) -> Result<(), AppError> {
+#[derive(Debug, PartialEq, Eq)]
+enum Persistence {
+    Durable,
+    DurabilityUnconfirmed(String),
+}
+
+fn persist(path: &Path, baseline: Option<&str>, contents: &[u8]) -> Result<Persistence, AppError> {
+    persist_with_directory_sync(path, baseline, contents, File::sync_all)
+}
+
+fn persist_with_directory_sync(
+    path: &Path,
+    baseline: Option<&str>,
+    contents: &[u8],
+    sync_directory: impl FnOnce(&File) -> io::Result<()>,
+) -> Result<Persistence, AppError> {
     match (baseline, fs::read_to_string(path)) {
         (Some(expected), Ok(actual)) if actual == expected => {}
         (Some(_), Ok(_)) => {
@@ -254,6 +295,7 @@ fn persist(path: &Path, baseline: Option<&str>, contents: &[u8]) -> Result<(), A
     let directory = path
         .parent()
         .ok_or_else(|| AppError::config_error(format!("{} has no parent", path.display())))?;
+    let directory_file = File::open(directory)?;
     let mut temporary = NamedTempFile::new_in(directory)?;
     if path.exists() {
         temporary.as_file().set_permissions(fs::metadata(path)?.permissions())?;
@@ -267,17 +309,23 @@ fn persist(path: &Path, baseline: Option<&str>, contents: &[u8]) -> Result<(), A
     temporary.write_all(contents)?;
     temporary.as_file_mut().sync_all()?;
     temporary.persist(path).map_err(|error| AppError::from(error.error))?;
-    File::open(directory)?.sync_all()?;
-    Ok(())
+    match sync_directory(&directory_file) {
+        Ok(()) => Ok(Persistence::Durable),
+        Err(error) => Ok(Persistence::DurabilityUnconfirmed(format!(
+            "{} was written, but syncing its directory failed: {error}; verify the file before retrying",
+            path.display()
+        ))),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::io;
 
     use tempfile::TempDir;
 
-    use super::{Addition, EditSession, persist};
+    use super::{Addition, EditSession, Persistence, persist, persist_with_directory_sync};
     use crate::repositories::{RemoteUrl, RepositoryName};
 
     #[test]
@@ -472,6 +520,24 @@ mod tests {
         assert_eq!(fs::read_to_string(path).unwrap(), "changed\n");
     }
 
+    #[test]
+    fn reports_unconfirmed_durability_after_replacing_the_destination() {
+        let root = TempDir::new().unwrap();
+        let path = root.path().join("grove.toml");
+        fs::write(&path, "original\n").unwrap();
+
+        let outcome =
+            persist_with_directory_sync(&path, Some("original\n"), b"replacement\n", |_| {
+                Err(io::Error::other("sync failed"))
+            })
+            .unwrap();
+
+        assert!(
+            matches!(outcome, Persistence::DurabilityUnconfirmed(message) if message.contains("was written"))
+        );
+        assert_eq!(fs::read_to_string(path).unwrap(), "replacement\n");
+    }
+
     #[cfg(unix)]
     #[test]
     fn preserves_existing_file_permissions() {
@@ -560,5 +626,30 @@ mod tests {
 
         drop(session);
         competing.try_lock().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn edit_session_locks_the_override_target_directory() {
+        use std::os::unix::fs::symlink;
+
+        let root = TempDir::new().unwrap();
+        let target_directory = TempDir::new().unwrap();
+        let config = root.path().join("grove.toml");
+        let override_target = target_directory.path().join("local.toml");
+        fs::write(&config, "version = 1\n").unwrap();
+        fs::write(&override_target, "").unwrap();
+        symlink(&override_target, root.path().join("grove.override.toml")).unwrap();
+
+        let session = EditSession::open(&config, true, false).unwrap();
+        let competing_root = fs::File::open(root.path()).unwrap();
+        let competing_target = fs::File::open(target_directory.path()).unwrap();
+
+        assert!(matches!(competing_root.try_lock(), Err(fs::TryLockError::WouldBlock)));
+        assert!(matches!(competing_target.try_lock(), Err(fs::TryLockError::WouldBlock)));
+
+        drop(session);
+        competing_root.try_lock().unwrap();
+        competing_target.try_lock().unwrap();
     }
 }

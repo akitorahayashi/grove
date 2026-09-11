@@ -188,7 +188,8 @@ fn validate_no_nested_repository_paths(
 }
 
 fn relative_display(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
+    let display = path
+        .strip_prefix(root)
         .unwrap_or(path)
         .components()
         .filter_map(|component| match component {
@@ -196,7 +197,8 @@ fn relative_display(root: &Path, path: &Path) -> String {
             _ => None,
         })
         .collect::<Vec<_>>()
-        .join("/")
+        .join("/");
+    if display.is_empty() { ".".to_string() } else { display }
 }
 
 #[cfg(test)]
@@ -225,5 +227,10 @@ mod tests {
 
         let error = result.expect_err("path outside the root should fail");
         assert_eq!(error.kind(), crate::AppErrorKind::Configuration);
+    }
+
+    #[test]
+    fn displays_the_grove_root_as_dot() {
+        assert_eq!(relative_display(Path::new("/workspace"), Path::new("/workspace")), ".");
     }
 }

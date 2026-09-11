@@ -57,6 +57,13 @@ fn print_entry(entry: &Entry, output: &mut Output<'_>) -> io::Result<()> {
             &label,
             &terminal_text(entry.display_path().unwrap_or_default()),
         ),
+        Outcome::DurabilityUnconfirmed(message) => entry_line(
+            output,
+            "!",
+            Paint::Yellow,
+            &label,
+            &format!("written; durability not confirmed: {}", safe_message(message)),
+        ),
         Outcome::Planned => entry_line(
             output,
             "+",
@@ -86,6 +93,20 @@ fn print_summary(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
     }
     let (changed, label) =
         if report.dry_run() { (report.planned(), "planned") } else { (report.added(), "written") };
+    if report.durability_unconfirmed() > 0 {
+        return write_line(
+            output,
+            format_args!(
+                "Stopped: {} {}, {} unchanged, {} failed, {} durability unconfirmed, {} not attempted",
+                changed,
+                label,
+                report.unchanged(),
+                report.failed(),
+                report.durability_unconfirmed(),
+                report.not_attempted()
+            ),
+        );
+    }
     write_line(
         output,
         format_args!(

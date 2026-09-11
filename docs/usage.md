@@ -61,13 +61,17 @@ The repository name is the canonical worktree root's directory name. It must
 satisfy grove's repository-name rules; the command never guesses another name.
 The configured path is relative to the grove root and is omitted when it equals
 the name. The URL is copied from `remote.origin.url`, while `default_branch` is
-left absent. A missing origin, a credential-bearing URL, a secret query
+left absent. Username-only `ssh://user@host/...` and SCP-like SSH origins are
+accepted. A missing origin, an SSH password, HTTP(S) userinfo, a secret query
 parameter, or a relative local URL stops the command with recovery guidance.
 
 An already configured canonical path and URL is an unchanged success. A name
 collision or a path whose URL differs is a failure. Earlier successful operands
-remain written, the failing operand leaves no change, and later operands are not
-attempted. Logs and the stop summary use stderr; stdout remains empty.
+remain written, failures before atomic replacement leave the current operand
+unchanged, and later operands are not attempted. If synchronizing the parent
+directory fails after replacement, the current operand is reported as written
+with unconfirmed durability and processing stops. Logs and the stop summary use
+stderr; stdout remains empty.
 
 `gv add --override` writes to the selected base file's sibling override. A
 missing override is created only when the first repository is successfully

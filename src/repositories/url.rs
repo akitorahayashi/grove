@@ -33,7 +33,7 @@ impl RemoteUrl {
                 "remote origin URL contains control characters; configure a safe origin URL",
             ));
         }
-        if has_uri_userinfo(&self.0) {
+        if has_disallowed_uri_userinfo(&self.0) {
             return Err(AppError::invalid_arguments(
                 "remote origin URL contains credentials; configure a credential-free origin URL",
             ));
@@ -196,14 +196,18 @@ fn redact_authority_userinfo(value: &str) -> String {
     )
 }
 
-fn has_uri_userinfo(value: &str) -> bool {
-    let Some(scheme_end) = value.find("://") else {
+fn has_disallowed_uri_userinfo(value: &str) -> bool {
+    let Some((scheme, remainder)) = value.split_once("://") else {
         return false;
     };
-    let authority = &value[scheme_end + 3..];
+    let authority = remainder;
     let authority_end =
         authority.find(|character| ['/', '?', '#'].contains(&character)).unwrap_or(authority.len());
-    authority[..authority_end].contains('@')
+    let Some((userinfo, _)) = authority[..authority_end].rsplit_once('@') else {
+        return false;
+    };
+
+    !scheme.eq_ignore_ascii_case("ssh") || userinfo.contains(':')
 }
 
 fn has_secret_query_parameter(value: &str) -> bool {
@@ -324,6 +328,7 @@ mod tests {
     fn persistence_rejects_credentials_secrets_and_relative_local_paths() {
         for url in [
             "https://user@example.com/repo.git",
+            "ssh://git:secret@example.com/repo.git",
             "https://example.com/repo.git?access_token=value",
             "../repo.git",
         ] {
@@ -335,6 +340,7 @@ mod tests {
     fn persistence_accepts_stable_credential_free_urls() {
         for url in [
             "git@example.com:company/repo.git",
+            "ssh://git@example.com/company/repo.git",
             "https://example.com/company/repo.git",
             "/srv/git/repo.git",
             "file:///srv/git/repo.git",

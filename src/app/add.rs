@@ -48,6 +48,7 @@ impl Entry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Outcome {
     Added,
+    DurabilityUnconfirmed(String),
     Planned,
     Unchanged,
     Failed(String),
@@ -67,7 +68,12 @@ pub(crate) struct Report {
 
 impl Report {
     pub(crate) fn added(&self) -> usize {
-        self.entries.iter().filter(|entry| entry.outcome == Outcome::Added).count()
+        self.entries
+            .iter()
+            .filter(|entry| {
+                matches!(entry.outcome, Outcome::Added | Outcome::DurabilityUnconfirmed(_))
+            })
+            .count()
     }
 
     pub(crate) fn planned(&self) -> usize {
@@ -82,12 +88,19 @@ impl Report {
         self.entries.iter().filter(|entry| matches!(entry.outcome, Outcome::Failed(_))).count()
     }
 
+    pub(crate) fn durability_unconfirmed(&self) -> usize {
+        self.entries
+            .iter()
+            .filter(|entry| matches!(entry.outcome, Outcome::DurabilityUnconfirmed(_)))
+            .count()
+    }
+
     pub(crate) fn not_attempted(&self) -> usize {
         self.total.saturating_sub(self.entries.len())
     }
 
     pub(crate) fn has_failure(&self) -> bool {
-        self.failed() > 0
+        self.failed() > 0 || self.durability_unconfirmed() > 0
     }
 
     pub(crate) fn dry_run(&self) -> bool {
@@ -124,7 +137,8 @@ where
                 outcome: Outcome::Failed(error.demote()?),
             },
         };
-        let failed = matches!(entry.outcome, Outcome::Failed(_));
+        let failed =
+            matches!(entry.outcome, Outcome::Failed(_) | Outcome::DurabilityUnconfirmed(_));
         entries.push(entry);
         on_event(Event::Entry(entries.last().expect("entry was just appended")))?;
         if failed {
@@ -188,6 +202,12 @@ fn add_one(
             name: Some(name),
             display_path: Some(display_path),
             outcome: if dry_run { Outcome::Planned } else { Outcome::Added },
+        }),
+        Addition::DurabilityUnconfirmed { name, display_path, message } => Ok(Entry {
+            input: input.to_path_buf(),
+            name: Some(name),
+            display_path: Some(display_path),
+            outcome: Outcome::DurabilityUnconfirmed(message),
         }),
         Addition::Unchanged { name, display_path } => Ok(Entry {
             input: input.to_path_buf(),
