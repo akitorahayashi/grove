@@ -6,12 +6,17 @@ use crate::repositories::RepositoryDefinition;
 #[derive(Debug, Clone)]
 pub struct ResolvedConfig {
     root_path: PathBuf,
+    groups: Vec<GroupDirectory>,
     repositories: Vec<RepositoryDefinition>,
 }
 
 impl ResolvedConfig {
-    pub(super) fn new(root_path: PathBuf, repositories: Vec<RepositoryDefinition>) -> Self {
-        Self { root_path, repositories }
+    pub(super) fn new(
+        root_path: PathBuf,
+        groups: Vec<GroupDirectory>,
+        repositories: Vec<RepositoryDefinition>,
+    ) -> Self {
+        Self { root_path, groups, repositories }
     }
 
     pub fn root_path(&self) -> &Path {
@@ -20,5 +25,29 @@ impl ResolvedConfig {
 
     pub fn repositories(&self) -> &[RepositoryDefinition] {
         &self.repositories
+    }
+
+    pub(super) fn groups(&self) -> &[GroupDirectory] {
+        &self.groups
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct GroupDirectory {
+    path: PathBuf,
+    display_path: String,
+}
+
+impl GroupDirectory {
+    pub(super) fn new(path: PathBuf, display_path: String) -> Self {
+        Self { path, display_path }
+    }
+
+    pub(super) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub(super) fn display_path(&self) -> &str {
+        &self.display_path
     }
 }

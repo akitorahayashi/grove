@@ -173,7 +173,8 @@ probe and their shared messages cannot drift.
 nearest `grove.toml`, resolves one include level, decodes TOML, and
 validates the complete catalog without invoking Git or zoxide. Root repository
 entries and directory-grouped entries flatten into the same declaration-ordered
-catalog; groups provide derived path prefixes and have no runtime identity. Each
+catalog. Groups provide derived path prefixes and retain their resolved directory
+identity for format-preserving additions, but do not become repository targets. Each
 loaded file — root or include target — is deep merged in TOML-table form with a
 sibling override named after its stem before decoding, so `grove.toml` pairs
 with `grove.override.toml` and an arbitrarily named `--config` target pairs the
@@ -181,15 +182,16 @@ same way. Repository URL strings normalize to tables before a matching detailed
 override; other tables merge recursively while scalars and arrays are replaced.
 Discovery itself never treats a standalone override as a root. It rejects
 schema violations, unsupported versions, duplicate or nested includes, invalid
-names and branch refs, aliased derived-path groups within one merged file,
+names and branch refs, aliased groups within one merged file,
 duplicate or nested repository identities, absolute paths, paths outside the
 canonical grove root, and an override that exists but cannot be resolved. Its
 addition session holds the selected base-directory lock, reuses an existing
-group spelling when its resolved parent directory matches the worktree parent,
+group spelling when the resolved group directory matches the worktree parent,
 edits TOML without changing unrelated formatting, validates prospective source
-contents through the normal loader, and atomically replaces one base or override
-destination. Non-cooperating filesystem actors retain the residual race between
-the final content check and replacement.
+contents through the normal loader, verifies the resulting repository identity,
+and atomically replaces one base or override destination. Non-cooperating
+filesystem actors retain the residual race between the final content check and
+replacement.
 
 `repositories` owns validated repository values. `RemoteUrl` exposes raw text
 only through its process-argument accessor; `Display` and `Debug` are redacted,

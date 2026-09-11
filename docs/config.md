@@ -79,19 +79,23 @@ SCP-like SSH URLs are accepted. SSH URLs containing a password, HTTP(S) URLs
 containing userinfo, secret query parameters, and relative local URLs are
 rejected rather than rewritten.
 
-An existing configured parent directory keeps its current group spelling. The
-comparison uses resolved filesystem identity, so case variants and symlink
-aliases do not cause `gv add` to create another group. Multiple configured
-spellings for one resolved parent are ambiguous and stop the addition.
+An existing configured parent directory, including an empty group, keeps its
+current group spelling. The group directory itself is compared by resolved
+filesystem identity, so case variants and parent-directory symlink aliases do
+not cause `gv add` to create another group. A symlinked repository inside an
+otherwise different group does not make those parent directories equivalent.
+Multiple configured spellings for one resolved parent are ambiguous and stop
+the addition.
 
 The destination is edited without reordering or reformatting existing content.
 A document whose representation cannot be preserved is rejected with guidance
 to add the entry manually. Each prospective edit is validated through the same
-base, override, include, and catalog validation as a normal load. A successful
-entry atomically replaces the destination and preserves its permissions; a new
-override is owner-only and omits `version`. A failure to synchronize the parent
-directory after replacement is reported as written with unconfirmed durability
-and stops further operands.
+base, override, include, and catalog validation as a normal load. The resulting
+entry must resolve to the requested worktree and URL before anything is written.
+A successful entry atomically replaces the destination and preserves its
+permissions; a new override is owner-only and omits `version`. A failure to
+synchronize the parent directory after replacement is reported as written with
+unconfirmed durability and stops further operands.
 
 ## Path resolution
 
@@ -168,7 +172,7 @@ field types, plus:
 - an unsupported or missing `version`
 - a missing, empty, or invalid repository name, URL, or branch ref
 - an empty, absolute, or non-normalized group directory
-- different derived-path groups in one merged file that resolve to the same directory
+- different groups in one merged file that resolve to the same directory
 - duplicate repository names or duplicate and nested repository identities
 - an absolute path, or a path outside the canonical grove root, for a
   repository's `path`

@@ -143,6 +143,7 @@ impl EditSession {
         let candidate_contents = candidate.to_string();
         let resolved =
             load_with_replacement(&self.root_path, &self.destination, &candidate_contents)?;
+        verify_added_repository(&resolved, &name, &repository_path, &url)?;
 
         let persistence = if self.dry_run {
             Persistence::Durable
@@ -179,13 +180,11 @@ fn configured_display_path(
     };
     let mut configured_parents = Vec::<&str>::new();
 
-    for repository in resolved.repositories() {
-        if repository.path().parent() != Some(parent) {
+    for group in resolved.groups() {
+        if group.path() != parent {
             continue;
         }
-        let Some((configured_parent, _)) = repository.display_path().rsplit_once('/') else {
-            continue;
-        };
+        let configured_parent = group.display_path();
         if !configured_parents.contains(&configured_parent) {
             configured_parents.push(configured_parent);
         }
@@ -204,6 +203,32 @@ fn configured_display_path(
                 .join(", ")
         ))),
     }
+}
+
+fn verify_added_repository(
+    resolved: &ResolvedConfig,
+    name: &RepositoryName,
+    repository_path: &Path,
+    url: &RemoteUrl,
+) -> Result<(), AppError> {
+    let Some(repository) = resolved.repositories().iter().find(|entry| entry.name() == name) else {
+        return Err(AppError::config_error(format!(
+            "prospective configuration does not contain added repository '{name}'; no changes were written"
+        )));
+    };
+    if repository.path() != repository_path {
+        return Err(AppError::config_error(format!(
+            "prospective configuration resolves added repository '{name}' to '{}' instead of requested worktree '{}'; no changes were written",
+            repository.path().display(),
+            repository_path.display()
+        )));
+    }
+    if !repository.url().matches(url) {
+        return Err(AppError::config_error(format!(
+            "prospective configuration changes the URL for added repository '{name}'; no changes were written"
+        )));
+    }
+    Ok(())
 }
 
 struct DirectoryLock {
