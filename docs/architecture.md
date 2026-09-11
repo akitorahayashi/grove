@@ -181,9 +181,11 @@ same way. Repository URL strings normalize to tables before a matching detailed
 override; other tables merge recursively while scalars and arrays are replaced.
 Discovery itself never treats a standalone override as a root. It rejects
 schema violations, unsupported versions, duplicate or nested includes, invalid
-names and branch refs, duplicate or nested repository identities, absolute
-paths, paths outside the canonical grove root, and an override that exists but
-cannot be resolved. Its addition session holds the selected base-directory lock,
+names and branch refs, aliased derived-path groups within one merged file,
+duplicate or nested repository identities, absolute paths, paths outside the
+canonical grove root, and an override that exists but cannot be resolved. Its
+addition session holds the selected base-directory lock, reuses an existing
+group spelling when its resolved parent directory matches the worktree parent,
 edits TOML without changing unrelated formatting, validates prospective source
 contents through the normal loader, and atomically replaces one base or override
 destination. Non-cooperating filesystem actors retain the residual race between

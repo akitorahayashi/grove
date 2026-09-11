@@ -14,6 +14,7 @@ pub(super) struct RawConfigFile {
 #[derive(Debug)]
 pub(super) struct RawRepositoryEntry {
     pub name: String,
+    pub group: Option<String>,
     pub default_path: String,
     pub field: String,
     pub repository: RawRepository,
@@ -206,7 +207,13 @@ fn parse_repository_table(
                     )));
                 }
             };
-            Ok(RawRepositoryEntry { name, default_path, field, repository })
+            Ok(RawRepositoryEntry {
+                name,
+                group: group.map(str::to_string),
+                default_path,
+                field,
+                repository,
+            })
         })
         .collect()
 }

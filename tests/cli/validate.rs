@@ -389,6 +389,35 @@ fn validate_rejects_invalid_group_shapes_and_directories() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn validate_rejects_group_aliases_for_the_same_directory() {
+    use std::fs;
+    use std::os::unix::fs::symlink;
+
+    let ctx = TestContext::new();
+    fs::create_dir(ctx.workspace().join("Actual")).unwrap();
+    symlink(ctx.workspace().join("Actual"), ctx.workspace().join("First")).unwrap();
+    symlink(ctx.workspace().join("Actual"), ctx.workspace().join("Second")).unwrap();
+    let config = ctx.write_config(
+        r#"
+version = 2
+
+[groups.First]
+one = "git@example.com:one.git"
+
+[groups.Second]
+two = "git@example.com:two.git"
+"#,
+    );
+
+    ctx.cli().arg("--config").arg(config).arg("validate").assert().failure().stderr(
+        predicate::str::contains(
+            "group directories 'First' and 'Second' resolve to the same location",
+        ),
+    );
+}
+
 #[test]
 fn validate_rejects_missing_repository_url() {
     let ctx = TestContext::new();

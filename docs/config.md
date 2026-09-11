@@ -79,6 +79,11 @@ SCP-like SSH URLs are accepted. SSH URLs containing a password, HTTP(S) URLs
 containing userinfo, secret query parameters, and relative local URLs are
 rejected rather than rewritten.
 
+An existing configured parent directory keeps its current group spelling. The
+comparison uses resolved filesystem identity, so case variants and symlink
+aliases do not cause `gv add` to create another group. Multiple configured
+spellings for one resolved parent are ambiguous and stop the addition.
+
 The destination is edited without reordering or reformatting existing content.
 A document whose representation cannot be preserved is rejected with guidance
 to add the entry manually. Each prospective edit is validated through the same
@@ -163,6 +168,7 @@ field types, plus:
 - an unsupported or missing `version`
 - a missing, empty, or invalid repository name, URL, or branch ref
 - an empty, absolute, or non-normalized group directory
+- different derived-path groups in one merged file that resolve to the same directory
 - duplicate repository names or duplicate and nested repository identities
 - an absolute path, or a path outside the canonical grove root, for a
   repository's `path`

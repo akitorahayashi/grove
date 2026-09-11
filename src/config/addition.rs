@@ -126,6 +126,12 @@ impl EditSession {
         }
 
         let display_path = relative_path(&self.root_directory, &repository_path)?;
+        let display_path = configured_display_path(
+            &self.resolved,
+            &repository_path,
+            &display_path,
+            name.as_str(),
+        )?;
         let mut candidate = self.document.clone();
         insert_repository(
             &mut candidate,
@@ -159,6 +165,44 @@ impl EditSession {
                 message,
             }),
         }
+    }
+}
+
+fn configured_display_path(
+    resolved: &ResolvedConfig,
+    repository_path: &Path,
+    default: &str,
+    name: &str,
+) -> Result<String, AppError> {
+    let Some(parent) = repository_path.parent() else {
+        return Ok(default.to_string());
+    };
+    let mut configured_parents = Vec::<&str>::new();
+
+    for repository in resolved.repositories() {
+        if repository.path().parent() != Some(parent) {
+            continue;
+        }
+        let Some((configured_parent, _)) = repository.display_path().rsplit_once('/') else {
+            continue;
+        };
+        if !configured_parents.contains(&configured_parent) {
+            configured_parents.push(configured_parent);
+        }
+    }
+
+    match configured_parents.as_slice() {
+        [] => Ok(default.to_string()),
+        [configured_parent] => Ok(format!("{configured_parent}/{name}")),
+        _ => Err(AppError::config_error(format!(
+            "repository directory '{}' is represented by multiple configured paths: {}; consolidate them before adding '{name}'",
+            parent.display(),
+            configured_parents
+                .iter()
+                .map(|path| format!("'{path}'"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
     }
 }
 

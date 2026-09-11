@@ -95,6 +95,56 @@ fn add_groups_nested_paths_and_is_idempotent() {
     assert!(!contents.contains("path ="));
 }
 
+#[cfg(unix)]
+#[test]
+fn add_reuses_the_configured_group_for_the_same_directory() {
+    use std::os::unix::fs::symlink;
+
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("group-alias");
+    initialize_repository(&ctx, "Actual/existing", &remote.url());
+    initialize_repository(&ctx, "Actual/kebab", &remote.url());
+    symlink(ctx.workspace().join("Actual"), ctx.workspace().join("Configured")).unwrap();
+    ctx.write_config(&format!(
+        "version = 2\n\n[groups.Configured]\nexisting = \"{}\"\n",
+        remote.url()
+    ));
+
+    ctx.cli()
+        .args(["add", "Actual/kebab"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("+ kebab Configured/kebab"));
+
+    let contents = fs::read_to_string(ctx.config_path()).unwrap();
+    assert_eq!(contents.matches("[groups.Configured]").count(), 1);
+    assert!(!contents.contains("[groups.Actual]"));
+    assert!(contents.contains(&format!("kebab = \"{}\"", remote.url())));
+}
+
+#[cfg(unix)]
+#[test]
+fn add_override_reuses_a_group_from_the_base_config() {
+    use std::os::unix::fs::symlink;
+
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("override-group-alias");
+    initialize_repository(&ctx, "Actual/existing", &remote.url());
+    initialize_repository(&ctx, "Actual/kebab", &remote.url());
+    symlink(ctx.workspace().join("Actual"), ctx.workspace().join("Configured")).unwrap();
+    ctx.write_config(&format!(
+        "version = 2\n\n[groups.Configured]\nexisting = \"{}\"\n",
+        remote.url()
+    ));
+
+    ctx.cli().args(["add", "--override", "Actual/kebab"]).assert().success();
+
+    let contents = fs::read_to_string(ctx.workspace().join("grove.override.toml")).unwrap();
+    assert!(contents.contains("[groups.Configured]"));
+    assert!(!contents.contains("[groups.Actual]"));
+    assert!(contents.contains(&format!("kebab = \"{}\"", remote.url())));
+}
+
 #[test]
 fn add_displays_dot_when_the_repository_is_the_grove_root() {
     let ctx = TestContext::new();

@@ -16,6 +16,7 @@ pub(super) fn resolve(tree: LoadedConfigTree) -> Result<ResolvedConfig, AppError
 
     for file in &tree.files {
         validate_version(file)?;
+        validate_group_directories(file, &tree.root_directory)?;
 
         for entry in &file.raw.repositories {
             let name = entry.name.as_str();
@@ -77,6 +78,44 @@ pub(super) fn resolve(tree: LoadedConfigTree) -> Result<ResolvedConfig, AppError
     validate_no_nested_repository_paths(&repositories)?;
 
     Ok(ResolvedConfig::new(tree.root_path, repositories))
+}
+
+fn validate_group_directories(file: &LoadedConfigFile, root: &Path) -> Result<(), AppError> {
+    let mut directories = HashMap::<PathBuf, String>::new();
+
+    for entry in &file.raw.repositories {
+        let Some(group) = entry.group.as_deref() else {
+            continue;
+        };
+        if entry.repository.path.is_some() {
+            continue;
+        }
+
+        let lexical = normalize_lexically(&file.directory.join(group));
+        let resolved = match resolve_operational_path(&lexical, root) {
+            Ok(path) => path,
+            Err(ResolutionError::OutsideRoot) => {
+                return Err(AppError::config_error(format!(
+                    "{}: group directory '{group}' leaves the grove root",
+                    file.path.display()
+                )));
+            }
+            Err(ResolutionError::Io(err)) => return Err(err.into()),
+        };
+
+        if let Some(existing) = directories.get(&resolved) {
+            if existing != group {
+                return Err(AppError::config_error(format!(
+                    "{}: group directories '{existing}' and '{group}' resolve to the same location",
+                    file.path.display()
+                )));
+            }
+        } else {
+            directories.insert(resolved, group.to_string());
+        }
+    }
+
+    Ok(())
 }
 
 fn validate_version(file: &LoadedConfigFile) -> Result<(), AppError> {
