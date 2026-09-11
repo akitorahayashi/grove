@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 
 use super::include::{LoadedConfigFile, LoadedConfigTree};
-use super::resolved::ResolvedConfig;
+use super::resolved::{GroupDirectory, ResolvedConfig};
 use crate::AppError;
 use crate::repositories::{
     BranchName, RemoteUrl, RepositoryDefinition, RepositoryName, ResolutionError,
@@ -10,12 +10,14 @@ use crate::repositories::{
 };
 
 pub(super) fn resolve(tree: LoadedConfigTree) -> Result<ResolvedConfig, AppError> {
+    let mut groups = Vec::new();
     let mut repositories = Vec::new();
     let mut names = HashMap::new();
     let mut paths = HashMap::new();
 
     for file in &tree.files {
         validate_version(file)?;
+        groups.extend(resolve_group_directories(file, &tree.root_directory)?);
 
         for entry in &file.raw.repositories {
             let name = entry.name.as_str();
@@ -76,7 +78,44 @@ pub(super) fn resolve(tree: LoadedConfigTree) -> Result<ResolvedConfig, AppError
 
     validate_no_nested_repository_paths(&repositories)?;
 
-    Ok(ResolvedConfig::new(tree.root_path, repositories))
+    Ok(ResolvedConfig::new(tree.root_path, groups, repositories))
+}
+
+fn resolve_group_directories(
+    file: &LoadedConfigFile,
+    root: &Path,
+) -> Result<Vec<GroupDirectory>, AppError> {
+    let mut directories = HashMap::<PathBuf, String>::new();
+    let mut groups = Vec::new();
+
+    for group in &file.raw.groups {
+        let lexical = normalize_lexically(&file.directory.join(group));
+        let resolved = match resolve_operational_path(&lexical, root) {
+            Ok(path) => path,
+            Err(ResolutionError::OutsideRoot) => {
+                return Err(AppError::config_error(format!(
+                    "{}: group directory '{group}' leaves the grove root",
+                    file.path.display()
+                )));
+            }
+            Err(ResolutionError::Io(err)) => return Err(err.into()),
+        };
+
+        if let Some(existing) = directories.get(&resolved) {
+            if existing != group {
+                return Err(AppError::config_error(format!(
+                    "{}: group directories '{existing}' and '{group}' resolve to the same location",
+                    file.path.display()
+                )));
+            }
+        } else {
+            directories.insert(resolved.clone(), group.to_string());
+        }
+
+        groups.push(GroupDirectory::new(resolved, relative_display(root, &lexical)));
+    }
+
+    Ok(groups)
 }
 
 fn validate_version(file: &LoadedConfigFile) -> Result<(), AppError> {

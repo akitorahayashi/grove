@@ -8,6 +8,7 @@ use crate::AppError;
 pub(super) struct RawConfigFile {
     pub version: Option<u32>,
     pub include: Vec<String>,
+    pub groups: Vec<String>,
     pub repositories: Vec<RawRepositoryEntry>,
 }
 
@@ -89,9 +90,10 @@ pub(super) fn decode(mut root: Table, label: &str) -> Result<RawConfigFile, AppE
     let version = parse_version(root.remove("version"), label)?;
     let include = parse_include(root.remove("include"), label)?;
     let mut repositories = parse_repositories(root.remove("repos"), label)?;
-    repositories.extend(parse_groups(root.remove("groups"), label)?);
+    let (groups, grouped_repositories) = parse_groups(root.remove("groups"), label)?;
+    repositories.extend(grouped_repositories);
 
-    Ok(RawConfigFile { version, include, repositories })
+    Ok(RawConfigFile { version, include, groups, repositories })
 }
 
 fn reject_unknown_root_fields(root: &Table, label: &str) -> Result<(), AppError> {
@@ -137,14 +139,18 @@ fn parse_repositories(
     parse_repository_table(table, None, label)
 }
 
-fn parse_groups(value: Option<Value>, label: &str) -> Result<Vec<RawRepositoryEntry>, AppError> {
+fn parse_groups(
+    value: Option<Value>,
+    label: &str,
+) -> Result<(Vec<String>, Vec<RawRepositoryEntry>), AppError> {
     let Some(value) = value else {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Vec::new()));
     };
     let Value::Table(groups) = value else {
         return Err(AppError::config_error(format!("{label}: field 'groups' must be a table")));
     };
 
+    let mut directories = Vec::new();
     let mut entries = Vec::new();
     for (directory, value) in groups {
         validate_group_directory(&directory, label)?;
@@ -153,9 +159,10 @@ fn parse_groups(value: Option<Value>, label: &str) -> Result<Vec<RawRepositoryEn
                 "{label}: group '{directory}' must be a table"
             )));
         };
+        directories.push(directory.clone());
         entries.extend(parse_repository_table(repositories, Some(&directory), label)?);
     }
-    Ok(entries)
+    Ok((directories, entries))
 }
 
 fn validate_group_directory(directory: &str, label: &str) -> Result<(), AppError> {
