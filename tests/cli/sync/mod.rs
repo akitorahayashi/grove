@@ -370,7 +370,7 @@ fn sync_escapes_control_characters_in_repository_paths() {
     let ctx = TestContext::new();
     let config = ctx.write_config(
         r#"
-version = 1
+version = 2
 
 [repos.blog]
 path = "folder\n\u001b[31m"
@@ -400,7 +400,7 @@ fn sync_rejects_missing_destination_below_symlink_escaping_root() {
         .expect("failed to create escaping symlink");
     let config = ctx.write_config(&format!(
         r#"
-version = 1
+version = 2
 
 [repos.blog]
 path = "escape/blog"
@@ -429,14 +429,14 @@ fn sync_accepts_existing_repository_through_in_root_symlink() {
     let remote = ctx.create_remote("blog");
     std::fs::create_dir(ctx.workspace().join("actual")).unwrap();
     let initial = ctx.write_config(&format!(
-        "version = 1\n[repos.blog]\npath = \"actual/blog\"\nurl = \"{}\"\n",
+        "version = 2\n[repos.blog]\npath = \"actual/blog\"\nurl = \"{}\"\n",
         remote.url()
     ));
     ctx.cli().arg("--config").arg(&initial).arg("sync").assert().success();
     std::os::unix::fs::symlink(ctx.workspace().join("actual"), ctx.workspace().join("alias"))
         .unwrap();
     let aliased = ctx.write_config(&format!(
-        "version = 1\n[repos.blog]\npath = \"alias/blog\"\nurl = \"{}\"\n",
+        "version = 2\n[repos.blog]\npath = \"alias/blog\"\nurl = \"{}\"\n",
         remote.url()
     ));
 
@@ -668,7 +668,7 @@ fn sync_blocks_ahead_and_diverged_default_branches() {
 fn sync_reports_fetch_and_clone_failures() {
     let clone_failure = TestContext::new();
     let config = clone_failure
-        .write_config("version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"/does/not/exist\"\n");
+        .write_config("version = 2\n[repos.blog]\npath = \"blog\"\nurl = \"/does/not/exist\"\n");
     clone_failure
         .cli()
         .arg("--config")
@@ -687,7 +687,7 @@ fn sync_reports_fetch_and_clone_failures() {
         &["remote", "set-url", "origin", "/does/not/exist"],
     );
     let config = fetch_failure
-        .write_config("version = 1\n[repos.blog]\npath = \"blog\"\nurl = \"/does/not/exist\"\n");
+        .write_config("version = 2\n[repos.blog]\npath = \"blog\"\nurl = \"/does/not/exist\"\n");
     fetch_failure
         .cli()
         .arg("--config")

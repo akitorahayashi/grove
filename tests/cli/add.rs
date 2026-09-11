@@ -8,7 +8,7 @@ use crate::harness::{TestContext, run_git};
 #[test]
 fn add_without_a_path_registers_the_current_worktree() {
     let ctx = TestContext::new();
-    ctx.write_config("version = 1\n");
+    ctx.write_config("version = 2\n");
     let remote = ctx.create_remote("backend");
     let repository = initialize_repository(&ctx, "backend", &remote.url());
     let nested = repository.join("nested");
@@ -29,7 +29,7 @@ fn add_without_a_path_registers_the_current_worktree() {
         );
 
     let contents = fs::read_to_string(ctx.config_path()).unwrap();
-    assert!(contents.contains("[repos.backend]\nurl ="));
+    assert!(contents.contains("[repos]\nbackend ="));
     assert!(!contents.contains("path ="));
     ctx.cli().arg("validate").assert().success();
 }
@@ -37,7 +37,7 @@ fn add_without_a_path_registers_the_current_worktree() {
 #[test]
 fn add_preserves_operand_order_and_stops_after_the_first_failure() {
     let ctx = TestContext::new();
-    ctx.write_config("version = 1\n");
+    ctx.write_config("version = 2\n");
     let remote = ctx.create_remote("repositories");
     initialize_repository(&ctx, "first", &remote.url());
     initialize_repository(&ctx, "missing-origin", "");
@@ -58,15 +58,15 @@ fn add_preserves_operand_order_and_stops_after_the_first_failure() {
     assert!(written < failed, "stderr was not emitted in operand order:\n{stderr}");
 
     let contents = fs::read_to_string(ctx.config_path()).unwrap();
-    assert!(contents.contains("[repos.first]"));
-    assert!(!contents.contains("[repos.missing-origin]"));
-    assert!(!contents.contains("[repos.last]"));
+    assert!(contents.contains("first ="));
+    assert!(!contents.contains("missing-origin ="));
+    assert!(!contents.contains("last ="));
 }
 
 #[test]
 fn add_keeps_successful_entries_in_operand_order() {
     let ctx = TestContext::new();
-    ctx.write_config("version = 1\n");
+    ctx.write_config("version = 2\n");
     let remote = ctx.create_remote("ordered");
     initialize_repository(&ctx, "second", &remote.url());
     initialize_repository(&ctx, "first", &remote.url());
@@ -74,13 +74,13 @@ fn add_keeps_successful_entries_in_operand_order() {
     ctx.cli().args(["add", "second", "first"]).assert().success();
 
     let contents = fs::read_to_string(ctx.config_path()).unwrap();
-    assert!(contents.find("[repos.second]").unwrap() < contents.find("[repos.first]").unwrap());
+    assert!(contents.find("second =").unwrap() < contents.find("first =").unwrap());
 }
 
 #[test]
-fn add_writes_custom_paths_and_is_idempotent() {
+fn add_groups_nested_paths_and_is_idempotent() {
     let ctx = TestContext::new();
-    ctx.write_config("version = 1\n");
+    ctx.write_config("version = 2\n");
     let remote = ctx.create_remote("backend");
     initialize_repository(&ctx, "services/backend", &remote.url());
 
@@ -90,14 +90,15 @@ fn add_writes_custom_paths_and_is_idempotent() {
     );
 
     let contents = fs::read_to_string(ctx.config_path()).unwrap();
-    assert_eq!(contents.matches("[repos.backend]").count(), 1);
-    assert!(contents.contains("path = \"services/backend\""));
+    assert_eq!(contents.matches("backend =").count(), 1);
+    assert!(contents.contains("[groups.services]"));
+    assert!(!contents.contains("path ="));
 }
 
 #[test]
 fn add_displays_dot_when_the_repository_is_the_grove_root() {
     let ctx = TestContext::new();
-    ctx.write_config("version = 1\n");
+    ctx.write_config("version = 2\n");
     let remote = ctx.create_remote("root");
     run_git(ctx.workspace(), &["init", "-b", "main"]);
     run_git(ctx.workspace(), &["remote", "add", "origin", &remote.url()]);
@@ -115,7 +116,7 @@ fn add_displays_dot_when_the_repository_is_the_grove_root() {
 #[test]
 fn add_accepts_username_only_ssh_origins() {
     let ctx = TestContext::new();
-    ctx.write_config("version = 1\n");
+    ctx.write_config("version = 2\n");
     initialize_repository(&ctx, "ssh-repository", "ssh://git@example.com/company/repo.git");
 
     ctx.cli().args(["add", "ssh-repository"]).assert().success();
@@ -123,14 +124,14 @@ fn add_accepts_username_only_ssh_origins() {
     assert!(
         fs::read_to_string(ctx.config_path())
             .unwrap()
-            .contains("url = \"ssh://git@example.com/company/repo.git\"")
+            .contains("ssh-repository = \"ssh://git@example.com/company/repo.git\"")
     );
 }
 
 #[test]
 fn add_override_creates_a_versionless_sibling() {
     let ctx = TestContext::new();
-    let base = ctx.write_config_at("custom.toml", "version = 1\n");
+    let base = ctx.write_config_at("custom.toml", "version = 2\n");
     let remote = ctx.create_remote("local");
     initialize_repository(&ctx, "local", &remote.url());
     let override_path = base.canonicalize().unwrap().with_file_name("custom.override.toml");
@@ -141,16 +142,16 @@ fn add_override_creates_a_versionless_sibling() {
         .success()
         .stderr(predicate::str::contains(format!("Config: {}", override_path.display())));
 
-    assert_eq!(fs::read_to_string(base).unwrap(), "version = 1\n");
+    assert_eq!(fs::read_to_string(base).unwrap(), "version = 2\n");
     let contents = fs::read_to_string(override_path).unwrap();
     assert!(!contents.contains("version"));
-    assert!(contents.contains("[repos.local]"));
+    assert!(contents.contains("[repos]\nlocal ="));
 }
 
 #[test]
 fn add_override_dry_run_keeps_both_files_absent_of_changes() {
     let ctx = TestContext::new();
-    ctx.write_config("version = 1\n");
+    ctx.write_config("version = 2\n");
     let remote = ctx.create_remote("planned");
     initialize_repository(&ctx, "planned", &remote.url());
     let override_path = ctx.workspace().join("grove.override.toml");
@@ -161,14 +162,14 @@ fn add_override_dry_run_keeps_both_files_absent_of_changes() {
         .success()
         .stderr(predicate::str::contains("+ planned would add planned"));
 
-    assert_eq!(fs::read_to_string(ctx.config_path()).unwrap(), "version = 1\n");
+    assert_eq!(fs::read_to_string(ctx.config_path()).unwrap(), "version = 2\n");
     assert!(!override_path.exists());
 }
 
 #[test]
 fn add_dry_run_reports_prior_plans_when_a_later_target_fails() {
     let ctx = TestContext::new();
-    ctx.write_config("version = 1\n");
+    ctx.write_config("version = 2\n");
     let remote = ctx.create_remote("dry-run");
     initialize_repository(&ctx, "planned", &remote.url());
     initialize_repository(&ctx, "missing-origin", "");
@@ -177,13 +178,13 @@ fn add_dry_run_reports_prior_plans_when_a_later_target_fails() {
         predicate::str::contains("Stopped: 1 planned, 0 unchanged, 1 failed, 0 not attempted"),
     );
 
-    assert_eq!(fs::read_to_string(ctx.config_path()).unwrap(), "version = 1\n");
+    assert_eq!(fs::read_to_string(ctx.config_path()).unwrap(), "version = 2\n");
 }
 
 #[test]
 fn add_rejects_unsafe_origin_without_disclosing_it() {
     let ctx = TestContext::new();
-    ctx.write_config("version = 1\n");
+    ctx.write_config("version = 2\n");
     let repository = initialize_repository(
         &ctx,
         "unsafe-origin",
@@ -196,13 +197,13 @@ fn add_rejects_unsafe_origin_without_disclosing_it() {
             .and(predicate::str::contains("hidden").not()),
     );
 
-    assert_eq!(fs::read_to_string(ctx.config_path()).unwrap(), "version = 1\n");
+    assert_eq!(fs::read_to_string(ctx.config_path()).unwrap(), "version = 2\n");
 }
 
 #[test]
 fn add_rejects_invalid_names_and_repositories_outside_the_grove_root() {
     let ctx = TestContext::new();
-    ctx.write_config("version = 1\n");
+    ctx.write_config("version = 2\n");
     let remote = ctx.create_remote("rejected");
     initialize_repository(&ctx, "invalid name", &remote.url());
     let outside = ctx.root().join("outside");
@@ -222,19 +223,19 @@ fn add_rejects_invalid_names_and_repositories_outside_the_grove_root() {
         .failure()
         .stderr(predicate::str::contains("leaves the grove root"));
 
-    assert_eq!(fs::read_to_string(ctx.config_path()).unwrap(), "version = 1\n");
+    assert_eq!(fs::read_to_string(ctx.config_path()).unwrap(), "version = 2\n");
 }
 
 #[test]
 fn add_short_alias_registers_a_repository() {
     let ctx = TestContext::new();
-    ctx.write_config("version = 1\n");
+    ctx.write_config("version = 2\n");
     let remote = ctx.create_remote("aliased");
     initialize_repository(&ctx, "aliased", &remote.url());
 
     ctx.cli().args(["a", "aliased"]).assert().success();
 
-    assert!(fs::read_to_string(ctx.config_path()).unwrap().contains("[repos.aliased]"));
+    assert!(fs::read_to_string(ctx.config_path()).unwrap().contains("aliased ="));
 }
 
 fn initialize_repository(ctx: &TestContext, relative: &str, origin: &str) -> PathBuf {

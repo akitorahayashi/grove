@@ -82,7 +82,7 @@ mod tests {
         assert_eq!(report.created_path(), directory.path().join("grove.toml"));
         let contents =
             fs::read_to_string(report.created_path()).expect("failed to read created config");
-        assert!(contents.contains("version = 1"));
+        assert!(contents.contains("version = 2"));
     }
 
     #[test]
@@ -104,7 +104,7 @@ mod tests {
         fs::write(&path, "").expect("failed to create partial file");
 
         let error =
-            write_template(FailingWriter, &path, b"version = 1\n").expect_err("write should fail");
+            write_template(FailingWriter, &path, b"version = 2\n").expect_err("write should fail");
 
         assert_eq!(error.io_error().map(io::Error::kind), Some(io::ErrorKind::WriteZero));
         assert!(!path.exists());
@@ -117,7 +117,7 @@ mod tests {
         fs::create_dir(&path).expect("failed to create cleanup-blocking directory");
 
         let error =
-            write_template(FailingWriter, &path, b"version = 1\n").expect_err("write should fail");
+            write_template(FailingWriter, &path, b"version = 2\n").expect_err("write should fail");
 
         assert!(error.to_string().contains("also failed to remove the partial file"));
         assert!(path.is_dir());

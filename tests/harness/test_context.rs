@@ -41,12 +41,12 @@ impl TestContext {
         url: &str,
         default_branch: Option<&str>,
     ) -> PathBuf {
-        let configured_branch = default_branch
-            .map(|branch| format!("default_branch = \"{branch}\"\n"))
-            .unwrap_or_default();
-        self.write_config(&format!(
-            "version = 1\n[repos.{name}]\npath = \"{name}\"\nurl = \"{url}\"\n{configured_branch}"
-        ))
+        match default_branch {
+            Some(branch) => self.write_config(&format!(
+                "version = 2\n[repos.{name}]\nurl = \"{url}\"\ndefault_branch = \"{branch}\"\n"
+            )),
+            None => self.write_config(&format!("version = 2\n[repos]\n{name} = \"{url}\"\n")),
+        }
     }
 
     pub fn write_config_at(&self, relative_path: &str, contents: &str) -> PathBuf {

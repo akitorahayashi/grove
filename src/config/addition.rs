@@ -126,12 +126,11 @@ impl EditSession {
         }
 
         let display_path = relative_path(&self.root_directory, &repository_path)?;
-        let configured_path = (display_path != name.as_str()).then_some(display_path.as_str());
         let mut candidate = self.document.clone();
         insert_repository(
             &mut candidate,
             name.as_str(),
-            configured_path,
+            &display_path,
             url.as_config_value(),
             &self.destination,
         )?;
@@ -217,6 +216,26 @@ fn relative_path(root: &Path, repository: &Path) -> Result<String, AppError> {
 fn insert_repository(
     document: &mut DocumentMut,
     name: &str,
+    display_path: &str,
+    url: &str,
+    destination: &Path,
+) -> Result<(), AppError> {
+    if display_path == name {
+        return insert_root_repository(document, name, None, url, destination);
+    }
+    if let Some((group, leaf)) = display_path.rsplit_once('/')
+        && leaf == name
+        && !group.is_empty()
+    {
+        return insert_group_repository(document, group, name, url, destination);
+    }
+
+    insert_root_repository(document, name, Some(display_path), url, destination)
+}
+
+fn insert_root_repository(
+    document: &mut DocumentMut,
+    name: &str,
     path: Option<&str>,
     url: &str,
     destination: &Path,
@@ -233,6 +252,10 @@ fn insert_repository(
         .ok_or_else(|| AppError::internal("validated configuration lost its repos table"))?;
     match repositories {
         Item::Table(repositories) => {
+            if path.is_none() && repositories.iter().all(|(_, item)| !item.is_table()) {
+                repositories.insert(name, value(url));
+                return Ok(());
+            }
             let mut repository = Table::new();
             if let Some(path) = path {
                 repository.insert("path", value(path));
@@ -241,6 +264,10 @@ fn insert_repository(
             repositories.insert(name, Item::Table(repository));
         }
         Item::Value(Value::InlineTable(repositories)) => {
+            if path.is_none() {
+                repositories.insert(name, Value::from(url));
+                return Ok(());
+            }
             let mut repository = InlineTable::new();
             if let Some(path) = path {
                 repository.insert("path", Value::from(path));
@@ -251,6 +278,77 @@ fn insert_repository(
         _ => {
             return Err(AppError::config_error(format!(
                 "{}: field 'repos' must be a table",
+                destination.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn insert_group_repository(
+    document: &mut DocumentMut,
+    group: &str,
+    name: &str,
+    url: &str,
+    destination: &Path,
+) -> Result<(), AppError> {
+    if !document.as_table().contains_key("groups") {
+        let mut groups = Table::new();
+        groups.set_implicit(true);
+        document.as_table_mut().insert("groups", Item::Table(groups));
+    }
+
+    let groups = document
+        .as_table_mut()
+        .get_mut("groups")
+        .ok_or_else(|| AppError::internal("validated configuration lost its groups table"))?;
+    match groups {
+        Item::Table(groups) => {
+            if !groups.contains_key(group) {
+                groups.insert(group, Item::Table(Table::new()));
+            }
+            let repositories = groups.get_mut(group).ok_or_else(|| {
+                AppError::internal("inserted configuration group could not be read")
+            })?;
+            match repositories {
+                Item::Table(repositories) => {
+                    if repositories.iter().all(|(_, item)| !item.is_table()) {
+                        repositories.insert(name, value(url));
+                    } else {
+                        let mut repository = Table::new();
+                        repository.insert("url", value(url));
+                        repositories.insert(name, Item::Table(repository));
+                    }
+                }
+                Item::Value(Value::InlineTable(repositories)) => {
+                    repositories.insert(name, Value::from(url));
+                }
+                _ => {
+                    return Err(AppError::config_error(format!(
+                        "{}: group '{group}' must be a table",
+                        destination.display()
+                    )));
+                }
+            }
+        }
+        Item::Value(Value::InlineTable(groups)) => {
+            if !groups.contains_key(group) {
+                groups.insert(group, Value::InlineTable(InlineTable::new()));
+            }
+            let repositories = groups.get_mut(group).ok_or_else(|| {
+                AppError::internal("inserted inline configuration group could not be read")
+            })?;
+            let Value::InlineTable(repositories) = repositories else {
+                return Err(AppError::config_error(format!(
+                    "{}: group '{group}' must be a table",
+                    destination.display()
+                )));
+            };
+            repositories.insert(name, Value::from(url));
+        }
+        _ => {
+            return Err(AppError::config_error(format!(
+                "{}: field 'groups' must be a table",
                 destination.display()
             )));
         }
@@ -336,7 +434,7 @@ mod tests {
         fs::create_dir(&repository).unwrap();
         fs::write(
             &config,
-            "# retained\nversion = 1\n\n[repos.frontend]\nurl = 'git@example.com:frontend.git' # retained\n",
+            "# retained\nversion = 2\n\n[repos.frontend]\nurl = 'git@example.com:frontend.git' # retained\n",
         )
         .unwrap();
         let mut session = EditSession::open(&config, false, false).unwrap();
@@ -355,7 +453,7 @@ mod tests {
         );
         let contents = fs::read_to_string(config).unwrap();
         assert!(contents.starts_with(
-            "# retained\nversion = 1\n\n[repos.frontend]\nurl = 'git@example.com:frontend.git' # retained\n"
+            "# retained\nversion = 2\n\n[repos.frontend]\nurl = 'git@example.com:frontend.git' # retained\n"
         ));
         assert!(contents.contains("[repos.backend]\nurl = \"git@example.com:backend.git\""));
     }
@@ -364,7 +462,7 @@ mod tests {
     fn dry_run_accumulates_candidates_without_writing() {
         let root = TempDir::new().unwrap();
         let config = root.path().join("grove.toml");
-        fs::write(&config, "version = 1\n").unwrap();
+        fs::write(&config, "version = 2\n").unwrap();
         let first = root.path().join("first");
         let second = root.path().join("second");
         fs::create_dir(&first).unwrap();
@@ -386,14 +484,14 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(fs::read_to_string(config).unwrap(), "version = 1\n");
+        assert_eq!(fs::read_to_string(config).unwrap(), "version = 2\n");
     }
 
     #[test]
     fn creates_a_versionless_override_only_after_a_successful_addition() {
         let root = TempDir::new().unwrap();
         let config = root.path().join("grove.toml");
-        fs::write(&config, "version = 1\n").unwrap();
+        fs::write(&config, "version = 2\n").unwrap();
         let repository = root.path().join("repo");
         fs::create_dir(&repository).unwrap();
         let mut session = EditSession::open(&config, true, false).unwrap();
@@ -410,7 +508,7 @@ mod tests {
 
         let contents = fs::read_to_string(override_path).unwrap();
         assert!(!contents.contains("version"));
-        assert!(contents.contains("[repos.repo]"));
+        assert!(contents.contains("[repos]\nrepo = \"git@example.com:repo.git\""));
     }
 
     #[test]
@@ -421,7 +519,7 @@ mod tests {
         fs::create_dir(&repository).unwrap();
         fs::write(
             &config,
-            "version = 1\nrepos = { frontend = { url = 'git@example.com:frontend.git' } } # retained\n",
+            "version = 2\nrepos = { frontend = { url = 'git@example.com:frontend.git' } } # retained\n",
         )
         .unwrap();
         let mut session = EditSession::open(&config, false, false).unwrap();
@@ -436,7 +534,7 @@ mod tests {
 
         let contents = fs::read_to_string(config).unwrap();
         assert!(contents.contains("frontend = { url = 'git@example.com:frontend.git' }"));
-        assert!(contents.contains("backend = { url = \"git@example.com:backend.git\" }"));
+        assert!(contents.contains("backend = \"git@example.com:backend.git\""));
         assert!(contents.ends_with("# retained\n"));
     }
 
@@ -448,7 +546,7 @@ mod tests {
         fs::create_dir(&repository).unwrap();
         fs::write(
             &config,
-            "version = 1\nrepos.frontend.url = 'git@example.com:frontend.git' # retained\n",
+            "version = 2\nrepos.frontend.url = 'git@example.com:frontend.git' # retained\n",
         )
         .unwrap();
         let mut session = EditSession::open(&config, false, false).unwrap();
@@ -474,7 +572,7 @@ mod tests {
         let repository = root.path().join("self-managed");
         fs::create_dir(&repository).unwrap();
         let config = repository.join("grove.toml");
-        fs::write(&config, "version = 1\n").unwrap();
+        fs::write(&config, "version = 2\n").unwrap();
         let mut session = EditSession::open(&config, false, false).unwrap();
 
         session
@@ -494,7 +592,7 @@ mod tests {
         let config = root.path().join("grove.toml");
         let repository = root.path().join("company.service");
         fs::create_dir(&repository).unwrap();
-        fs::write(&config, "version = 1\n").unwrap();
+        fs::write(&config, "version = 2\n").unwrap();
         let mut session = EditSession::open(&config, false, false).unwrap();
 
         session
@@ -505,7 +603,35 @@ mod tests {
             )
             .unwrap();
 
-        assert!(fs::read_to_string(config).unwrap().contains("[repos.\"company.service\"]"));
+        assert!(
+            fs::read_to_string(config)
+                .unwrap()
+                .contains("\"company.service\" = \"git@example.com:company/service.git\"")
+        );
+    }
+
+    #[test]
+    fn groups_a_repository_by_its_parent_directory() {
+        let root = TempDir::new().unwrap();
+        let config = root.path().join("grove.toml");
+        let repository = root.path().join("Clients").join("acme").join("backend");
+        fs::create_dir_all(&repository).unwrap();
+        fs::write(&config, "version = 2\n").unwrap();
+        let mut session = EditSession::open(&config, false, false).unwrap();
+
+        session
+            .add(
+                RepositoryName::new("backend").unwrap(),
+                &repository,
+                RemoteUrl::new("git@example.com:backend.git").unwrap(),
+            )
+            .unwrap();
+
+        assert!(
+            fs::read_to_string(config)
+                .unwrap()
+                .contains("[groups.\"Clients/acme\"]\nbackend = \"git@example.com:backend.git\"")
+        );
     }
 
     #[test]
@@ -547,7 +673,7 @@ mod tests {
         let config = root.path().join("grove.toml");
         let repository = root.path().join("repo");
         fs::create_dir(&repository).unwrap();
-        fs::write(&config, "version = 1\n").unwrap();
+        fs::write(&config, "version = 2\n").unwrap();
         fs::set_permissions(&config, fs::Permissions::from_mode(0o640)).unwrap();
         let mut session = EditSession::open(&config, false, false).unwrap();
 
@@ -571,7 +697,7 @@ mod tests {
         let config = root.path().join("grove.toml");
         let repository = root.path().join("repo");
         fs::create_dir(&repository).unwrap();
-        fs::write(&config, "version = 1\n").unwrap();
+        fs::write(&config, "version = 2\n").unwrap();
         let mut session = EditSession::open(&config, true, false).unwrap();
 
         session
@@ -597,7 +723,7 @@ mod tests {
         let override_link = root.path().join("grove.override.toml");
         let repository = root.path().join("repo");
         fs::create_dir(&repository).unwrap();
-        fs::write(&config, "version = 1\n").unwrap();
+        fs::write(&config, "version = 2\n").unwrap();
         fs::write(&override_target, "").unwrap();
         symlink(&override_target, &override_link).unwrap();
         let mut session = EditSession::open(&config, true, false).unwrap();
@@ -611,14 +737,18 @@ mod tests {
             .unwrap();
 
         assert!(fs::symlink_metadata(override_link).unwrap().file_type().is_symlink());
-        assert!(fs::read_to_string(override_target).unwrap().contains("[repos.repo]"));
+        assert!(
+            fs::read_to_string(override_target)
+                .unwrap()
+                .contains("[repos]\nrepo = \"git@example.com:repo.git\"")
+        );
     }
 
     #[test]
     fn edit_session_locks_the_selected_base_directory() {
         let root = TempDir::new().unwrap();
         let config = root.path().join("grove.toml");
-        fs::write(&config, "version = 1\n").unwrap();
+        fs::write(&config, "version = 2\n").unwrap();
         let session = EditSession::open(&config, false, false).unwrap();
         let competing = fs::File::open(root.path()).unwrap();
 
@@ -637,7 +767,7 @@ mod tests {
         let target_directory = TempDir::new().unwrap();
         let config = root.path().join("grove.toml");
         let override_target = target_directory.path().join("local.toml");
-        fs::write(&config, "version = 1\n").unwrap();
+        fs::write(&config, "version = 2\n").unwrap();
         fs::write(&override_target, "").unwrap();
         symlink(&override_target, root.path().join("grove.override.toml")).unwrap();
 
