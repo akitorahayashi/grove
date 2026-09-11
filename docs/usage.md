@@ -5,6 +5,10 @@
 ```bash
 gv --version
 gv init
+gv add path/to/repository
+gv add repository-a repository-b
+gv add --override path/to/repository
+gv add --dry-run path/to/repository
 gv validate
 
 gv status
@@ -30,6 +34,9 @@ gv cache clean frontend
 ```
 
 `gv init`, with the alias `gv i`, creates `grove.toml` in the current directory.
+`gv add`, with the alias `gv a`, registers existing Git worktrees in the selected
+configuration. With no path it registers the worktree containing the current
+directory.
 `gv validate`, with the alias `gv vl`, checks `grove.toml` without inspecting
 repositories.
 
@@ -41,6 +48,37 @@ Commands that read configuration search the current directory and its ancestors
 for `grove.toml`, and `--config <path>` addresses one directly. Configuration
 discovery, file schema, and validation rules are documented in
 [configuration](config.md).
+
+## Add
+
+`gv add [<path>...]` resolves the configuration once from the invocation's
+current directory, then processes paths sequentially in operand order. Each path
+must be a directory inside a non-bare Git worktree; a path below the worktree root
+registers that root. Omitting all paths is equivalent to `gv add .`. Dirty and
+detached worktrees are accepted, and the command performs no network access.
+
+The repository name is the canonical worktree root's directory name. It must
+satisfy grove's repository-name rules; the command never guesses another name.
+The configured path is relative to the grove root and is omitted when it equals
+the name. The URL is copied from `remote.origin.url`, while `default_branch` is
+left absent. Username-only `ssh://user@host/...` and SCP-like SSH origins are
+accepted. A missing origin, an SSH password, HTTP(S) userinfo, a secret query
+parameter, or a relative local URL stops the command with recovery guidance.
+
+An already configured canonical path and URL is an unchanged success. A name
+collision or a path whose URL differs is a failure. Earlier successful operands
+remain written, failures before atomic replacement leave the current operand
+unchanged, and later operands are not attempted. If synchronizing the parent
+directory fails after replacement, the current operand is reported as written
+with unconfirmed durability and processing stops. Logs and the stop summary use
+stderr; stdout remains empty.
+
+`gv add --override` writes to the selected base file's sibling override. A
+missing override is created only when the first repository is successfully
+added, without a `version` field. The option selects the destination and does not
+permit replacing an existing definition. `gv add --dry-run` performs the same
+ordered probes, collision checks, and prospective configuration validation in
+memory without creating or changing either file.
 
 ## Status
 

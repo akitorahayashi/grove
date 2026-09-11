@@ -29,6 +29,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    #[command(visible_alias = "a", about = "Add existing Git repositories to grove.toml")]
+    Add(commands::add::AddCommand),
     #[command(visible_alias = "c", about = "Inspect and clean the local clone cache")]
     Cache(commands::cache::CacheCommand),
     #[command(
@@ -88,6 +90,7 @@ fn run_with_args(args: impl IntoIterator<Item = OsString>, output: &mut Output<'
     };
 
     let result = match cli.command {
+        Commands::Add(command) => commands::add::run(cli.config, command, output),
         Commands::Cache(command) => commands::cache::run(cli.config, command, output),
         Commands::Clone(command) => commands::clone::run(cli.config, command, output),
         Commands::Init(command) => commands::init::run(cli.config, command, output),

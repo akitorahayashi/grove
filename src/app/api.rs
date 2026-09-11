@@ -4,7 +4,7 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 use crate::AppError;
-use crate::app::{AppContext, cache, clone, init, refresh, status, sync, validate};
+use crate::app::{AppContext, add, cache, clone, init, refresh, status, sync, validate};
 use crate::git::CommandGitClient;
 use crate::phases::EventSink;
 
@@ -68,6 +68,20 @@ pub(crate) fn cache_clean(
 
 pub(crate) fn init(directory: PathBuf) -> Result<init::Report, AppError> {
     init::execute(&directory)
+}
+
+pub(crate) fn add_with_events<F>(
+    config_path: PathBuf,
+    cwd: PathBuf,
+    paths: Vec<PathBuf>,
+    options: add::Options,
+    on_event: F,
+) -> Result<add::Report, AppError>
+where
+    F: FnMut(add::Event<'_>) -> Result<(), AppError>,
+{
+    let ctx = default_context();
+    add::execute(&ctx, &config_path, &cwd, &paths, options, on_event)
 }
 
 pub(crate) fn refresh_with_events(

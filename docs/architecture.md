@@ -24,6 +24,7 @@ src/
     mod.rs
     output.rs
     commands/
+      add.rs
       mod.rs
       cache/
         mod.rs
@@ -42,6 +43,7 @@ src/
       report.rs
       table.rs
   app/
+    add.rs
     api.rs
     cache/
       mod.rs
@@ -76,6 +78,7 @@ src/
     slots.rs
     workers.rs
   config/
+    addition.rs
     discovery.rs
     file.rs
     include.rs
@@ -120,7 +123,8 @@ status and cache listings, which emit styling unconditionally and let `output`
 strip ANSI when the destination or environment calls for plain text.
 Configuration-reading subcommands resolve the `grove.toml` path before invoking
 their use case and name a file that discovery found above the current directory.
-Subcommands return completion or error values. The
+Add always names its resolved write destination and streams one ordered result
+per operand to stderr. Subcommands return completion or error values. The
 crate-root `cli` function returns `ExitCode`; `main` is the sole process
 termination boundary. Output write failures propagate, and a closed stdout pipe
 has non-panicking handling.
@@ -133,7 +137,9 @@ without embedding command logic. Sync has check, clone/fetch preparation, update
 seeding, and optional zoxide phases. Refresh has check, fetch, and
 default-branch refresh phases. Status inspects repositories through bounded
 parallel workers. Fetching status additionally keys workers by Git common
-directory. Results retain selection order. Refresh blocks selected linked
+directory. Add resolves worktree roots and origins sequentially, commits each
+valid configuration addition independently, and stops after its first failed
+entry. Results retain selection order. Refresh blocks selected linked
 worktrees that would finish on the same default branch. The cache use case lists
 and removes cache entries.
 
@@ -174,7 +180,11 @@ Discovery itself never treats a standalone override as a root. It rejects
 schema violations, unsupported versions, duplicate or nested includes, invalid
 names and branch refs, duplicate or nested repository identities, absolute
 paths, paths outside the canonical grove root, and an override that exists but
-cannot be resolved.
+cannot be resolved. Its addition session holds the selected base-directory lock,
+edits TOML without changing unrelated formatting, validates prospective source
+contents through the normal loader, and atomically replaces one base or override
+destination. Non-cooperating filesystem actors retain the residual race between
+the final content check and replacement.
 
 `repositories` owns validated repository values. `RemoteUrl` exposes raw text
 only through its process-argument accessor; `Display` and `Debug` are redacted,
@@ -184,7 +194,8 @@ appends the nonexistent suffix. In-root aliases resolve to one operational
 identity while retaining the configured display path.
 
 `git` owns Git availability, strict probe grammars, progress parsing, clone and
-fetch execution, and default-branch mutation. `command` owns the common process
+fetch execution, worktree-root and origin discovery for configuration additions,
+and default-branch mutation. `command` owns the common process
 runner and bounded progress diagnostics; `probe`, `cache_entry`, and
 `branch_update` own their corresponding command families. Worktree branch and
 cleanliness come from one Porcelain v2 observation. Local and remote

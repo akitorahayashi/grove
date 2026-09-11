@@ -88,6 +88,27 @@ impl RepositoryProbe for CommandGitClient {
         }
     }
 
+    fn worktree_root(&self, repository: &Path) -> Result<Option<PathBuf>, AppError> {
+        if !self.is_work_tree(repository)? {
+            return Ok(None);
+        }
+
+        let args = ["rev-parse", "--show-toplevel"];
+        let output = self.git_required(repository, &args)?;
+        let value = strict_output_line(repository, &args, &output)?;
+        let path = PathBuf::from(value);
+        if !path.is_absolute() {
+            return Err(malformed_output(repository, &args, "non-absolute path"));
+        }
+        let path = path.canonicalize().map_err(|err| {
+            io::Error::new(
+                err.kind(),
+                format!("failed to resolve Git worktree root '{}': {err}", path.display()),
+            )
+        })?;
+        Ok(Some(path))
+    }
+
     fn worktree_status(&self, repository: &Path) -> Result<Option<WorktreeStatus>, AppError> {
         let args = ["status", "--porcelain=v2", "--branch", "--no-ahead-behind"];
         let output = self.git_probe(repository, &args)?;
@@ -267,6 +288,21 @@ fn malformed_output(repository: &Path, args: &[&str], output: &str) -> AppError 
     AppError::git_command_failed(format_probe(repository, args), description)
 }
 
+fn strict_output_line(
+    repository: &Path,
+    args: &[&str],
+    output: &Output,
+) -> Result<String, AppError> {
+    let bytes = output.stdout.strip_suffix(b"\n").unwrap_or(&output.stdout);
+    let bytes = bytes.strip_suffix(b"\r").unwrap_or(bytes);
+    if bytes.is_empty() || bytes.contains(&b'\n') || bytes.contains(&b'\r') {
+        return Err(malformed_output(repository, args, "invalid line count"));
+    }
+    std::str::from_utf8(bytes)
+        .map(str::to_string)
+        .map_err(|_| malformed_output(repository, args, "non-UTF-8 output"))
+}
+
 pub(super) fn parse_git_version(output: &str) -> Option<(u32, u32, u32)> {
     let value = output.trim().strip_prefix("git version ")?.split_whitespace().next()?;
     let mut parts = value.split('.');
@@ -308,6 +344,30 @@ mod tests {
             client.common_directory(&main).unwrap(),
             client.common_directory(&linked).unwrap()
         );
+    }
+
+    #[test]
+    fn worktree_root_resolves_a_subdirectory() {
+        let root = TempDir::new().unwrap();
+        let repository = root.path().join("repo");
+        initialize_committed_repository(&repository);
+        let nested = repository.join("nested");
+        std::fs::create_dir(&nested).unwrap();
+
+        let resolved = CommandGitClient::default().worktree_root(&nested).unwrap();
+
+        assert_eq!(resolved, Some(repository.canonicalize().unwrap()));
+    }
+
+    #[test]
+    fn worktree_root_distinguishes_non_repository_and_bare_repository() {
+        let root = TempDir::new().unwrap();
+        let bare = root.path().join("bare.git");
+        run_git(root.path(), &["init", "--bare", bare.to_str().unwrap()]);
+        let client = CommandGitClient::default();
+
+        assert_eq!(client.worktree_root(root.path()).unwrap(), None);
+        assert_eq!(client.worktree_root(&bare).unwrap(), None);
     }
 
     #[test]

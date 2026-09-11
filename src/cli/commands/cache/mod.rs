@@ -84,7 +84,7 @@ fn run_clean(
     // outside a grove root.
     let config = match repositories.is_empty() {
         true => None,
-        false => Some(super::resolve_config(config, output)?),
+        false => Some(super::resolve_config(config, super::ConfigNotice::WhenAscended, output)?),
     };
     let report = api::cache_clean(config, repositories)?;
     let removed = report.removed();

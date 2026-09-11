@@ -43,6 +43,31 @@ validate` is the exception, always naming the file on stdout in its summary.
 writes to the current directory, and `gv clone`, `gv cache list`, and
 `gv cache clean` without repository names read no configuration.
 
+## Adding repositories
+
+`gv add` resolves one base configuration from the invocation's current directory
+or `--config`, regardless of the repository paths supplied. It adds each existing
+Git worktree to that base file in operand order. `--override` changes the
+destination to the base file's sibling override; it does not make an override
+file independently discoverable or replace a conflicting definition.
+
+Generated names come from canonical worktree directory names. Generated paths
+are relative to the base file's directory, use `/` separators, and are omitted
+when the name already supplies the same path. The origin URL is stored without a
+`default_branch`. Username-only `ssh://user@host/...` URLs and SCP-like SSH URLs
+are accepted. SSH URLs containing a password, HTTP(S) URLs containing userinfo,
+secret query parameters, and relative local URLs are rejected rather than
+rewritten.
+
+The destination is edited without reordering or reformatting existing content.
+A document whose representation cannot be preserved is rejected with guidance
+to add the entry manually. Each prospective edit is validated through the same
+base, override, include, and catalog validation as a normal load. A successful
+entry atomically replaces the destination and preserves its permissions; a new
+override is owner-only and omits `version`. A failure to synchronize the parent
+directory after replacement is reported as written with unconfirmed durability
+and stops further operands.
+
 ## Path resolution
 
 Explicit paths are resolved relative to the `grove.toml` file that defines

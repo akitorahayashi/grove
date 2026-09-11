@@ -457,6 +457,10 @@ mod tests {
             Ok(true)
         }
 
+        fn worktree_root(&self, repository: &Path) -> Result<Option<PathBuf>, AppError> {
+            Ok(Some(repository.to_path_buf()))
+        }
+
         fn worktree_status(&self, _repository: &Path) -> Result<Option<WorktreeStatus>, AppError> {
             if let Some(barrier) = &self.worktree_barrier {
                 barrier.wait();

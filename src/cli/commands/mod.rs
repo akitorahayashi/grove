@@ -1,5 +1,6 @@
 //! Subcommand implementations.
 
+pub(in crate::cli) mod add;
 pub(in crate::cli) mod cache;
 pub(in crate::cli) mod clone;
 pub(in crate::cli) mod init;
@@ -22,13 +23,23 @@ use crate::cli::tty::report::write_line;
 /// it. Discovery that ascended above the current directory names the file it
 /// settled on, so a root picked up from an unexpected depth acts announced
 /// rather than silently.
+#[derive(Clone, Copy)]
+pub(in crate::cli) enum ConfigNotice {
+    WhenAscended,
+    Never,
+}
+
 pub(in crate::cli) fn resolve_config(
     explicit: Option<PathBuf>,
+    notice: ConfigNotice,
     output: &mut Output<'_>,
 ) -> Result<PathBuf, AppError> {
     let discovered = explicit.is_none();
     let path = config::locate(explicit.as_deref())?;
-    if discovered && path.parent() != Some(std::env::current_dir()?.canonicalize()?.as_path()) {
+    if matches!(notice, ConfigNotice::WhenAscended)
+        && discovered
+        && path.parent() != Some(std::env::current_dir()?.canonicalize()?.as_path())
+    {
         let displayed = terminal_text(&path.display().to_string());
         write_line(output, format_args!("{}", format!("Config: {displayed}").dimmed()))?;
     }

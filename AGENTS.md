@@ -5,7 +5,8 @@
 `grove` is a Rust CLI, invoked as `gv`, that manages the multiple Git
 repositories declared in `grove.toml`. It clones missing repositories through a
 local object cache, reports repository state, and fast-forwards existing
-repositories' default branches through the system `git` command. The crate ships
+repositories' default branches through the system `git` command. Existing Git
+worktrees can be registered in the configuration with `gv add`. The crate ships
 both the binary and a library whose supported surface is the `src/lib.rs` facade.
 
 ## Directory Structure
@@ -21,7 +22,7 @@ src/
   app/           One use case per subcommand, plus the default dependency wiring, the external-boundary context, and the report row sync and refresh share
   cache/         The local clone cache store: entry layout, identity keying, locking, placement, seeding
   phases/        Bounded-parallel phase execution shared by the repository use cases
-  config/        grove.toml discovery, sibling override merging, include loading, and validation
+  config/        grove.toml discovery, format-preserving additions, override/include loading, and validation
   repositories/  Validated repository values: name, path, URL, branch, selection
   git/           The system `git` boundary: probes, process runner, cache entries, branch updates
   zoxide/        The optional zoxide boundary
@@ -53,6 +54,8 @@ domain depends on `app/` or `cli/`.
   and never spawns threads itself.
 - `git stash`, `git reset --hard`, `git rebase`, `git clean`, forced checkout,
   and forced push are never issued.
+- Configuration additions preserve existing TOML formatting, validate the
+  prospective merged tree, and replace one destination atomically.
 
 ## Testing
 

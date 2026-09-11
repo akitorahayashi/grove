@@ -1,3 +1,4 @@
+pub(crate) mod add;
 pub(crate) mod api;
 pub(crate) mod cache;
 pub(crate) mod clone;
