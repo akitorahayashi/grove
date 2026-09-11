@@ -8,9 +8,8 @@
 gv init
 ```
 
-Edit `grove.toml`: uncomment one `[repos.<name>]` block (or add your own) and
-replace its `REPLACE_WITH_*` placeholders. See
-[configuration](docs/config.md) for the schema.
+Register existing repositories with `gv add`, or edit `grove.toml` directly.
+See [configuration](docs/config.md) for the schema.
 
 An existing local Git repository can also be registered from the grove root:
 

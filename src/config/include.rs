@@ -103,6 +103,7 @@ fn load_one(
         // (unknown field, wrong type) is attributed to it, not to the base
         // file it's about to merge into.
         file::decode(override_table.clone(), &override_label)?;
+        file::expand_repository_strings(&mut table);
         file::merge_tables(&mut table, override_table);
     }
 

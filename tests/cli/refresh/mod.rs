@@ -52,7 +52,7 @@ fn refresh_alias_updates_only_selected_repository_and_stays_on_default_branch() 
     let second = ctx.create_remote("second");
     let config = ctx.write_config(&format!(
         r#"
-version = 1
+version = 2
 
 [repos.first]
 path = "first"
@@ -174,7 +174,7 @@ fn refresh_processes_independent_repositories_after_a_skip() {
     let ready = ctx.create_remote("ready");
     let config = ctx.write_config(&format!(
         r#"
-version = 1
+version = 2
 
 [repos.dirty]
 path = "dirty"
@@ -234,7 +234,7 @@ fn refresh_blocks_ahead_and_diverged_branches_before_switching() {
     let diverged = ctx.create_remote("diverged");
     let config = ctx.write_config(&format!(
         r#"
-version = 1
+version = 2
 
 [repos.ahead]
 path = "ahead"
@@ -331,7 +331,7 @@ fn refresh_reports_invalid_destinations_origin_and_default_branch() {
 
     let config = ctx.write_config(&format!(
         r#"
-version = 1
+version = 2
 
 [repos.not-git]
 path = "not-git"

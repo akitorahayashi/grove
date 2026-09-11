@@ -59,11 +59,14 @@ detached worktrees are accepted, and the command performs no network access.
 
 The repository name is the canonical worktree root's directory name. It must
 satisfy grove's repository-name rules; the command never guesses another name.
-The configured path is relative to the grove root and is omitted when it equals
-the name. The URL is copied from `remote.origin.url`, while `default_branch` is
-left absent. Username-only `ssh://user@host/...` and SCP-like SSH origins are
-accepted. A missing origin, an SSH password, HTTP(S) userinfo, a secret query
-parameter, or a relative local URL stops the command with recovery guidance.
+Repositories directly below the configuration directory become URL entries in
+`repos`; deeper repositories become URL entries in the group named by their
+relative parent directory. A worktree at the configuration root carries an
+explicit `path = "."`. The URL is copied from `remote.origin.url`, while
+`default_branch` is left absent. Username-only `ssh://user@host/...` and
+SCP-like SSH origins are accepted. A missing origin, an SSH password, HTTP(S)
+userinfo, a secret query parameter, or a relative local URL stops the command
+with recovery guidance.
 
 An already configured canonical path and URL is an unchanged success. A name
 collision or a path whose URL differs is a failure. Earlier successful operands

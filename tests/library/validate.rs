@@ -5,7 +5,7 @@ fn validate_returns_config_summary() {
     let ctx = TestContext::new();
     let config = ctx.write_config(
         r#"
-version = 1
+version = 2
 
 [repos.frontend]
 path = "frontend"

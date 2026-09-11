@@ -171,11 +171,14 @@ probe and their shared messages cannot drift.
 
 `config` discovers the root file by ascending from the current directory to the
 nearest `grove.toml`, resolves one include level, decodes TOML, and
-validates the complete catalog without invoking Git or zoxide. Each loaded
-file — root or include target — is deep merged in TOML-table form with a
+validates the complete catalog without invoking Git or zoxide. Root repository
+entries and directory-grouped entries flatten into the same declaration-ordered
+catalog; groups provide derived path prefixes and have no runtime identity. Each
+loaded file — root or include target — is deep merged in TOML-table form with a
 sibling override named after its stem before decoding, so `grove.toml` pairs
-with `grove.override.toml` and an arbitrarily named `--config` target pairs
-the same way; tables merge recursively while scalars and arrays are replaced.
+with `grove.override.toml` and an arbitrarily named `--config` target pairs the
+same way. Repository URL strings normalize to tables before a matching detailed
+override; other tables merge recursively while scalars and arrays are replaced.
 Discovery itself never treats a standalone override as a root. It rejects
 schema violations, unsupported versions, duplicate or nested includes, invalid
 names and branch refs, duplicate or nested repository identities, absolute

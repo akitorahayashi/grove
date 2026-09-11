@@ -22,11 +22,12 @@ pub(super) fn resolve(tree: LoadedConfigTree) -> Result<ResolvedConfig, AppError
             let raw = &entry.repository;
             let path = match raw.path.as_deref() {
                 Some(path) => {
-                    required_field(Some(path), &file.path, &format!("repos.{name}.path"))?
+                    required_field(Some(path), &file.path, &format!("{}.path", entry.field))?
                 }
-                None => name,
+                None => entry.default_path.as_str(),
             };
-            let url = required_field(raw.url.as_deref(), &file.path, &format!("repos.{name}.url"))?;
+            let url =
+                required_field(raw.url.as_deref(), &file.path, &format!("{}.url", entry.field))?;
             let repository_name = RepositoryName::new(name)?;
             let (resolved_path, display_path) = resolve_repository_path(
                 &file.directory,
@@ -80,7 +81,7 @@ pub(super) fn resolve(tree: LoadedConfigTree) -> Result<ResolvedConfig, AppError
 
 fn validate_version(file: &LoadedConfigFile) -> Result<(), AppError> {
     match file.raw.version {
-        Some(1) => Ok(()),
+        Some(2) => Ok(()),
         Some(version) => Err(AppError::config_error(format!(
             "{}: unsupported config version {version}",
             file.path.display()

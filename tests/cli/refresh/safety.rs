@@ -102,7 +102,7 @@ fn refresh_blocks_multiple_linked_worktrees_before_switching() {
 
     let config = ctx.write_config(&format!(
         r#"
-version = 1
+version = 2
 
 [repos.primary]
 path = "primary"

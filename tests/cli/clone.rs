@@ -209,7 +209,7 @@ fn clone_rejects_existing_non_empty_destination() {
 fn clone_rejects_config_flag() {
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
-    let config = ctx.write_config("version = 1\n");
+    let config = ctx.write_config("version = 2\n");
 
     ctx.cli()
         .arg("--config")

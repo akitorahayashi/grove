@@ -9,7 +9,7 @@ fn status_reports_missing_repositories_without_fetching() {
     let ctx = TestContext::new();
     let config = ctx.write_config(
         r#"
-version = 1
+version = 2
 
 [repos.blog]
 path = "personal/blog"
@@ -98,7 +98,7 @@ fn status_fetch_reports_missing_repositories_alongside_fetched_ones() {
     let remote = ctx.create_remote("frontend");
     let config = ctx.write_config(&format!(
         r#"
-version = 1
+version = 2
 
 [repos.frontend]
 path = "frontend"
@@ -142,7 +142,7 @@ fn status_reports_linked_worktrees_in_configuration_order() {
     run_git(&primary, &["worktree", "add", "-b", "feature-linked", linked.to_str().unwrap()]);
     let config = ctx.write_config(&format!(
         r#"
-version = 1
+version = 2
 
 [repos.primary]
 path = "primary"
@@ -177,7 +177,7 @@ fn status_target_outputs_detail_sections() {
     let ctx = TestContext::new();
     let config = ctx.write_config(
         r#"
-version = 1
+version = 2
 
 [repos.blog]
 path = "personal/blog"
@@ -208,7 +208,7 @@ fn status_uses_repository_name_as_default_path() {
     let ctx = TestContext::new();
     let config = ctx.write_config(
         r#"
-version = 1
+version = 2
 
 [repos.blog]
 url = "git@example.com:blog.git"
@@ -451,7 +451,7 @@ fn status_short_alias_reports_repository_status() {
     let ctx = TestContext::new();
     let config = ctx.write_config(
         r#"
-version = 1
+version = 2
 
 [repos.blog]
 path = "personal/blog"
@@ -497,7 +497,7 @@ fn status_runs_without_the_cache_environment() {
     let ctx = TestContext::new();
     let config = ctx.write_config(
         r#"
-version = 1
+version = 2
 
 [repos.blog]
 path = "personal/blog"
@@ -520,7 +520,7 @@ url = "git@example.com:blog.git"
 #[test]
 fn status_reports_missing_git_before_inspection() {
     let ctx = TestContext::new();
-    let config = ctx.write_config("version = 1\n");
+    let config = ctx.write_config("version = 2\n");
 
     ctx.cli()
         .env("PATH", "")

@@ -7,7 +7,7 @@ fn validate_reports_config_summary() {
     let ctx = TestContext::new();
     let config = ctx.write_config(
         r#"
-version = 1
+version = 2
 
 include = [
   "work/grove.toml",
@@ -21,7 +21,7 @@ url = "git@example.com:blog.git"
     ctx.write_config_at(
         "work/grove.toml",
         r#"
-version = 1
+version = 2
 
 [repos.frontend]
 path = "frontend"
@@ -46,7 +46,7 @@ fn validate_short_alias_reports_config_summary() {
     let ctx = TestContext::new();
     let config = ctx.write_config(
         r#"
-version = 1
+version = 2
 
 [repos.blog]
 path = "blog"
@@ -90,7 +90,7 @@ fn validate_redacts_credentials_from_malformed_toml_errors() {
     let ctx = TestContext::new();
     let config = ctx.write_config(
         r#"
-version = 1
+version = 2
 
 [repos.blog]
 url = "GIT+SSH://user:credential@example.com/repo.git?access%5Ftoken=secret-value
@@ -117,7 +117,7 @@ fn validate_does_not_require_git() {
     let ctx = TestContext::new();
     let config = ctx.write_config(
         r#"
-version = 1
+version = 2
 
 [repos.blog]
 path = "blog"
@@ -145,7 +145,7 @@ fn validate_rejects_repository_path_escaping_root_through_symlink() {
         .expect("failed to create escaping symlink");
     let config = ctx.write_config(
         r#"
-version = 1
+version = 2
 
 [repos.blog]
 path = "escape/blog"
@@ -173,7 +173,7 @@ fn validate_rejects_duplicate_repository_paths_through_symlink_aliases() {
         .expect("failed to create alias symlink");
     let config = ctx.write_config(
         r#"
-version = 1
+version = 2
 
 [repos.first]
 path = "actual/repo"
@@ -198,11 +198,11 @@ url = "git@example.com:second.git"
 #[test]
 fn validate_rejects_documented_catalog_invariant_violations() {
     let cases = [
-        ("unsupported version", "version = 2\n", "unsupported config version 2"),
+        ("unsupported version", "version = 1\n", "unsupported config version 1"),
         (
             "duplicate paths",
             r#"
-version = 1
+version = 2
 [repos.first]
 path = "same"
 url = "git@example.com:first.git"
@@ -215,7 +215,7 @@ url = "git@example.com:second.git"
         (
             "nested paths",
             r#"
-version = 1
+version = 2
 [repos.first]
 path = "parent"
 url = "git@example.com:first.git"
@@ -228,7 +228,7 @@ url = "git@example.com:second.git"
         (
             "absolute path",
             r#"
-version = 1
+version = 2
 [repos.repo]
 path = "/tmp/outside"
 url = "git@example.com:repo.git"
@@ -238,7 +238,7 @@ url = "git@example.com:repo.git"
         (
             "root escape",
             r#"
-version = 1
+version = 2
 [repos.repo]
 path = "../outside"
 url = "git@example.com:repo.git"
@@ -248,7 +248,7 @@ url = "git@example.com:repo.git"
         (
             "empty path",
             r#"
-version = 1
+version = 2
 [repos.repo]
 path = ""
 url = "git@example.com:repo.git"
@@ -258,7 +258,7 @@ url = "git@example.com:repo.git"
         (
             "blank path",
             r#"
-version = 1
+version = 2
 [repos.repo]
 path = "   "
 url = "git@example.com:repo.git"
@@ -268,7 +268,7 @@ url = "git@example.com:repo.git"
         (
             "unknown field",
             r#"
-version = 1
+version = 2
 unexpected = true
 "#,
             "unknown field `unexpected`",
@@ -276,7 +276,7 @@ unexpected = true
         (
             "invalid default branch",
             r#"
-version = 1
+version = 2
 [repos.repo]
 path = "repo"
 url = "git@example.com:repo.git"
@@ -305,13 +305,13 @@ fn validate_accepts_repository_key_names_and_default_paths() {
     let ctx = TestContext::new();
     let config = ctx.write_config(
         r#"
-version = 1
+version = 2
 
-[repos.frontend]
-url = "git@example.com:frontend.git"
+[repos]
+frontend = "git@example.com:frontend.git"
 
-[repos."company.service"]
-url = "git@example.com:company.service.git"
+[groups."company.services"]
+"company.service" = "git@example.com:company.service.git"
 "#,
     );
 
@@ -326,11 +326,75 @@ url = "git@example.com:company.service.git"
 }
 
 #[test]
+fn validate_derives_grouped_repository_paths() {
+    let ctx = TestContext::new();
+    let config = ctx.write_config(
+        r#"
+version = 2
+
+[groups.Rust]
+frontend = "git@example.com:frontend.git"
+
+[repos.duplicate]
+path = "Rust/frontend"
+url = "git@example.com:duplicate.git"
+"#,
+    );
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("validate")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("duplicate repository path"));
+}
+
+#[test]
+fn validate_rejects_invalid_group_shapes_and_directories() {
+    let cases = [
+        (
+            "absolute directory",
+            "version = 2\n[groups.\"/outside\"]\nrepo = \"git@example.com:repo.git\"\n",
+            "must be a normalized relative path",
+        ),
+        (
+            "parent directory",
+            "version = 2\n[groups.\"../outside\"]\nrepo = \"git@example.com:repo.git\"\n",
+            "must be a normalized relative path",
+        ),
+        (
+            "scalar group",
+            "version = 2\ngroups = { Rust = \"git@example.com:repo.git\" }\n",
+            "group 'Rust' must be a table",
+        ),
+        (
+            "invalid repository type",
+            "version = 2\n[groups.Rust]\nrepo = 42\n",
+            "must be a URL string or table",
+        ),
+    ];
+
+    for (_label, contents, expected) in cases {
+        let ctx = TestContext::new();
+        let config = ctx.write_config(contents);
+
+        ctx.cli()
+            .arg("--config")
+            .arg(config)
+            .arg("validate")
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(expected));
+    }
+}
+
+#[test]
 fn validate_rejects_missing_repository_url() {
     let ctx = TestContext::new();
     let config = ctx.write_config(
         r#"
-version = 1
+version = 2
 
 [repos.blog]
 "#,
@@ -351,7 +415,7 @@ fn validate_rejects_invalid_repository_key_names() {
     let ctx = TestContext::new();
     let config = ctx.write_config(
         r#"
-version = 1
+version = 2
 
 [repos."bad name"]
 url = "git@example.com:bad.git"
@@ -369,11 +433,11 @@ url = "git@example.com:bad.git"
 }
 
 #[test]
-fn validate_rejects_legacy_repository_arrays() {
+fn validate_rejects_unknown_repository_arrays() {
     let ctx = TestContext::new();
     let config = ctx.write_config(
         r#"
-version = 1
+version = 2
 
 [[repo]]
 name = "blog"
@@ -389,8 +453,7 @@ url = "git@example.com:blog.git"
         .assert()
         .failure()
         .stdout(predicate::str::is_empty())
-        .stderr(predicate::str::contains("unsupported field 'repo'"))
-        .stderr(predicate::str::contains("[repos.<name>]"));
+        .stderr(predicate::str::contains("unknown field `repo`"));
 }
 
 #[test]
@@ -398,7 +461,7 @@ fn validate_rejects_duplicate_names_across_includes() {
     let ctx = TestContext::new();
     let config = ctx.write_config(
         r#"
-version = 1
+version = 2
 include = ["work/grove.toml"]
 
 [repos.same]
@@ -408,7 +471,7 @@ url = "git@example.com:first.git"
     ctx.write_config_at(
         "work/grove.toml",
         r#"
-version = 1
+version = 2
 
 [repos.same]
 url = "git@example.com:second.git"
@@ -428,9 +491,9 @@ url = "git@example.com:second.git"
 #[test]
 fn validate_rejects_duplicate_and_nested_includes() {
     let duplicate = TestContext::new();
-    duplicate.write_config_at("child.toml", "version = 1\n");
+    duplicate.write_config_at("child.toml", "version = 2\n");
     let config =
-        duplicate.write_config("version = 1\ninclude = [\"child.toml\", \"child.toml\"]\n");
+        duplicate.write_config("version = 2\ninclude = [\"child.toml\", \"child.toml\"]\n");
     duplicate
         .cli()
         .arg("--config")
@@ -441,9 +504,9 @@ fn validate_rejects_duplicate_and_nested_includes() {
         .stderr(predicate::str::contains("duplicate configuration file"));
 
     let nested = TestContext::new();
-    nested.write_config_at("grandchild.toml", "version = 1\n");
-    nested.write_config_at("child.toml", "version = 1\ninclude = [\"grandchild.toml\"]\n");
-    let config = nested.write_config("version = 1\ninclude = [\"child.toml\"]\n");
+    nested.write_config_at("grandchild.toml", "version = 2\n");
+    nested.write_config_at("child.toml", "version = 2\ninclude = [\"grandchild.toml\"]\n");
+    let config = nested.write_config("version = 2\ninclude = [\"child.toml\"]\n");
     nested
         .cli()
         .arg("--config")
@@ -463,7 +526,7 @@ fn validate_accepts_symlink_target_inside_root_and_rejects_nested_alias() {
     std::os::unix::fs::symlink(&target, accepted.workspace().join("alias")).unwrap();
     let config = accepted.write_config(
         r#"
-version = 1
+version = 2
 [repos.repo]
 path = "alias/repo"
 url = "git@example.com:repo.git"
@@ -484,7 +547,7 @@ url = "git@example.com:repo.git"
     std::os::unix::fs::symlink(&target, nested.workspace().join("alias")).unwrap();
     let config = nested.write_config(
         r#"
-version = 1
+version = 2
 [repos.parent]
 path = "actual/repo"
 url = "git@example.com:parent.git"
@@ -508,7 +571,7 @@ fn validate_accepts_valid_default_branch_with_slash() {
     let ctx = TestContext::new();
     let config = ctx.write_config(
         r#"
-version = 1
+version = 2
 [repos.repo]
 path = "repo"
 url = "git@example.com:repo.git"
@@ -524,7 +587,7 @@ fn validate_discovers_config_in_a_parent_directory() {
     let ctx = TestContext::new();
     let config = ctx.write_config(
         r#"
-version = 1
+version = 2
 [repos.blog]
 path = "blog"
 url = "git@example.com:blog.git"
@@ -548,7 +611,7 @@ fn validate_prefers_the_nearest_config_while_ascending() {
     let ctx = TestContext::new();
     ctx.write_config(
         r#"
-version = 1
+version = 2
 [repos.blog]
 path = "blog"
 url = "git@example.com:blog.git"
@@ -557,7 +620,7 @@ url = "git@example.com:blog.git"
     let nested = ctx.write_config_at(
         "inner/grove.toml",
         r#"
-version = 1
+version = 2
 [repos.frontend]
 path = "frontend"
 url = "git@example.com:frontend.git"
@@ -595,7 +658,7 @@ fn validate_surfaces_a_broken_config_symlink_instead_of_ascending() {
     let ctx = TestContext::new();
     ctx.write_config(
         r#"
-version = 1
+version = 2
 [repos.blog]
 path = "blog"
 url = "git@example.com:blog.git"
@@ -620,21 +683,20 @@ fn validate_override_merges_scalar_fields_into_matching_repository() {
     let ctx = TestContext::new();
     let config = ctx.write_config(
         r#"
-version = 1
+version = 2
 
 [repos.a]
 path = "shared"
 url = "git@example.com:a.git"
 
-[repos.b]
-path = "other"
-url = "git@example.com:b.git"
+[groups.other]
+b = "git@example.com:b.git"
 "#,
     );
     ctx.write_config_at(
         "grove.override.toml",
         r#"
-[repos.b]
+[groups.other.b]
 path = "shared"
 "#,
     );
@@ -656,17 +718,17 @@ fn validate_override_adds_a_repository_absent_from_the_base_file() {
     let ctx = TestContext::new();
     let config = ctx.write_config(
         r#"
-version = 1
+version = 2
 
-[repos.frontend]
-url = "git@example.com:frontend.git"
+[groups.apps]
+frontend = "git@example.com:frontend.git"
 "#,
     );
     ctx.write_config_at(
         "grove.override.toml",
         r#"
-[repos.personal]
-url = "git@example.com:personal.git"
+[groups.apps]
+personal = "git@example.com:personal.git"
 "#,
     );
 
@@ -684,14 +746,14 @@ fn validate_override_replaces_the_include_array_instead_of_concatenating() {
     let ctx = TestContext::new();
     let config = ctx.write_config(
         r#"
-version = 1
+version = 2
 include = ["work/grove.toml", "personal/grove.toml"]
 "#,
     );
     ctx.write_config_at(
         "work/grove.toml",
         r#"
-version = 1
+version = 2
 
 [repos.frontend]
 url = "git@example.com:frontend.git"
@@ -700,7 +762,7 @@ url = "git@example.com:frontend.git"
     ctx.write_config_at(
         "personal/grove.toml",
         r#"
-version = 1
+version = 2
 
 [repos.blog]
 url = "git@example.com:blog.git"
@@ -729,10 +791,10 @@ fn validate_override_may_omit_version_and_inherit_the_base_version() {
     let ctx = TestContext::new();
     let config = ctx.write_config(
         r#"
-version = 1
+version = 2
 
-[repos.blog]
-url = "git@example.com:blog.git"
+[repos]
+blog = "git@example.com:blog.git"
 "#,
     );
     ctx.write_config_at(
@@ -757,13 +819,13 @@ fn validate_override_version_replaces_the_base_version() {
     let ctx = TestContext::new();
     let config = ctx.write_config(
         r#"
-version = 1
+version = 2
 
 [repos.blog]
 url = "git@example.com:blog.git"
 "#,
     );
-    ctx.write_config_at("grove.override.toml", "version = 2\n");
+    ctx.write_config_at("grove.override.toml", "version = 3\n");
 
     ctx.cli()
         .arg("--config")
@@ -771,7 +833,7 @@ url = "git@example.com:blog.git"
         .arg("validate")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("unsupported config version 2"));
+        .stderr(predicate::str::contains("unsupported config version 3"));
 }
 
 #[test]
@@ -779,7 +841,7 @@ fn validate_override_malformed_toml_fails() {
     let ctx = TestContext::new();
     let config = ctx.write_config(
         r#"
-version = 1
+version = 2
 
 [repos.blog]
 url = "git@example.com:blog.git"
@@ -803,7 +865,7 @@ fn validate_override_schema_violation_is_attributed_to_the_override_file() {
     let ctx = TestContext::new();
     let config = ctx.write_config(
         r#"
-version = 1
+version = 2
 
 [repos.blog]
 url = "git@example.com:blog.git"
@@ -834,7 +896,7 @@ fn validate_override_broken_symlink_fails() {
     let ctx = TestContext::new();
     let config = ctx.write_config(
         r#"
-version = 1
+version = 2
 
 [repos.blog]
 url = "git@example.com:blog.git"
@@ -862,7 +924,7 @@ fn validate_override_non_regular_file_fails() {
     let ctx = TestContext::new();
     let config = ctx.write_config(
         r#"
-version = 1
+version = 2
 
 [repos.blog]
 url = "git@example.com:blog.git"
@@ -886,7 +948,7 @@ fn validate_override_applies_to_included_child_configs_too() {
     let ctx = TestContext::new();
     let config = ctx.write_config(
         r#"
-version = 1
+version = 2
 include = ["work/grove.toml"]
 
 [repos.root_repo]
@@ -897,7 +959,7 @@ url = "git@example.com:root.git"
     ctx.write_config_at(
         "work/grove.toml",
         r#"
-version = 1
+version = 2
 
 [repos.child_repo]
 path = "other"
@@ -929,7 +991,7 @@ fn validate_override_file_name_follows_an_arbitrary_config_files_stem() {
     let config = ctx.write_config_at(
         "custom.toml",
         r#"
-version = 1
+version = 2
 
 [repos.a]
 path = "x"

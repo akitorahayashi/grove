@@ -128,7 +128,7 @@ fn cache_clean_by_name_removes_matching_entry() {
     let remote = ctx.create_remote("blog");
     let config = ctx.write_config(&format!(
         r#"
-version = 1
+version = 2
 
 [repos.blog]
 path = "blog"
@@ -153,7 +153,7 @@ url = "{}"
 #[test]
 fn cache_clean_unknown_name_fails() {
     let ctx = TestContext::new();
-    let config = ctx.write_config("version = 1\n");
+    let config = ctx.write_config("version = 2\n");
 
     ctx.cli()
         .arg("--config")

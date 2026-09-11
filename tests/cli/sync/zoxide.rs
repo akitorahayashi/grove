@@ -131,7 +131,7 @@ fn sync_register_zoxide_queries_database_at_most_twice() {
     let zoxide = FakeZoxide::new(&ctx);
     let config = ctx.write_config(&format!(
         r#"
-version = 1
+version = 2
 
 [repos.first]
 path = "first"
