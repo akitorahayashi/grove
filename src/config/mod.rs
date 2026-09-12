@@ -21,6 +21,14 @@ pub fn load(explicit_config: Option<&Path>) -> Result<ResolvedConfig, AppError> 
     validation::resolve(loaded)
 }
 
+pub(crate) fn load_without_overrides(
+    explicit_config: Option<&Path>,
+) -> Result<ResolvedConfig, AppError> {
+    let root_path = locate(explicit_config)?;
+    let loaded = include::load_tree_without_overrides(&root_path)?;
+    validation::resolve(loaded)
+}
+
 fn load_with_replacement(
     root_path: &Path,
     replacement_path: &Path,

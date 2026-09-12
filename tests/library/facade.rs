@@ -30,6 +30,10 @@ fn root_facade_exposes_supported_use_cases_and_reports() {
     let sync_options = grove::SyncOptions::new(true, true);
     assert!(sync_options.dry_run());
     assert!(sync_options.register_zoxide());
+    assert!(!sync_options.ignores_overrides());
+
+    let sync_options = sync_options.ignore_overrides(true);
+    assert!(sync_options.ignores_overrides());
 
     // Sync and refresh entries expose the structured blocked-reason detail, and
     // BlockedReasonDetails is part of the exported report vocabulary, so a

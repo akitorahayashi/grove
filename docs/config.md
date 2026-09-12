@@ -142,6 +142,10 @@ resolved — malformed TOML, a broken symlink, or a non-file — fails validatio
 A schema violation confined to the override is reported against the override
 file; a violation that survives the merge is reported against the base file. A
 symlinked base configuration pairs with an override beside its resolved target.
+`gv sync --ignore-overrides` (`gv sync -i`) instead loads the root and every
+included base file without inspecting their sibling overrides. The base
+configuration's `include` array is used unchanged, and the resulting base-only
+tree must pass the normal validation rules.
 
 ## Includes
 

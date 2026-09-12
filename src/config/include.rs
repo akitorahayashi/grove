@@ -20,8 +20,18 @@ pub(super) struct LoadedConfigTree {
     pub files: Vec<LoadedConfigFile>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum OverrideFiles {
+    Merge,
+    Ignore,
+}
+
 pub(super) fn load_tree(root_path: &Path) -> Result<LoadedConfigTree, AppError> {
-    load_tree_from(root_path, None)
+    load_tree_from(root_path, None, OverrideFiles::Merge)
+}
+
+pub(super) fn load_tree_without_overrides(root_path: &Path) -> Result<LoadedConfigTree, AppError> {
+    load_tree_from(root_path, None, OverrideFiles::Ignore)
 }
 
 pub(super) fn load_tree_with_replacement(
@@ -29,7 +39,11 @@ pub(super) fn load_tree_with_replacement(
     replacement_path: &Path,
     contents: &str,
 ) -> Result<LoadedConfigTree, AppError> {
-    load_tree_from(root_path, Some(SourceReplacement { path: replacement_path, contents }))
+    load_tree_from(
+        root_path,
+        Some(SourceReplacement { path: replacement_path, contents }),
+        OverrideFiles::Merge,
+    )
 }
 
 #[derive(Clone, Copy)]
@@ -41,8 +55,9 @@ struct SourceReplacement<'a> {
 fn load_tree_from(
     root_path: &Path,
     replacement: Option<SourceReplacement<'_>>,
+    override_files: OverrideFiles,
 ) -> Result<LoadedConfigTree, AppError> {
-    let root = load_one(&root_path.canonicalize()?, replacement)?;
+    let root = load_one(&root_path.canonicalize()?, replacement, override_files)?;
     let root_directory = root
         .path
         .parent()
@@ -66,7 +81,7 @@ fn load_tree_from(
             )));
         }
 
-        let child = load_one(&child_path, replacement)?;
+        let child = load_one(&child_path, replacement, override_files)?;
         if !child.raw.include.is_empty() {
             return Err(AppError::config_error(format!(
                 "{}: nested includes are not allowed",
@@ -87,6 +102,7 @@ fn load_tree_from(
 fn load_one(
     path: &Path,
     replacement: Option<SourceReplacement<'_>>,
+    override_files: OverrideFiles,
 ) -> Result<LoadedConfigFile, AppError> {
     let directory = path
         .parent()
@@ -96,7 +112,9 @@ fn load_one(
     let contents = read_source(path, replacement)?;
     let mut table = file::parse_table(&contents, &label)?;
 
-    if let Some((override_path, override_contents)) = read_sibling_override(path, replacement)? {
+    if override_files == OverrideFiles::Merge
+        && let Some((override_path, override_contents)) = read_sibling_override(path, replacement)?
+    {
         let override_label = override_path.display().to_string();
         let override_table = file::parse_table(&override_contents, &override_label)?;
         // Standalone decode first, so a schema error confined to the override

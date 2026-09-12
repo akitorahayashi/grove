@@ -70,11 +70,17 @@ pub enum Phase {
 pub struct SyncOptions {
     dry_run: bool,
     register_zoxide: bool,
+    ignore_overrides: bool,
 }
 
 impl SyncOptions {
     pub fn new(dry_run: bool, register_zoxide: bool) -> Self {
-        Self { dry_run, register_zoxide }
+        Self { dry_run, register_zoxide, ignore_overrides: false }
+    }
+
+    pub fn ignore_overrides(mut self, ignore_overrides: bool) -> Self {
+        self.ignore_overrides = ignore_overrides;
+        self
     }
 
     pub fn dry_run(self) -> bool {
@@ -83,6 +89,10 @@ impl SyncOptions {
 
     pub fn register_zoxide(self) -> bool {
         self.register_zoxide
+    }
+
+    pub fn ignores_overrides(self) -> bool {
+        self.ignore_overrides
     }
 }
 
@@ -103,7 +113,11 @@ pub(crate) fn execute_with_events(
     events: &impl EventSink<Phase>,
 ) -> Result<Report, AppError> {
     ctx.git().verify_available()?;
-    let config = config::load(config_path)?;
+    let config = if options.ignores_overrides() {
+        config::load_without_overrides(config_path)?
+    } else {
+        config::load(config_path)?
+    };
     let repositories = select_repositories(config.repositories(), targets)?;
     let parallelism = std::thread::available_parallelism()?.get();
     let started = Instant::now();

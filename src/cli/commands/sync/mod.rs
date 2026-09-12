@@ -29,6 +29,9 @@ pub(in crate::cli) struct SyncCommand {
 
     #[arg(short = 'z', long)]
     register_zoxide: bool,
+
+    #[arg(short = 'i', long, help = "Ignore sibling override files when loading configuration")]
+    ignore_overrides: bool,
 }
 
 pub(in crate::cli) fn run(
@@ -37,7 +40,8 @@ pub(in crate::cli) fn run(
     output: &mut Output<'_>,
 ) -> Result<Completion, AppError> {
     let config = super::resolve_config(config, super::ConfigNotice::WhenAscended, output)?;
-    let options = SyncOptions::new(command.dry_run, command.register_zoxide);
+    let options = SyncOptions::new(command.dry_run, command.register_zoxide)
+        .ignore_overrides(command.ignore_overrides);
     let report = if command.dry_run {
         api::sync(Some(config), command.repositories, options)?
     } else {
