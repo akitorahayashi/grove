@@ -18,6 +18,7 @@ gv status --fetch
 gv sync
 gv sync frontend
 gv sync -z
+gv sync -i
 gv sync --dry-run
 
 gv refresh
@@ -137,6 +138,13 @@ repositories with zoxide. Skipped and blocked repositories are not registered,
 and dry runs only report the repositories that would be registered. Registration
 uses one initial zoxide database snapshot and at most one final snapshot.
 
+`gv sync --ignore-overrides` and its short form `gv sync -i` load the root and
+included base configuration files without inspecting or merging any sibling
+override files. The base configuration's `include` list remains authoritative.
+Malformed, unreadable, and broken-symlink overrides therefore do not block this
+mode, while validation failures in the resulting base-only configuration do.
+The option composes with dry runs and zoxide registration.
+
 ## Refresh
 
 `gv refresh`, with the alias `gv rf`, updates repositories that already exist
@@ -246,9 +254,11 @@ The supported Rust API is the crate-root facade: `cli`, `clone`, `refresh`,
 `sync` and `refresh` take option structs: `sync(config, targets, SyncOptions)`
 and `refresh(config, targets, RefreshOptions)`. A `None` config argument
 discovers `grove.toml` from the process's current directory upward, matching the
-CLI. `SyncOptions` carries the
-dry-run and zoxide-registration flags, so library callers reach the same zoxide
-report as the CLI. `clone(url, destination)` clones a single URL through the
+CLI. `SyncOptions` carries the dry-run, zoxide-registration, and override-loading
+flags, so library callers reach the same sync behavior and zoxide report as the
+CLI. Existing construction remains compatible; `ignore_overrides(true)` opts
+into base-only loading and `ignores_overrides()` reports that choice.
+`clone(url, destination)` clones a single URL through the
 cache and returns a `CloneReport` carrying the resulting `CacheOutcome`. Sync
 and refresh report entries expose the structured blocked-reason detail through
 `blocked_details()`, returning `BlockedReasonDetails` such as a remote-URL

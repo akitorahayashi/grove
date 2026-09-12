@@ -3,6 +3,7 @@ use predicates::prelude::*;
 use crate::harness::{TestContext, commit_file, current_branch, path_with_wrapper, run_git};
 
 mod cache;
+mod overrides;
 mod planning;
 mod progress;
 mod zoxide;
