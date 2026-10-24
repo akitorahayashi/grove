@@ -26,8 +26,15 @@ pub(super) fn repository(
     git: &impl RepositoryProbe,
     repository: &RepositoryDefinition,
     dry_run: bool,
+    planned_move_from: Option<&String>,
 ) -> Result<Decision, AppError> {
     if !repository.path().exists() {
+        if let Some(from) = planned_move_from {
+            return Ok(Decision::Entry(Entry::new(
+                repository,
+                Outcome::Planned(Plan::Move { from: from.clone() }),
+            )));
+        }
         if dry_run {
             return Ok(Decision::Entry(Entry::new(
                 repository,

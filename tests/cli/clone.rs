@@ -94,12 +94,19 @@ fn clone_forwards_git_config_options() {
 #[test]
 fn clone_preserves_git_help_and_invalid_option_behavior() {
     let ctx = TestContext::new();
+    let git_help_code = std::process::Command::new("git")
+        .args(["clone", "-h"])
+        .output()
+        .unwrap()
+        .status
+        .code()
+        .unwrap();
 
     ctx.cli()
         .arg("clone")
         .arg("-h")
         .assert()
-        .code(129)
+        .code(git_help_code)
         .stdout(predicate::str::contains("usage: git clone"))
         .stderr(predicate::str::is_empty());
 

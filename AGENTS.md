@@ -17,6 +17,8 @@ src/
   lib.rs         Public facade: the complete supported library API
   error.rs       AppError, its stable categories, and every error constructor
   inspection.rs  Repository readiness probing and the diagnostics the use cases share
+  removal.rs     Assessment of `removed` declarations shared by sync and status
+  trash.rs       The operating system trash boundary
   assets/        Templates embedded in the binary
   cli/           Clap parsing and rendering; commands/ holds one module per subcommand, tty/ the presentation over the single output sink
   app/           One use case per subcommand, plus the default dependency wiring, the external-boundary context, and the report row sync and refresh share

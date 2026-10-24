@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::repositories::RepositoryDefinition;
+use crate::repositories::{RemovedRepository, RepositoryDefinition};
 
 /// Fully validated configuration resolved from a root grove.toml.
 #[derive(Debug, Clone)]
@@ -8,6 +8,7 @@ pub struct ResolvedConfig {
     root_path: PathBuf,
     groups: Vec<GroupDirectory>,
     repositories: Vec<RepositoryDefinition>,
+    removed: Vec<RemovedRepository>,
 }
 
 impl ResolvedConfig {
@@ -15,8 +16,9 @@ impl ResolvedConfig {
         root_path: PathBuf,
         groups: Vec<GroupDirectory>,
         repositories: Vec<RepositoryDefinition>,
+        removed: Vec<RemovedRepository>,
     ) -> Self {
-        Self { root_path, groups, repositories }
+        Self { root_path, groups, repositories, removed }
     }
 
     pub fn root_path(&self) -> &Path {
@@ -25,6 +27,10 @@ impl ResolvedConfig {
 
     pub fn repositories(&self) -> &[RepositoryDefinition] {
         &self.repositories
+    }
+
+    pub(crate) fn removed(&self) -> &[RemovedRepository] {
+        &self.removed
     }
 
     pub(super) fn groups(&self) -> &[GroupDirectory] {

@@ -1088,3 +1088,166 @@ fn validate_discovery_ignores_a_standalone_override_file() {
         .stderr(predicate::str::contains("grove.toml was not found in"))
         .stderr(predicate::str::contains("or any parent directory"));
 }
+
+#[test]
+fn validate_rejects_invalid_removed_declarations() {
+    let cases = [
+        (
+            r#"
+version = 2
+[removed.repos]
+old = "git@example.com:old.git"
+[removed.groups.apps]
+old = "git@example.com:other.git"
+"#,
+            "duplicate removed repository name 'old'",
+        ),
+        (
+            r#"
+version = 2
+[repos]
+keep = "git@example.com:keep.git"
+[removed.repos.gone]
+path = "keep"
+url = "git@example.com:gone.git"
+"#,
+            "duplicate repository path",
+        ),
+        (
+            r#"
+version = 2
+[repos]
+keep = "git@example.com:keep.git"
+[removed.repos.gone]
+path = "keep/inner"
+url = "git@example.com:gone.git"
+"#,
+            "repository paths must not be nested",
+        ),
+        (
+            r#"
+version = 2
+[removed.repos.gone]
+url = "git@example.com:gone.git"
+moved_to = "missing"
+"#,
+            "removed repository 'gone' moves to 'missing', which is not a configured repository",
+        ),
+        (
+            r#"
+version = 2
+[repos]
+keep = "git@example.com:keep.git"
+[removed.repos]
+first = { url = "git@example.com:first.git", moved_to = "keep" }
+second = { url = "git@example.com:second.git", moved_to = "keep" }
+"#,
+            "removed repositories 'first' and 'second' both move to 'keep'",
+        ),
+        (
+            r#"
+version = 2
+[repos]
+keep = "git@example.com:keep.git"
+[removed.repos.gone]
+moved_to = "keep"
+"#,
+            "missing required field 'removed.repos.gone.url'",
+        ),
+        (
+            r#"
+version = 2
+[removed.repos.gone]
+url = "git@example.com:gone.git"
+default_branch = "main"
+"#,
+            "unknown field `default_branch`",
+        ),
+        (
+            r#"
+version = 2
+[removed.other]
+gone = "git@example.com:gone.git"
+"#,
+            "unknown field `removed.other`",
+        ),
+    ];
+
+    for (contents, expected) in cases {
+        let ctx = TestContext::new();
+        let config = ctx.write_config(contents);
+
+        ctx.cli()
+            .arg("--config")
+            .arg(config)
+            .arg("validate")
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(expected));
+    }
+}
+
+#[test]
+fn validate_accepts_removed_declarations_from_base_override_and_includes() {
+    let ctx = TestContext::new();
+    let config = ctx.write_config(
+        r#"
+version = 2
+include = ["work/grove.toml"]
+
+[groups.tools]
+tool = "git@example.com:tool.git"
+
+[removed.groups.apps]
+tool = { url = "git@example.com:tool.git", moved_to = "tool" }
+"#,
+    );
+    ctx.write_config_at(
+        "grove.override.toml",
+        r#"
+[removed.repos]
+private = "git@example.com:private.git"
+"#,
+    );
+    ctx.write_config_at(
+        "work/grove.toml",
+        r#"
+version = 2
+
+[removed.repos.legacy]
+url = "git@example.com:legacy.git"
+path = "legacy-checkout"
+"#,
+    );
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("validate")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Validated 1 repository"));
+}
+
+#[test]
+fn validate_attributes_removed_schema_errors_to_the_override() {
+    let ctx = TestContext::new();
+    let config = ctx.write_config("version = 2\n");
+    ctx.write_config_at(
+        "grove.override.toml",
+        r#"
+[removed.repos.gone]
+url = "git@example.com:gone.git"
+unexpected = true
+"#,
+    );
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("validate")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("grove.override.toml"))
+        .stderr(predicate::str::contains("unknown field `unexpected`"));
+}

@@ -401,3 +401,27 @@ fn refresh_redacts_remote_url_mismatch_details() {
         .stderr(predicate::str::contains("expected-secret").not())
         .stderr(predicate::str::contains("expected-token").not());
 }
+
+#[test]
+fn refresh_leaves_removed_declarations_to_sync() {
+    let ctx = TestContext::new();
+    let blog = ctx.create_remote("blog");
+    let old = ctx.create_remote("old");
+    run_git(ctx.workspace(), &["clone", "--quiet", &old.url(), "old"]);
+    let config = ctx.write_config(&format!(
+        "version = 2\n\n[repos]\nblog = \"{}\"\n\n[removed.repos]\nold = \"{}\"\n",
+        blog.url(),
+        old.url()
+    ));
+    ctx.cli().arg("--config").arg(&config).args(["sync", "blog"]).assert().success();
+
+    ctx.cli()
+        .arg("--config")
+        .arg(&config)
+        .arg("refresh")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("old").not());
+
+    assert!(ctx.workspace().join("old/.git").exists());
+}

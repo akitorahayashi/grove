@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use std::path::{Component, Path};
 use toml::{Table, Value};
 
@@ -9,15 +10,16 @@ pub(super) struct RawConfigFile {
     pub version: Option<u32>,
     pub include: Vec<String>,
     pub groups: Vec<String>,
-    pub repositories: Vec<RawRepositoryEntry>,
+    pub repositories: Vec<RawEntry<RawRepository>>,
+    pub removed: Vec<RawEntry<RawRemovedRepository>>,
 }
 
 #[derive(Debug)]
-pub(super) struct RawRepositoryEntry {
+pub(super) struct RawEntry<T> {
     pub name: String,
     pub default_path: String,
     pub field: String,
-    pub repository: RawRepository,
+    pub repository: T,
 }
 
 #[derive(Debug, Deserialize)]
@@ -26,6 +28,32 @@ pub(super) struct RawRepository {
     pub path: Option<String>,
     pub url: Option<String>,
     pub default_branch: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawRemovedRepository {
+    pub path: Option<String>,
+    pub url: Option<String>,
+    pub moved_to: Option<String>,
+}
+
+/// A URL string is shorthand for a table holding only `url`, for live and
+/// removed entries alike.
+trait FromUrl {
+    fn from_url(url: String) -> Self;
+}
+
+impl FromUrl for RawRepository {
+    fn from_url(url: String) -> Self {
+        Self { path: None, url: Some(url), default_branch: None }
+    }
+}
+
+impl FromUrl for RawRemovedRepository {
+    fn from_url(url: String) -> Self {
+        Self { path: None, url: Some(url), moved_to: None }
+    }
 }
 
 /// Parses TOML text into a table without decoding it, so a caller can deep
@@ -54,10 +82,17 @@ pub(super) fn merge_tables(base: &mut Table, overlay: Table) {
 }
 
 pub(super) fn expand_repository_strings(root: &mut Table) {
-    if let Some(Value::Table(repositories)) = root.get_mut("repos") {
+    expand_section(root);
+    if let Some(Value::Table(removed)) = root.get_mut("removed") {
+        expand_section(removed);
+    }
+}
+
+fn expand_section(section: &mut Table) {
+    if let Some(Value::Table(repositories)) = section.get_mut("repos") {
         expand_strings(repositories);
     }
-    if let Some(Value::Table(groups)) = root.get_mut("groups") {
+    if let Some(Value::Table(groups)) = section.get_mut("groups") {
         for (_, group) in groups.iter_mut() {
             if let Value::Table(repositories) = group {
                 expand_strings(repositories);
@@ -89,16 +124,40 @@ pub(super) fn decode(mut root: Table, label: &str) -> Result<RawConfigFile, AppE
 
     let version = parse_version(root.remove("version"), label)?;
     let include = parse_include(root.remove("include"), label)?;
-    let mut repositories = parse_repositories(root.remove("repos"), label)?;
-    let (groups, grouped_repositories) = parse_groups(root.remove("groups"), label)?;
+    let mut repositories = parse_repositories(root.remove("repos"), "repos", label)?;
+    let (groups, grouped_repositories) = parse_groups(root.remove("groups"), "groups", label)?;
     repositories.extend(grouped_repositories);
+    let removed = parse_removed(root.remove("removed"), label)?;
 
-    Ok(RawConfigFile { version, include, groups, repositories })
+    Ok(RawConfigFile { version, include, groups, repositories, removed })
+}
+
+/// Removed groups are not recorded as group directories: a group that only
+/// holds removed entries is on its way out and must not steer `gv add`.
+fn parse_removed(
+    value: Option<Value>,
+    label: &str,
+) -> Result<Vec<RawEntry<RawRemovedRepository>>, AppError> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let Value::Table(mut section) = value else {
+        return Err(AppError::config_error(format!("{label}: field 'removed' must be a table")));
+    };
+    for key in section.keys() {
+        if !matches!(key.as_str(), "repos" | "groups") {
+            return Err(AppError::config_error(format!("{label}: unknown field `removed.{key}`")));
+        }
+    }
+    let mut removed = parse_repositories(section.remove("repos"), "removed.repos", label)?;
+    let (_, grouped) = parse_groups(section.remove("groups"), "removed.groups", label)?;
+    removed.extend(grouped);
+    Ok(removed)
 }
 
 fn reject_unknown_root_fields(root: &Table, label: &str) -> Result<(), AppError> {
     for key in root.keys() {
-        if !matches!(key.as_str(), "version" | "include" | "repos" | "groups") {
+        if !matches!(key.as_str(), "version" | "include" | "repos" | "groups" | "removed") {
             return Err(AppError::config_error(format!("{label}: unknown field `{key}`")));
         }
     }
@@ -125,29 +184,31 @@ fn parse_include(value: Option<Value>, label: &str) -> Result<Vec<String>, AppEr
     value.try_into().map_err(|err| AppError::config_source(format!("{label}: include: {err}"), err))
 }
 
-fn parse_repositories(
+fn parse_repositories<T: DeserializeOwned + FromUrl>(
     value: Option<Value>,
+    field: &str,
     label: &str,
-) -> Result<Vec<RawRepositoryEntry>, AppError> {
+) -> Result<Vec<RawEntry<T>>, AppError> {
     let Some(value) = value else {
         return Ok(Vec::new());
     };
     let Value::Table(table) = value else {
-        return Err(AppError::config_error(format!("{label}: field 'repos' must be a table")));
+        return Err(AppError::config_error(format!("{label}: field '{field}' must be a table")));
     };
 
-    parse_repository_table(table, None, label)
+    parse_repository_table(table, field, None, label)
 }
 
-fn parse_groups(
+fn parse_groups<T: DeserializeOwned + FromUrl>(
     value: Option<Value>,
+    field: &str,
     label: &str,
-) -> Result<(Vec<String>, Vec<RawRepositoryEntry>), AppError> {
+) -> Result<(Vec<String>, Vec<RawEntry<T>>), AppError> {
     let Some(value) = value else {
         return Ok((Vec::new(), Vec::new()));
     };
     let Value::Table(groups) = value else {
-        return Err(AppError::config_error(format!("{label}: field 'groups' must be a table")));
+        return Err(AppError::config_error(format!("{label}: field '{field}' must be a table")));
     };
 
     let mut directories = Vec::new();
@@ -160,7 +221,7 @@ fn parse_groups(
             )));
         };
         directories.push(directory.clone());
-        entries.extend(parse_repository_table(repositories, Some(&directory), label)?);
+        entries.extend(parse_repository_table(repositories, field, Some(&directory), label)?);
     }
     Ok((directories, entries))
 }
@@ -184,26 +245,25 @@ fn validate_group_directory(directory: &str, label: &str) -> Result<(), AppError
     Ok(())
 }
 
-fn parse_repository_table(
+fn parse_repository_table<T: DeserializeOwned + FromUrl>(
     table: Table,
+    section: &str,
     group: Option<&str>,
     label: &str,
-) -> Result<Vec<RawRepositoryEntry>, AppError> {
+) -> Result<Vec<RawEntry<T>>, AppError> {
     table
         .into_iter()
         .map(|(name, value)| {
             let field = match group {
-                Some(group) => format!("groups.{group}.{name}"),
-                None => format!("repos.{name}"),
+                Some(group) => format!("{section}.{group}.{name}"),
+                None => format!("{section}.{name}"),
             };
             let default_path = match group {
                 Some(group) => format!("{group}/{name}"),
                 None => name.clone(),
             };
             let repository = match value {
-                Value::String(url) => {
-                    RawRepository { path: None, url: Some(url), default_branch: None }
-                }
+                Value::String(url) => T::from_url(url),
                 Value::Table(fields) => fields.try_into().map_err(|err| {
                     AppError::config_source(format!("{label}: repository '{name}': {err}"), err)
                 })?,
@@ -213,7 +273,7 @@ fn parse_repository_table(
                     )));
                 }
             };
-            Ok(RawRepositoryEntry { name, default_path, field, repository })
+            Ok(RawEntry { name, default_path, field, repository })
         })
         .collect()
 }

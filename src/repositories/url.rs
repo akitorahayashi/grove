@@ -59,6 +59,12 @@ impl RemoteUrl {
         self.0.trim() == other.0.trim()
     }
 
+    /// Whether two URLs name the same repository by `identity`, so an
+    /// `https://` origin still proves ownership of a `git@` declaration.
+    pub(crate) fn same_identity(&self, other: &RemoteUrl) -> bool {
+        self.identity() == other.identity()
+    }
+
     /// The repository identity the cache keys on: `host[:port]/path` with the
     /// host lowercased and userinfo, query, fragment, leading and trailing
     /// slashes, and a trailing `.git` dropped, so the `git@` and `https://`

@@ -6,6 +6,7 @@ use owo_colors::OwoColorize;
 
 use crate::AppError;
 use crate::app::api;
+use crate::app::cache::is_identity;
 use crate::cache::EntryInfo;
 
 use crate::cli::Completion;
@@ -32,8 +33,9 @@ struct ListCommand;
 
 #[derive(Args)]
 struct CleanCommand {
-    #[arg(value_name = "repo")]
-    repositories: Vec<String>,
+    /// A configured repository name, or a cache identity as `gv cache list` prints it
+    #[arg(value_name = "repo|identity")]
+    targets: Vec<String>,
 }
 
 pub(in crate::cli) fn run(
@@ -43,7 +45,7 @@ pub(in crate::cli) fn run(
 ) -> Result<Completion, AppError> {
     match command.command {
         CacheSubcommand::List(_) => run_list(output),
-        CacheSubcommand::Clean(clean) => run_clean(config, clean.repositories, output),
+        CacheSubcommand::Clean(clean) => run_clean(config, clean.targets, output),
     }
 }
 
@@ -77,16 +79,16 @@ fn updated(entry: &EntryInfo) -> String {
 
 fn run_clean(
     config: Option<PathBuf>,
-    repositories: Vec<String>,
+    targets: Vec<String>,
     output: &mut Output<'_>,
 ) -> Result<Completion, AppError> {
-    // Cleaning the whole cache reads no configuration, so it stays usable
-    // outside a grove root.
-    let config = match repositories.is_empty() {
+    // Cleaning the whole cache or identities reads no configuration, so it
+    // stays usable outside a grove root.
+    let config = match targets.iter().all(|target| is_identity(target)) {
         true => None,
         false => Some(super::resolve_config(config, super::ConfigNotice::WhenAscended, output)?),
     };
-    let report = api::cache_clean(config, repositories)?;
+    let report = api::cache_clean(config, targets)?;
     let removed = report.removed();
     let noun = if removed == 1 { "entry" } else { "entries" };
     output.stdout(format_args!("Removed {removed} cache {noun}\n"))?;

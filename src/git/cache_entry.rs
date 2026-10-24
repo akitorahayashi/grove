@@ -58,7 +58,7 @@ impl CacheEntry for CommandGitClient {
         url: &RemoteUrl,
         progress: &mut dyn GitProgressSink,
     ) -> Result<(), AppError> {
-        self.repoint_origin(entry, url)?;
+        self.set_origin_url(entry, url)?;
         self.git_progress_required(entry, &["fetch", "--progress", "origin", "--prune"], progress)
     }
 
@@ -69,7 +69,7 @@ impl CacheEntry for CommandGitClient {
         branch: &str,
         progress: &mut dyn GitProgressSink,
     ) -> Result<(), AppError> {
-        self.repoint_origin(entry, url)?;
+        self.set_origin_url(entry, url)?;
         let refspec = format!("+refs/heads/{branch}:refs/heads/{branch}");
         self.git_required(entry, &["config", "remote.origin.fetch", &refspec])?;
         self.git_progress_required(entry, &["fetch", "--progress", "origin", "--prune"], progress)
@@ -120,9 +120,13 @@ impl CommandGitClient {
     /// Entries are keyed by transport-independent identity, so a reused entry
     /// may still carry the origin of whichever URL form created it. Setting
     /// the URL unconditionally is idempotent and cheaper than reading first.
-    fn repoint_origin(&self, entry: &Path, url: &RemoteUrl) -> Result<(), AppError> {
+    pub(super) fn set_origin_url(
+        &self,
+        repository: &Path,
+        url: &RemoteUrl,
+    ) -> Result<(), AppError> {
         self.git_required(
-            entry,
+            repository,
             &["remote", "set-url", "--", "origin", url.as_process_argument()],
         )?;
         Ok(())

@@ -7,7 +7,8 @@ use owo_colors::OwoColorize;
 use crate::AppError;
 use crate::app::api;
 use crate::app::sync::{
-    Outcome, Phase, PhaseSummary, Plan, Report, SyncOptions, ZoxideOutcome, ZoxideReport,
+    CacheRemoval, Outcome, Phase, PhaseSummary, Plan, RemovalEntry, RemovalOutcome, RemovalPlan,
+    Report, SyncOptions, ZoxideOutcome, ZoxideReport,
 };
 
 use crate::cli::Completion;
@@ -67,6 +68,7 @@ pub(in crate::cli) fn run(
 impl ProgressPhase for Phase {
     fn message(self) -> &'static str {
         match self {
+            Phase::Removing => "Removing repositories...",
             Phase::Checking => "Checking repositories...",
             Phase::Preparing => "Preparing repositories...",
             Phase::Updating => "Updating repositories...",
@@ -86,6 +88,7 @@ fn print_report(report: &Report, dry_run: bool, output: &mut Output<'_>) -> io::
 
     print_count("Skipped", report.skipped(), output)?;
     print_count("Blocked", report.blocked(), output)?;
+    print_removals(report, output)?;
     print_entries(report, output)?;
     print_zoxide_report(report.zoxide(), dry_run, output)
 }
@@ -96,6 +99,9 @@ fn print_phase_completion(
     output: &mut Output<'_>,
 ) -> io::Result<()> {
     match phase {
+        Phase::Removing => {
+            print_count_with_elapsed("Removed", summary.count(), summary.elapsed(), true, output)
+        }
         Phase::Checking => print_phase("Checked", summary.count(), summary.elapsed(), output),
         Phase::Preparing => {
             print_count_with_elapsed("Prepared", summary.count(), summary.elapsed(), true, output)
@@ -112,7 +118,13 @@ fn print_phase_completion(
 fn print_dry_run_summary(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
     print_count("Would clone", report.planned_clones(), output)?;
     print_count("Would fetch", report.planned_fetches(), output)?;
-    if report.planned_clones() == 0 && report.planned_fetches() == 0 && !report.has_failures() {
+    print_count("Would move", report.planned_moves(), output)?;
+    print_count("Would trash", report.planned_trashes(), output)?;
+    let planned = report.planned_clones()
+        + report.planned_fetches()
+        + report.planned_moves()
+        + report.planned_trashes();
+    if planned == 0 && !report.has_failures() {
         write_line(output, format_args!("Would make no changes"))?;
     }
     Ok(())
@@ -133,7 +145,7 @@ fn print_entries(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
                     &format!("from {}", terminal_text(url)),
                 )?;
             }
-            Outcome::Planned(Plan::Fetch { .. }) | Outcome::Current { .. } => {}
+            Outcome::Planned(Plan::Fetch { .. } | Plan::Move { .. }) | Outcome::Current { .. } => {}
             Outcome::Cloned { url, cache } => {
                 entry_line(
                     output,
@@ -190,7 +202,7 @@ fn print_entries(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
             // note has a subject.
             let has_line = !matches!(
                 entry.outcome(),
-                Outcome::Planned(Plan::Fetch { .. }) | Outcome::Current { .. }
+                Outcome::Planned(Plan::Fetch { .. } | Plan::Move { .. }) | Outcome::Current { .. }
             );
             if !has_line {
                 let repository = terminal_text(entry.repository());
@@ -204,6 +216,58 @@ fn print_entries(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
                 ),
             )?;
         }
+    }
+    Ok(())
+}
+
+fn print_removals(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
+    let mut entries = report.removals().iter().collect::<Vec<_>>();
+    entries.sort_by_key(|entry| entry.repository());
+
+    for entry in entries {
+        print_removal(entry, output)?;
+    }
+    Ok(())
+}
+
+fn print_removal(entry: &RemovalEntry, output: &mut Output<'_>) -> io::Result<()> {
+    let repository = entry.repository();
+    match entry.outcome() {
+        RemovalOutcome::Planned(RemovalPlan::Move { to }) => {
+            let detail = terminal_text(&format!("would move to {to}"));
+            entry_line(output, ">", Paint::Cyan, repository, &detail)?;
+        }
+        RemovalOutcome::Planned(RemovalPlan::Trash) => {
+            entry_line(output, "-", Paint::Cyan, repository, "would move to the trash")?;
+        }
+        RemovalOutcome::Moved { to } => {
+            let detail = terminal_text(&format!("moved to {to}"));
+            entry_line(output, ">", Paint::Green, repository, &detail)?;
+        }
+        RemovalOutcome::Trashed => {
+            entry_line(output, "-", Paint::Green, repository, "moved to the trash")?;
+        }
+        RemovalOutcome::Blocked { reason } => {
+            entry_line(output, "x", Paint::Red, repository, &safe_message(&reason.message()))?;
+        }
+        RemovalOutcome::Absent => {
+            write_line(
+                output,
+                format_args!(" {} {}", "=".cyan(), terminal_text(repository).bold()),
+            )?;
+        }
+    }
+
+    let cache = match entry.cache() {
+        CacheRemoval::Removed => Some("clone cache entry removed"),
+        CacheRemoval::WouldRemove => Some("clone cache entry would be removed"),
+        _ => None,
+    };
+    if let Some(cache) = cache {
+        write_line(output, format_args!("    {}", cache.dimmed()))?;
+    }
+    if let Some(warning) = entry.warning() {
+        write_line(output, format_args!("    {}", safe_message(warning).dimmed()))?;
     }
     Ok(())
 }

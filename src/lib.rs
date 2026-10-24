@@ -8,7 +8,9 @@ mod error;
 mod git;
 mod inspection;
 mod phases;
+mod removal;
 mod repositories;
+mod trash;
 mod zoxide;
 
 pub use app::api::{clone, refresh, status, sync, validate};
@@ -21,14 +23,16 @@ pub use app::refresh::{
     SkippedReason as RefreshSkippedReason,
 };
 pub use app::status::{
-    BranchTrackingStatus, DefaultBranchStatus, RemoteUrlMismatch, StatusCondition, StatusEntry,
+    BranchTrackingStatus, DefaultBranchStatus, RemoteUrlMismatch,
+    RemovalAction as StatusRemovalAction, RemovalStatus, StatusCondition, StatusEntry,
     StatusReport,
 };
 pub use app::sync::{
-    BlockedReason as SyncBlockedReason, Entry as SyncEntry, Outcome as SyncOutcome,
-    PhaseSummaries as SyncPhaseSummaries, PhaseSummary as SyncPhaseSummary, Plan as SyncPlan,
-    Report as SyncReport, SkippedReason as SyncSkippedReason, SyncOptions, ZoxideEntry,
-    ZoxideOutcome, ZoxideReport,
+    BlockedReason as SyncBlockedReason, CacheRemoval as SyncCacheRemoval, Entry as SyncEntry,
+    Outcome as SyncOutcome, PhaseSummaries as SyncPhaseSummaries, PhaseSummary as SyncPhaseSummary,
+    Plan as SyncPlan, RemovalEntry as SyncRemovalEntry, RemovalOutcome as SyncRemovalOutcome,
+    RemovalPlan as SyncRemovalPlan, Report as SyncReport, SkippedReason as SyncSkippedReason,
+    SyncOptions, ZoxideEntry, ZoxideOutcome, ZoxideReport,
 };
 pub use app::validate::Report as ValidationReport;
 pub use cache::Outcome as CacheOutcome;
@@ -37,3 +41,4 @@ pub use error::{
     AppError, AppErrorKind, ArgumentError, CacheError, ConfigError, GitError, InternalError,
     ProcessErrorKind, ZoxideError,
 };
+pub use removal::{BlockedReason as RemovalBlockedReason, LocalState as RemovalLocalState};

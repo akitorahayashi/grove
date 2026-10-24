@@ -60,7 +60,8 @@ validate` is the exception, always naming the file on stdout in its summary.
 
 `--config <path>` addresses a file directly and performs no search. `gv init`
 writes a minimal version 2 file to the current directory. `gv clone`, `gv cache
-list`, and `gv cache clean` without repository names read no configuration.
+list`, and `gv cache clean` without repository names (no targets, or only cache
+identities) read no configuration.
 
 ## Adding repositories
 
@@ -105,6 +106,48 @@ root are rejected. Symlinks are valid when their canonical targets remain inside
 the root. Symlink aliases share one operational identity for duplicate and
 nested path validation.
 
+## Removed repositories
+
+Leaving a repository out of the configuration never removes it: an entry may be
+absent because overrides were ignored, because a machine has no override, or by
+mistake. Removal and renaming are declared instead, under `removed`, which
+mirrors the live tables.
+
+```toml
+version = 2
+
+[groups.Skills]
+agent-device = "git@github.com:company/agent-device.git"
+
+[removed.groups.Skills]
+agent-device-plugin = { url = "git@github.com:company/agent-device-plugin.git", moved_to = "agent-device" }
+
+[removed.repos]
+old-tool = "git@github.com:company/old-tool.git"
+```
+
+`removed.repos` and `removed.groups.<directory>` take the same shapes as `repos`
+and `groups.<directory>`, and their paths derive by the same rules. A URL string
+is shorthand for a table holding only `url`.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `url` | yes | The old repository's URL; it proves ownership of the old path and names the clone cache entry to drop |
+| `path` | no | Replaces the derived old path, as for a live repository |
+| `moved_to` | no | The live repository that the old directory becomes |
+
+Removed names are unique among removed entries only. A live repository may
+share one, which is how a repository moving between groups is declared:
+`[removed.groups.A] tool = { url = "…", moved_to = "tool" }` beside
+`[groups.B] tool = "…"`. Removed entries are never CLI targets. Their paths
+share the live paths' namespace, so a removed path may neither equal nor nest
+with any live or other removed path. A removed path resolves its parent
+directories as live paths do but keeps its final component as written, so a
+symbolic link there is the path sync assesses, not its target. Each live
+repository is the `moved_to` of at most one removed entry. `gv sync` converges declared entries as
+described in [usage](usage.md#removed-repositories). A declaration can be
+dropped once every machine has synced it.
+
 ## Overrides
 
 Loading a configuration file — the root file or an include target — also looks
@@ -113,9 +156,11 @@ with `grove.override.toml`, and a `--config custom.toml` file pairs with
 `custom.override.toml`.
 
 Tables merge key by key, while scalars and arrays — including `include` — are
-replaced outright. A base repository URL string is normalized to its `url`
-field before merging, so a matching repository table in the override can change
-only `path` or `default_branch` without repeating the URL.
+replaced outright. A base repository URL string, live or removed, is normalized
+to its `url` field before merging, so a matching repository table in the
+override can change only `path` or `default_branch` (or `moved_to`) without
+repeating the URL. Removed entries for repositories that must stay private
+belong in the override, next to their live declarations.
 
 ```toml
 # grove.toml
@@ -178,6 +223,12 @@ field types, plus:
 - an empty, absolute, or non-normalized group directory
 - different groups in one merged file that resolve to the same directory
 - duplicate repository names or duplicate and nested repository identities
+- a removed entry without `url`, with a field other than `url`, `path`, and
+  `moved_to`, or with a name repeated among removed entries
+- a removed path equal to or nested with a live or another removed path
+- a `moved_to` that names no live repository, or a live repository another
+  removed entry already moves to
+- a `removed` table holding keys other than `repos` and `groups`
 - an absolute path, or a path outside the canonical grove root, for a
   repository's `path`
 - an absolute, nonexistent, duplicate, or nested include path

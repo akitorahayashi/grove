@@ -35,9 +35,23 @@ pub(crate) fn list(store: &Store) -> Result<Vec<EntryInfo>, AppError> {
     store.list()
 }
 
-/// Remove cache entries. With no targets, every entry is removed; otherwise
-/// only the selected repositories' entries are, and repositories without an
-/// entry are reported as absent rather than treated as failures.
+/// Whether a `gv cache clean` target names a cache identity rather than a
+/// configured repository. Repository names cannot contain `/`, and every
+/// remote identity has a host and a path. Only a bare relative local path,
+/// which Git resolves against the working directory rather than the grove,
+/// yields an identity without one; such an entry is not addressable by
+/// identity and leaves with `gv cache clean` without targets.
+pub(crate) fn is_identity(target: &str) -> bool {
+    target.contains('/')
+}
+
+/// Remove cache entries. With no targets, every entry is removed. Otherwise
+/// each identity target removes its entry, and must have one: an identity is
+/// typed by hand from `gv cache list`, so a miss is more likely a typo than a
+/// clean cache, and it fails before anything is removed. Repository targets
+/// remove their configured URL's entry, and repositories without one are
+/// reported as absent rather than treated as failures. Configuration is read
+/// only when a repository target needs it.
 pub(crate) fn clean(
     store: &Store,
     config_path: Option<&Path>,
@@ -47,11 +61,28 @@ pub(crate) fn clean(
         return Ok(CleanReport::new(store.clean_all()?, Vec::new()));
     }
 
-    let config = config::load(config_path)?;
-    let repositories = select_repositories(config.repositories(), targets)?;
+    let (identities, names): (Vec<_>, Vec<_>) =
+        targets.iter().cloned().partition(|target| is_identity(target));
+    if let Some(missing) = identities.iter().find(|identity| !store.contains_identity(identity)) {
+        return Err(AppError::cache_state(format!("no cache entry for '{missing}'")));
+    }
+    let repositories = if names.is_empty() {
+        Vec::new()
+    } else {
+        let config = config::load(config_path)?;
+        select_repositories(config.repositories(), &names)?.into_iter().cloned().collect()
+    };
+
     let mut removed = 0;
     let mut absent = Vec::new();
-    for repository in repositories {
+    for identity in &identities {
+        if store.remove_identity(identity)? {
+            removed += 1;
+        } else {
+            absent.push(identity.clone());
+        }
+    }
+    for repository in &repositories {
         if store.remove(repository.url())? {
             removed += 1;
         } else {
