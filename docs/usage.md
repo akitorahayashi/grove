@@ -28,6 +28,8 @@ gv --config ~/workspace/grove.toml status
 
 gv clone git@github.com:company/frontend.git
 gv clone git@github.com:company/frontend.git frontend
+gv clone frontend
+gv clone company/frontend
 
 gv cache list
 gv cache clean
@@ -280,6 +282,20 @@ the reason is reported on stderr. Unknown options are also delegated unchanged,
 so the installed Git remains the authority for validation and future options.
 Failure to prepare the cache is reported and falls back to the unchanged Git
 invocation, while a failure from the final clone is returned without retrying.
+
+A repository operand that is neither a URL nor an explicit path names a cache
+entry by the trailing `/`-separated segments of its identity: `frontend`,
+`company/frontend`, and `github.com/company/frontend` all reach the entry
+`github.com/company/frontend`. Segments match whole and case-sensitively, and a
+trailing `.git` is ignored on both sides. An operand containing `:`, starting
+with `/`, `./`, `../`, `~`, or `-`, or one that Git would clone locally because
+it, or it with `.git` or `.bundle` appended, exists, stays Git's. The operand is
+replaced with the origin URL the entry was last used with, and the clone then
+proceeds as for that URL, options and cache bypass included; the resolution is
+reported on stderr unless `--quiet` is given. No match, several matches, or an
+origin carrying credentials, a secret query parameter, a relative path, or a
+leading `-` fails the command before Git runs. Invocations with options grove
+does not recognize are delegated without resolution.
 
 `gv cache list` reports cached repositories in `URL`, `UPDATED`, and `SIZE`
 columns, followed by the total allocated size of all listed entries. `gv cache

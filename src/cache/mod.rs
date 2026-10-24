@@ -9,13 +9,17 @@
 //! placed clone is self-contained and correct even when the entry is stale or
 //! narrow — the entry only reduces network transfer.
 
-use std::ffi::OsStr;
+mod shorthand;
+
+use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+pub(crate) use shorthand::Shorthand;
+
 use crate::AppError;
-use crate::git::{CacheEntry, GitProgressSink};
+use crate::git::{CacheEntry, GitProgressSink, RepositoryProbe};
 use crate::repositories::{
     BranchName, RemoteUrl, ResolutionError, redact_urls_for_display, resolve_operational_path,
 };
@@ -167,18 +171,8 @@ impl Store {
     pub(crate) fn list(&self) -> Result<Vec<EntryInfo>, AppError> {
         let _global_lock = self.global_lock(LockMode::Shared)?;
         let mut infos = Vec::new();
-        for entry in fs::read_dir(&self.root)? {
-            let entry = entry?;
-            let directory_name = entry.file_name();
-            if !entry.file_type()?.is_dir()
-                || directory_name == LOCK_DIRECTORY
-                || is_temporary_entry_name(&directory_name)
-                || !is_entry_directory_name(&directory_name)
-            {
-                continue;
-            }
+        for (directory_name, container) in self.entry_directories()? {
             let _entry_lock = self.entry_directory_lock(&directory_name)?;
-            let container = entry.path();
             let Some(url) = read_metadata(&container, "url")? else {
                 continue;
             };
@@ -192,6 +186,61 @@ impl Store {
         }
         infos.sort_by(|left, right| left.url.cmp(&right.url));
         Ok(infos)
+    }
+
+    /// Resolve `shorthand` to the origin URL of the single entry whose identity
+    /// it matches. That origin is the URL the entry was last used with, so the
+    /// transport the user chose carries over. An origin grove would refuse to
+    /// write into configuration is refused here too, so credentials stored by an
+    /// earlier clone never spread into a new one, and an option-like origin
+    /// never reaches Git's argument parser.
+    pub(crate) fn resolve(
+        &self,
+        git: &impl RepositoryProbe,
+        shorthand: &Shorthand,
+    ) -> Result<RemoteUrl, AppError> {
+        let _global_lock = self.global_lock(LockMode::Shared)?;
+        let mut matches = Vec::new();
+        for (directory_name, container) in self.entry_directories()? {
+            let _entry_lock = self.entry_directory_lock(&directory_name)?;
+            if let Some(identity) = read_metadata(&container, "url")?
+                && shorthand.matches(&identity)
+            {
+                let origin = git.remote_url(&container.join("git"));
+                matches.push((identity, origin));
+            }
+        }
+
+        let (identity, origin) = match matches.len() {
+            0 => {
+                return Err(AppError::cache_state(format!(
+                    "no cache entry matches '{}'; clone it by URL first",
+                    shorthand.as_str()
+                )));
+            }
+            1 => matches.remove(0),
+            _ => {
+                let mut identities =
+                    matches.into_iter().map(|(identity, _)| identity).collect::<Vec<_>>();
+                identities.sort();
+                return Err(AppError::invalid_arguments(format!(
+                    "'{}' matches several cache entries: {}; name more of the identity",
+                    shorthand.as_str(),
+                    identities.join(", ")
+                )));
+            }
+        };
+        let refused = |reason: &dyn std::fmt::Display| {
+            AppError::cache_state(format!(
+                "cache entry '{identity}' cannot be cloned by name: {reason}; clone it by URL"
+            ))
+        };
+        let origin = origin?.ok_or_else(|| refused(&"the entry has no origin URL"))?;
+        if origin.as_process_argument().starts_with('-') {
+            return Err(refused(&"its origin URL begins with '-'"));
+        }
+        origin.ensure_safe_for_config().map_err(|error| refused(&error))?;
+        Ok(origin)
     }
 
     /// Remove every cache entry, returning how many were removed.
@@ -261,6 +310,24 @@ impl Store {
         }
         fs::remove_dir_all(&container)?;
         Ok(true)
+    }
+
+    /// Entry containers under the root; the caller holds the global lock.
+    fn entry_directories(&self) -> Result<Vec<(OsString, PathBuf)>, AppError> {
+        let mut directories = Vec::new();
+        for entry in fs::read_dir(&self.root)? {
+            let entry = entry?;
+            let directory_name = entry.file_name();
+            if !entry.file_type()?.is_dir()
+                || directory_name == LOCK_DIRECTORY
+                || is_temporary_entry_name(&directory_name)
+                || !is_entry_directory_name(&directory_name)
+            {
+                continue;
+            }
+            directories.push((directory_name, entry.path()));
+        }
+        Ok(directories)
     }
 
     fn ensure_entry(

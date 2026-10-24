@@ -35,6 +35,15 @@ pub(in crate::cli) fn run(
     }
 
     let report = api::clone_command(command.arguments)?;
+    if let Some((shorthand, url)) = report.resolved()
+        && !report.quiet()
+    {
+        output.stderr(format_args!(
+            "gv: clone resolved {} to {}\n",
+            terminal_text(shorthand.as_str()),
+            terminal_text(&url.to_string())
+        ))?;
+    }
     match report.cache() {
         CommandCache::Used(_) | CommandCache::Bypassed(_) if report.quiet() => {}
         CommandCache::Used(outcome) => output.stderr(format_args!(
