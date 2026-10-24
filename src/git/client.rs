@@ -127,6 +127,27 @@ pub trait CacheEntry: Sync {
     ) -> Result<(), AppError>;
 }
 
+/// What converging a declared-removed repository needs beyond the read-only
+/// probes: the local-only state that would be lost by discarding it, the
+/// worktree links that a move or deletion would break, and repointing origin
+/// after a move.
+pub trait Removal: Sync {
+    /// Whether `repository` is a linked worktree rather than a main worktree.
+    fn is_linked_worktree(&self, repository: &Path) -> Result<bool, AppError>;
+
+    /// Whether other worktrees, prunable ones included, share `repository`'s
+    /// common directory.
+    fn has_linked_worktrees(&self, repository: &Path) -> Result<bool, AppError>;
+
+    fn has_stash(&self, repository: &Path) -> Result<bool, AppError>;
+
+    /// Whether a local branch or HEAD holds a commit no remote-tracking ref
+    /// reaches. Judged from the refs already present, without fetching.
+    fn has_unpushed_commits(&self, repository: &Path) -> Result<bool, AppError>;
+
+    fn set_origin_url(&self, repository: &Path, url: &RemoteUrl) -> Result<(), AppError>;
+}
+
 /// Advancing and switching a repository's local default branch. Both methods
 /// resolve the Git common directory at mutation time and take the advisory
 /// lock there, so a repository whose `.git` indirection changed after
@@ -146,11 +167,11 @@ pub trait DefaultBranch: Sync {
 }
 
 /// The full Git surface grove owns, composed from the focused traits. Any type
-/// that implements all three satisfies it, so consumers bound only the traits
-/// they use while use cases that need the whole surface bound this.
-pub trait GitClient: RepositoryProbe + CacheEntry + DefaultBranch {}
+/// that implements all of them satisfies it, so consumers bound only the
+/// traits they use while use cases that need the whole surface bound this.
+pub trait GitClient: RepositoryProbe + CacheEntry + DefaultBranch + Removal {}
 
-impl<T: RepositoryProbe + CacheEntry + DefaultBranch> GitClient for T {}
+impl<T: RepositoryProbe + CacheEntry + DefaultBranch + Removal> GitClient for T {}
 
 pub trait GitProgressSink {
     fn progress(&mut self, progress: GitProgress) -> Result<(), AppError>;

@@ -243,7 +243,7 @@ impl CommandGitClient {
     }
 }
 
-fn optional_probe(
+pub(super) fn optional_probe(
     repository: &Path,
     args: &[&str],
     output: Output,
@@ -279,7 +279,7 @@ fn probe_failure(repository: &Path, args: &[&str], output: &Output) -> AppError 
     )
 }
 
-fn malformed_output(repository: &Path, args: &[&str], output: &str) -> AppError {
+pub(super) fn malformed_output(repository: &Path, args: &[&str], output: &str) -> AppError {
     let description = if output.trim().is_empty() {
         "Git returned empty output".to_string()
     } else {
@@ -316,7 +316,7 @@ pub(super) fn parse_git_version(output: &str) -> Option<(u32, u32, u32)> {
     Some((major, minor, patch))
 }
 
-fn stdout(output: &Output) -> String {
+pub(super) fn stdout(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
 

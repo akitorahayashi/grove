@@ -6,6 +6,7 @@ mod cache;
 mod overrides;
 mod planning;
 mod progress;
+mod removal;
 mod zoxide;
 
 #[test]

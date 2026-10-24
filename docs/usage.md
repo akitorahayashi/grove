@@ -32,6 +32,7 @@ gv clone git@github.com:company/frontend.git frontend
 gv cache list
 gv cache clean
 gv cache clean frontend
+gv cache clean github.com/company/old-tool
 ```
 
 `gv init`, with the alias `gv i`, creates `grove.toml` in the current directory.
@@ -99,6 +100,12 @@ URL preflight completes before network access, so a missing or mismatched
 origin is never fetched. The common-directory lock remains held through the
 reported post-fetch observations. Report entries preserve selection order.
 
+Removed declarations whose old path still exists follow the table in a
+`Removed` table that previews what `gv sync` would do with each: move to its
+destination, move to the trash, or stay blocked with the reason. With named
+repositories, only declarations moving to one of them are shown. Assessing
+them changes nothing.
+
 ## Sync
 
 `gv sync`, with the alias `gv s`, clones missing repositories and safely updates
@@ -144,6 +151,50 @@ override files. The base configuration's `include` list remains authoritative.
 Malformed, unreadable, and broken-symlink overrides therefore do not block this
 mode, while validation failures in the resulting base-only configuration do.
 The option composes with dry runs and zoxide registration.
+
+### Removed repositories
+
+Before checking, `gv sync` converges the `removed` declarations
+([configuration](config.md#removed-repositories)). Each old path is assessed
+by the first matching row:
+
+| Row | Old path | Action | Report |
+|---|---|---|---|
+| 1 | does not exist | nothing | none |
+| 2 | is a symbolic link, not a Git worktree root, without origin, or with an origin whose identity matches neither `url` nor the `moved_to` repository's URL | left in place | blocked |
+| 3 | is a linked worktree or has linked worktrees | left in place | blocked |
+| 4 | declares `moved_to` whose path does not exist | renamed to the destination, whose origin is then set to the destination URL | moved |
+| 5 | holds local-only state | left in place | blocked, naming the state |
+| 6 | anything else | moved to the operating system trash | trashed |
+
+Accepting the `moved_to` URL in row 2 covers a checkout whose origin was
+already repointed by hand. A move keeps everything in the directory, uncommitted
+work included, and the moved repository is then checked and updated in the
+same run under the normal rules. A rename that fails, for example across
+volumes, blocks rather than copying.
+
+Local-only state is uncommitted changes or untracked files (ignored files
+excepted), a stash, or a commit on a local branch or HEAD that no
+remote-tracking ref reaches. It is judged from the refs already present,
+without fetching, so stale refs err towards blocking. The trash is the user's
+Trash on macOS, through `NSFileManager`, and the freedesktop Trash on Linux, honoring
+`XDG_DATA_HOME`; ignored files such as `.tmp/` go to the trash with the
+repository and stay recoverable. A trash failure blocks; nothing is deleted
+permanently.
+
+The clone cache entry for each declaration's `url` is removed whatever the old
+path's state, unless a live repository shares its identity, as when a
+repository moves between groups. A failure is reported as a note without
+changing the result. A blocked removal fails the run like any blocked
+repository.
+
+| Option | Removed declarations |
+|---|---|
+| `--dry-run` | assessed and reported as planned moves and trashes, with cache entries that would be removed; nothing changes, and a planned destination is not reported as a clone |
+| `-i` | declarations in override files are not loaded |
+| `<repo>...` | only declarations whose `moved_to` names a selected repository |
+
+`gv refresh` never acts on removed declarations.
 
 ## Refresh
 
@@ -232,8 +283,13 @@ invocation, while a failure from the final clone is returned without retrying.
 
 `gv cache list` reports cached repositories in `URL`, `UPDATED`, and `SIZE`
 columns, followed by the total allocated size of all listed entries. `gv cache
-clean` removes every entry; `gv cache clean <repo>...` removes the entries backing
-the named configured repositories.
+clean` removes every entry. `gv cache clean <target>...` removes the entries
+named by its targets: a target containing `/` is an identity exactly as `gv
+cache list` prints it, and any other target is a configured repository name,
+since names cannot contain `/`. Identities reach entries no configuration
+names any more and read no configuration; one without an entry fails the
+command before anything is removed. A named repository without an entry is
+reported as not cached.
 
 ## Requirements
 
@@ -263,6 +319,11 @@ cache and returns a `CloneReport` carrying the resulting `CacheOutcome`. Sync
 and refresh report entries expose the structured blocked-reason detail through
 `blocked_details()`, returning `BlockedReasonDetails` such as a remote-URL
 mismatch's actual and expected values, so callers reproduce the CLI diagnostics.
+`SyncReport::removals()` lists the removed declarations sync acted on or
+planned, as `SyncRemovalEntry` values with a `SyncRemovalOutcome` and a
+`SyncCacheRemoval`, and `StatusReport::removals()` previews them as
+`RemovalStatus` values with a `StatusRemovalAction`; a blocked removal carries a
+`RemovalBlockedReason`, listing any `RemovalLocalState`.
 `AppError::kind()` exposes stable categories without exposing the error storage
 layout. Domain accessors retain typed details and underlying causes through
 `std::error::Error::source`; Git and zoxide failures expose process kind,

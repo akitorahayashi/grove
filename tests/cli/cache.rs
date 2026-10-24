@@ -165,3 +165,45 @@ fn cache_clean_unknown_name_fails() {
         .failure()
         .stderr(predicate::str::contains("missing"));
 }
+
+#[test]
+fn cache_clean_by_identity_removes_the_entry_without_reading_config() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    ctx.cli().arg("clone").arg(remote.url()).arg("cloned").assert().success();
+    ctx.write_config("not = [valid toml");
+
+    ctx.cli()
+        .args(["cache", "clean"])
+        .arg(remote.url())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Removed 1 cache entry"));
+
+    ctx.cli()
+        .args(["cache", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("blog.git").not());
+}
+
+#[test]
+fn cache_clean_unknown_identity_fails_before_removing_anything() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    ctx.cli().arg("clone").arg(remote.url()).arg("cloned").assert().success();
+
+    ctx.cli()
+        .args(["cache", "clean"])
+        .arg(remote.url())
+        .arg("example.com/missing/repo")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no cache entry for 'example.com/missing/repo'"));
+
+    ctx.cli()
+        .args(["cache", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("blog.git"));
+}

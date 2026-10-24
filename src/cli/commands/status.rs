@@ -6,7 +6,10 @@ use owo_colors::OwoColorize;
 
 use crate::AppError;
 use crate::app::api;
-use crate::app::status::{BranchTrackingStatus, DefaultBranchStatus, StatusCondition, StatusEntry};
+use crate::app::status::{
+    BranchTrackingStatus, DefaultBranchStatus, RemovalAction, RemovalStatus, StatusCondition,
+    StatusEntry,
+};
 
 use crate::cli::Completion;
 use crate::cli::output::{Output, terminal_text};
@@ -37,8 +40,32 @@ pub(in crate::cli) fn run(
     } else {
         print_table(entries, output)?;
     }
+    print_removals(report.removals(), output)?;
 
     Ok(Completion::Success)
+}
+
+fn print_removals(removals: &[RemovalStatus], output: &mut Output<'_>) -> io::Result<()> {
+    if removals.is_empty() {
+        return Ok(());
+    }
+    output.stdout(format_args!("\nRemoved\n"))?;
+    let mut table = Table::new(["NAME", "REPOSITORY", "ACTION"]);
+    for removal in removals {
+        let (action, paint) = match removal.action() {
+            RemovalAction::Move { to } => (terminal_text(&format!("move to {to}")), Paint::Cyan),
+            RemovalAction::Trash => ("trash".to_string(), Paint::Cyan),
+            RemovalAction::Blocked(reason) => {
+                (sanitize_summary(&format!("blocked: {}", reason.message())), Paint::Red)
+            }
+        };
+        table.push_row(vec![
+            Cell::new(terminal_text(removal.name()), Paint::Bold),
+            Cell::new(terminal_text(removal.display_path()), Paint::Cyan),
+            Cell::new(action, paint),
+        ]);
+    }
+    table.render(output)
 }
 
 fn print_table(entries: &[StatusEntry], output: &mut Output<'_>) -> io::Result<()> {

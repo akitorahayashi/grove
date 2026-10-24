@@ -531,3 +531,38 @@ fn status_reports_missing_git_before_inspection() {
         .failure()
         .stderr(predicate::str::contains("git is not available"));
 }
+
+#[test]
+fn status_previews_removed_declarations_whose_old_path_remains() {
+    let ctx = TestContext::new();
+    let old = ctx.create_remote("old");
+    let gone = ctx.create_remote("gone");
+    run_git(ctx.workspace(), &["clone", "--quiet", &old.url(), "old"]);
+    let config = ctx.write_config(&format!(
+        r#"
+version = 2
+
+[repos]
+new = "{new}"
+
+[removed.repos]
+old = {{ url = "{old}", moved_to = "new" }}
+gone = "{gone}"
+"#,
+        new = old.url(),
+        old = old.url(),
+        gone = gone.url(),
+    ));
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("status")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Removed"))
+        .stdout(predicate::str::contains("move to new"))
+        .stdout(predicate::str::contains("gone").not());
+
+    assert!(ctx.workspace().join("old/.git").exists());
+}

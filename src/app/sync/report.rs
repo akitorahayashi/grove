@@ -6,11 +6,21 @@ use crate::inspection;
 use crate::phases::Summary as PhaseSummary;
 use crate::repositories::RepositoryDefinition;
 
+use super::removal::{RemovalEntry, RemovalOutcome, RemovalPlan};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Plan {
-    Clone { url: String },
-    Fetch { branch: String },
+    Clone {
+        url: String,
+    },
+    Fetch {
+        branch: String,
+    },
+    /// The destination of a planned move, which a dry run does not clone.
+    Move {
+        from: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,6 +90,7 @@ pub enum Outcome {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PhaseSummaries {
+    removed: PhaseSummary,
     checked: PhaseSummary,
     prepared: PhaseSummary,
     updated: PhaseSummary,
@@ -88,12 +99,17 @@ pub struct PhaseSummaries {
 
 impl PhaseSummaries {
     pub(super) fn new(
+        removed: PhaseSummary,
         checked: PhaseSummary,
         prepared: PhaseSummary,
         updated: PhaseSummary,
         seeded: PhaseSummary,
     ) -> Self {
-        Self { checked, prepared, updated, seeded }
+        Self { removed, checked, prepared, updated, seeded }
+    }
+
+    pub fn removed(self) -> PhaseSummary {
+        self.removed
     }
 
     pub fn checked(self) -> PhaseSummary {
@@ -115,6 +131,7 @@ impl PhaseSummaries {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Report {
+    removals: Vec<RemovalEntry>,
     entries: Vec<Entry<Outcome>>,
     elapsed: Duration,
     phases: PhaseSummaries,
@@ -123,16 +140,39 @@ pub struct Report {
 
 impl Report {
     pub(super) fn new(
+        removals: Vec<RemovalEntry>,
         entries: Vec<Entry<Outcome>>,
         elapsed: Duration,
         phases: PhaseSummaries,
         zoxide: Option<ZoxideReport>,
     ) -> Self {
-        Self { entries, elapsed, phases, zoxide }
+        Self { removals, entries, elapsed, phases, zoxide }
+    }
+
+    /// The removed declarations sync acted on or would act on; an absent old
+    /// path with no cache entry to drop is omitted.
+    pub fn removals(&self) -> &[RemovalEntry] {
+        &self.removals
     }
 
     pub fn entries(&self) -> &[Entry<Outcome>] {
         &self.entries
+    }
+
+    pub fn planned_moves(&self) -> usize {
+        self.removals
+            .iter()
+            .filter(|entry| {
+                matches!(entry.outcome(), RemovalOutcome::Planned(RemovalPlan::Move { .. }))
+            })
+            .count()
+    }
+
+    pub fn planned_trashes(&self) -> usize {
+        self.removals
+            .iter()
+            .filter(|entry| matches!(entry.outcome(), RemovalOutcome::Planned(RemovalPlan::Trash)))
+            .count()
     }
 
     pub fn elapsed(&self) -> Duration {
@@ -196,17 +236,27 @@ impl Report {
             .iter()
             .filter(|entry| matches!(entry.outcome(), Outcome::Blocked { .. }))
             .count()
+            + self.blocked_removals()
+    }
+
+    fn blocked_removals(&self) -> usize {
+        self.removals
+            .iter()
+            .filter(|entry| matches!(entry.outcome(), RemovalOutcome::Blocked { .. }))
+            .count()
     }
 
     pub fn has_failures(&self) -> bool {
-        self.entries.iter().any(|entry| {
-            matches!(
-                entry.outcome(),
-                Outcome::Skipped { .. }
-                    | Outcome::Blocked { .. }
-                    | Outcome::UpdatedButRestorationFailed { .. }
-            )
-        }) || self.zoxide.as_ref().is_some_and(ZoxideReport::has_failures)
+        self.blocked_removals() > 0
+            || self.entries.iter().any(|entry| {
+                matches!(
+                    entry.outcome(),
+                    Outcome::Skipped { .. }
+                        | Outcome::Blocked { .. }
+                        | Outcome::UpdatedButRestorationFailed { .. }
+                )
+            })
+            || self.zoxide.as_ref().is_some_and(ZoxideReport::has_failures)
     }
 }
 

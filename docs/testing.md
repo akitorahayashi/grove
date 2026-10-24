@@ -13,7 +13,7 @@ binaries plus a shared fixture module:
 `tests/cli/`, one file per subcommand: `add.rs`, `cache.rs`, `clone.rs`, `init.rs`,
   `status.rs`, and `validate.rs`, plus responsibility-oriented `refresh/` and
   `sync/` modules. `refresh/` splits out `planning` and `safety`; `sync/`
-  splits out `planning`, `cache`, `progress`, and `zoxide`. Each `mod.rs`
+  splits out `planning`, `cache`, `progress`, `removal`, and `zoxide`. Each `mod.rs`
   keeps the module wiring and its subcommand's core flow.
 - `tests/library.rs` is the crate root for public library-facade behavior. It
   pulls in `tests/library/`: `error_contract.rs`, `facade.rs`,
@@ -24,7 +24,10 @@ binaries plus a shared fixture module:
 - `tests/harness/git_process.rs` owns shared local-commit and Git-wrapper
   fixtures used by failure-path suites.
 
-Filesystem and process tests use temporary directories. Git observation parsers
+Filesystem and process tests use temporary directories. Nothing reaches the
+real trash: unit tests inject a trash double, and the CLI test that trashes a
+repository runs on Linux only, with `XDG_DATA_HOME` inside its temporary
+directory. Git observation parsers
 are tested against independent machine-readable fixtures. Status concurrency
 tests use synchronization primitives rather than elapsed-time assumptions and
 assert the externally visible ordering rather than Git invocation counts.

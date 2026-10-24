@@ -12,7 +12,10 @@ pub(super) fn dry_run(repositories: &[&RepositoryDefinition], entries: &[Entry])
         .iter()
         .zip(entries)
         .filter(|(_, entry)| {
-            matches!(entry.outcome(), Outcome::Planned(Plan::Clone { .. } | Plan::Fetch { .. }))
+            matches!(
+                entry.outcome(),
+                Outcome::Planned(Plan::Clone { .. } | Plan::Fetch { .. } | Plan::Move { .. })
+            )
         })
         .map(|(repository, _)| ZoxideEntry::new(repository, ZoxideOutcome::WouldRegister))
         .collect();

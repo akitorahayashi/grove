@@ -8,13 +8,15 @@ mod command;
 mod default_branch;
 mod probe;
 mod progress;
+mod removal;
 mod tracking;
 mod update;
 mod worktree;
 
 pub(crate) use client::RepositoryLock;
 pub use client::{
-    CacheEntry, DefaultBranch, GitClient, GitProgressSink, NoopGitProgressSink, RepositoryProbe,
+    CacheEntry, DefaultBranch, GitClient, GitProgressSink, NoopGitProgressSink, Removal,
+    RepositoryProbe,
 };
 pub(crate) use clone::{CacheDecision as CloneCacheDecision, CloneCommand, CloneInvocation};
 pub use command::CommandGitClient;

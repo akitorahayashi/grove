@@ -8,16 +8,19 @@ use crate::cache::Store;
 use crate::config;
 use crate::git::{CacheEntry, DefaultBranch, GitClient, RepositoryProbe};
 use crate::phases::{self, DiscardEvents, EventProgress, EventSink, Slots, Task as PhaseTask};
-use crate::repositories::{RepositoryDefinition, select_repositories};
+use crate::repositories::{RepositoryDefinition, RepositoryName, select_repositories};
+use crate::trash::Trash;
 
 mod check;
 mod prepare;
+mod removal;
 mod report;
 mod update;
 mod zoxide;
 
 pub(crate) use crate::app::entry::BlockedReasonDetails;
 pub use crate::phases::Summary as PhaseSummary;
+pub use removal::{CacheRemoval, RemovalEntry, RemovalOutcome, RemovalPlan};
 pub use report::{
     BlockedReason, Outcome, PhaseSummaries, Plan, Report, SkippedReason, ZoxideEntry,
     ZoxideOutcome, ZoxideReport,
@@ -60,6 +63,7 @@ struct SeedOutcome {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
+    Removing,
     Checking,
     Preparing,
     Updating,
@@ -97,7 +101,7 @@ impl SyncOptions {
 }
 
 pub fn execute_with_options(
-    ctx: &AppContext<impl GitClient, impl crate::zoxide::ZoxideClient>,
+    ctx: &AppContext<impl GitClient, impl crate::zoxide::ZoxideClient, impl Trash>,
     config_path: Option<&Path>,
     targets: &[String],
     options: SyncOptions,
@@ -106,7 +110,7 @@ pub fn execute_with_options(
 }
 
 pub(crate) fn execute_with_events(
-    ctx: &AppContext<impl GitClient, impl crate::zoxide::ZoxideClient>,
+    ctx: &AppContext<impl GitClient, impl crate::zoxide::ZoxideClient, impl Trash>,
     config_path: Option<&Path>,
     targets: &[String],
     options: SyncOptions,
@@ -123,8 +127,19 @@ pub(crate) fn execute_with_events(
     let started = Instant::now();
     let mut entries = Slots::new(repositories.len());
 
-    let (decisions, checked) =
-        check_phase(ctx.git(), &repositories, parallelism, options.dry_run(), events)?;
+    let removed = crate::removal::select(&config, &repositories, !targets.is_empty());
+    let (removals, removed_summary) =
+        removal::phase(ctx, &config, &removed, options.dry_run(), events)?;
+    let planned_moves = planned_moves(&config, &removals);
+
+    let (decisions, checked) = check_phase(
+        ctx.git(),
+        &repositories,
+        parallelism,
+        options.dry_run(),
+        &planned_moves,
+        events,
+    )?;
 
     let mut preparations = Vec::new();
     let mut seeds = Vec::new();
@@ -181,8 +196,27 @@ pub(crate) fn execute_with_events(
     } else {
         None
     };
-    let phases = PhaseSummaries::new(checked, prepared, updated, seeded);
-    Ok(Report::new(entries, started.elapsed(), phases, zoxide))
+    let phases = PhaseSummaries::new(removed_summary, checked, prepared, updated, seeded);
+    Ok(Report::new(removals, entries, started.elapsed(), phases, zoxide))
+}
+
+/// Destinations a dry run plans to fill by moving an old directory, keyed by
+/// repository name, with the old display path they move from.
+fn planned_moves(
+    config: &config::ResolvedConfig,
+    removals: &[RemovalEntry],
+) -> HashMap<RepositoryName, String> {
+    removals
+        .iter()
+        .filter_map(|entry| match entry.outcome() {
+            RemovalOutcome::Planned(RemovalPlan::Move { to }) => config
+                .repositories()
+                .iter()
+                .find(|repository| repository.display_path() == to)
+                .map(|repository| (repository.name().clone(), entry.repository().to_string())),
+            _ => None,
+        })
+        .collect()
 }
 
 fn check_phase(
@@ -190,10 +224,11 @@ fn check_phase(
     repositories: &[&RepositoryDefinition],
     parallelism: usize,
     dry_run: bool,
+    planned_moves: &HashMap<RepositoryName, String>,
     events: &impl EventSink<Phase>,
 ) -> Result<(Vec<check::Decision>, PhaseSummary), AppError> {
     phases::run_check(events, Phase::Checking, repositories, parallelism, |repository| {
-        check::repository(git, repository, dry_run)
+        check::repository(git, repository, dry_run, planned_moves.get(repository.name()))
     })
 }
 

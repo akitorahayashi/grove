@@ -3,24 +3,61 @@ use std::path::{Path, PathBuf};
 use crate::AppError;
 use crate::app::AppContext;
 use crate::config;
-use crate::git::{NoopGitProgressSink, RepositoryProbe};
+use crate::git::{NoopGitProgressSink, Removal, RepositoryProbe};
 use crate::inspection::{self, BranchReadiness, Ownership};
 use crate::phases::{Slots, workers};
+use crate::removal::{self, Assessment, BlockedReason};
 use crate::repositories::select_repositories;
 use crate::repositories::{BranchName, RemoteUrl, RepositoryDefinition};
 
 #[derive(Debug, Clone)]
 pub struct StatusReport {
     entries: Vec<StatusEntry>,
+    removals: Vec<RemovalStatus>,
 }
 
 impl StatusReport {
-    pub(crate) fn new(entries: Vec<StatusEntry>) -> Self {
-        Self { entries }
+    pub(crate) fn new(entries: Vec<StatusEntry>, removals: Vec<RemovalStatus>) -> Self {
+        Self { entries, removals }
     }
 
     pub fn entries(&self) -> &[StatusEntry] {
         &self.entries
+    }
+
+    /// Removed declarations whose old path still exists, with what sync
+    /// would do to each.
+    pub fn removals(&self) -> &[RemovalStatus] {
+        &self.removals
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RemovalAction {
+    Move { to: String },
+    Trash,
+    Blocked(BlockedReason),
+}
+
+#[derive(Debug, Clone)]
+pub struct RemovalStatus {
+    name: String,
+    display_path: String,
+    action: RemovalAction,
+}
+
+impl RemovalStatus {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn display_path(&self) -> &str {
+        &self.display_path
+    }
+
+    pub fn action(&self) -> &RemovalAction {
+        &self.action
     }
 }
 
@@ -174,7 +211,7 @@ impl RemoteUrlMismatch {
     }
 }
 
-pub fn execute<G: RepositoryProbe, Z>(
+pub fn execute<G: RepositoryProbe + Removal, Z>(
     ctx: &AppContext<G, Z>,
     config_path: Option<&Path>,
     targets: &[String],
@@ -184,8 +221,33 @@ pub fn execute<G: RepositoryProbe, Z>(
     let config = config::load(config_path)?;
     let repositories = select_repositories(config.repositories(), targets)?;
     let parallelism = std::thread::available_parallelism()?.get();
+    let removals = collect_removals(ctx.git(), &config, &repositories, !targets.is_empty())?;
 
-    Ok(StatusReport::new(collect_entries(ctx.git(), &repositories, fetch, parallelism)?))
+    Ok(StatusReport::new(collect_entries(ctx.git(), &repositories, fetch, parallelism)?, removals))
+}
+
+fn collect_removals(
+    git: &(impl RepositoryProbe + Removal),
+    config: &config::ResolvedConfig,
+    repositories: &[&RepositoryDefinition],
+    targeted: bool,
+) -> Result<Vec<RemovalStatus>, AppError> {
+    let mut removals = Vec::new();
+    for removed in removal::select(config, repositories, targeted) {
+        let destination = removal::destination(config, removed);
+        let action = match removal::assess(git, removed, destination)? {
+            Assessment::Absent => continue,
+            Assessment::Blocked(reason) => RemovalAction::Blocked(reason),
+            Assessment::Trash => RemovalAction::Trash,
+            Assessment::Move { to } => RemovalAction::Move { to },
+        };
+        removals.push(RemovalStatus {
+            name: removed.name().to_string(),
+            display_path: removed.display_path().to_string(),
+            action,
+        });
+    }
+    Ok(removals)
 }
 
 /// Collect one status entry per repository, preserving selection order. The

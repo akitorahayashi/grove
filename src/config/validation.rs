@@ -5,8 +5,8 @@ use super::include::{LoadedConfigFile, LoadedConfigTree};
 use super::resolved::{GroupDirectory, ResolvedConfig};
 use crate::AppError;
 use crate::repositories::{
-    BranchName, RemoteUrl, RepositoryDefinition, RepositoryName, ResolutionError,
-    normalize_lexically, resolve_operational_path,
+    BranchName, RemoteUrl, RemovedRepository, RepositoryDefinition, RepositoryName,
+    ResolutionError, normalize_lexically, resolve_operational_path,
 };
 
 pub(super) fn resolve(tree: LoadedConfigTree) -> Result<ResolvedConfig, AppError> {
@@ -76,9 +76,94 @@ pub(super) fn resolve(tree: LoadedConfigTree) -> Result<ResolvedConfig, AppError
         }
     }
 
-    validate_no_nested_repository_paths(&repositories)?;
+    let removed = resolve_removed(&tree, &names, &mut paths)?;
 
-    Ok(ResolvedConfig::new(tree.root_path, groups, repositories))
+    let all_paths = repositories
+        .iter()
+        .map(RepositoryDefinition::path)
+        .chain(removed.iter().map(RemovedRepository::path))
+        .collect::<Vec<_>>();
+    validate_no_nested_repository_paths(&all_paths)?;
+
+    Ok(ResolvedConfig::new(tree.root_path, groups, repositories, removed))
+}
+
+/// Removed names share no namespace with live ones: moving a repository
+/// between groups keeps its name, and the CLI never addresses a removed entry
+/// by name. Their paths do share one, because sync acts on them.
+fn resolve_removed(
+    tree: &LoadedConfigTree,
+    live_names: &HashMap<String, PathBuf>,
+    paths: &mut HashMap<PathBuf, String>,
+) -> Result<Vec<RemovedRepository>, AppError> {
+    let mut removed = Vec::new();
+    let mut names = HashMap::new();
+
+    for file in &tree.files {
+        for entry in &file.raw.removed {
+            let raw = &entry.repository;
+            let path = match raw.path.as_deref() {
+                Some(path) => {
+                    required_field(Some(path), &file.path, &format!("{}.path", entry.field))?
+                }
+                None => entry.default_path.as_str(),
+            };
+            let url =
+                required_field(raw.url.as_deref(), &file.path, &format!("{}.url", entry.field))?;
+            let name = RepositoryName::new(&entry.name)?;
+            let (resolved_path, display_path) = resolve_repository_path(
+                &file.directory,
+                path,
+                &tree.root_directory,
+                &file.path,
+                name.as_str(),
+            )?;
+            let url = validate_url(url, &file.path, name.as_str())?;
+            let moved_to = raw
+                .moved_to
+                .as_deref()
+                .map(|target| validate_moved_to(target, live_names, &file.path, &name))
+                .transpose()?;
+
+            if let Some(existing) = names.insert(name.as_str().to_string(), file.path.clone()) {
+                return Err(AppError::config_error(format!(
+                    "{}: duplicate removed repository name '{}' already defined in {}",
+                    file.path.display(),
+                    name,
+                    existing.display()
+                )));
+            }
+            if let Some(existing_name) =
+                paths.insert(resolved_path.clone(), name.as_str().to_string())
+            {
+                return Err(AppError::config_error(format!(
+                    "{}: duplicate repository path '{}' also used by '{}'",
+                    file.path.display(),
+                    resolved_path.display(),
+                    existing_name
+                )));
+            }
+
+            removed.push(RemovedRepository::new(name, resolved_path, display_path, url, moved_to));
+        }
+    }
+
+    Ok(removed)
+}
+
+fn validate_moved_to(
+    target: &str,
+    live_names: &HashMap<String, PathBuf>,
+    source: &Path,
+    name: &RepositoryName,
+) -> Result<RepositoryName, AppError> {
+    match RepositoryName::new(target) {
+        Ok(target) if live_names.contains_key(target.as_str()) => Ok(target),
+        _ => Err(AppError::config_error(format!(
+            "{}: removed repository '{name}' moves to '{target}', which is not a configured repository",
+            source.display()
+        ))),
+    }
 }
 
 fn resolve_group_directories(
@@ -210,16 +295,14 @@ fn resolve_repository_path(
     Ok((resolved, relative_display(root, &lexical)))
 }
 
-fn validate_no_nested_repository_paths(
-    repositories: &[RepositoryDefinition],
-) -> Result<(), AppError> {
-    for (index, left) in repositories.iter().enumerate() {
-        for right in repositories.iter().skip(index + 1) {
-            if left.path().starts_with(right.path()) || right.path().starts_with(left.path()) {
+fn validate_no_nested_repository_paths(paths: &[&Path]) -> Result<(), AppError> {
+    for (index, left) in paths.iter().enumerate() {
+        for right in paths.iter().skip(index + 1) {
+            if left.starts_with(right) || right.starts_with(left) {
                 return Err(AppError::config_error(format!(
                     "repository paths must not be nested: '{}' and '{}'",
-                    left.path().display(),
-                    right.path().display()
+                    left.display(),
+                    right.display()
                 )));
             }
         }

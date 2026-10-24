@@ -219,10 +219,20 @@ impl Store {
 
     /// Remove the cache entry for a single URL, if present.
     pub(crate) fn remove(&self, url: &RemoteUrl) -> Result<bool, AppError> {
-        let key = url.identity();
+        self.remove_identity(&url.identity())
+    }
+
+    pub(crate) fn contains_identity(&self, identity: &str) -> bool {
+        self.root.join(entry_directory_name(identity)).exists()
+    }
+
+    /// Remove the cache entry recorded under `identity`, as `list` reports it,
+    /// if present. The identity is matched verbatim rather than reparsed as a
+    /// URL: a `host:port/path` identity would read back as scp syntax.
+    pub(crate) fn remove_identity(&self, key: &str) -> Result<bool, AppError> {
         let _global_lock = self.global_lock(LockMode::Shared)?;
-        let _entry_lock = self.entry_lock(&key)?;
-        let container = self.root.join(entry_directory_name(&key));
+        let _entry_lock = self.entry_lock(key)?;
+        let container = self.root.join(entry_directory_name(key));
         let metadata = match fs::symlink_metadata(&container) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),

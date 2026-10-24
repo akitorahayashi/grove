@@ -64,6 +64,7 @@ src/
       check.rs
       mod.rs
       prepare.rs
+      removal.rs
       report.rs
       update.rs
       zoxide.rs
@@ -71,6 +72,8 @@ src/
   cache/
     mod.rs
   inspection.rs
+  removal.rs
+  trash.rs
   phases/
     events.rs
     mod.rs
@@ -91,6 +94,7 @@ src/
     mod.rs
     name.rs
     path.rs
+    removed.rs
     selection.rs
     url.rs
   git/
@@ -102,6 +106,7 @@ src/
     mod.rs
     probe.rs
     progress.rs
+    removal.rs
     tracking.rs
     update.rs
     worktree.rs
@@ -133,8 +138,10 @@ has non-panicking handling.
 that sync and refresh share, generic over each use case's outcome vocabulary and
 carrying the structured blocked-reason detail a caller renders beyond the
 message. It holds one module per subcommand and a facade that delegates to each
-without embedding command logic. Sync has check, clone/fetch preparation, update,
-seeding, and optional zoxide phases. Refresh has check, fetch, and
+without embedding command logic. Sync has removal, check, clone/fetch
+preparation, update, seeding, and optional zoxide phases; the removal phase runs
+its few entries sequentially, outside `phases`, because its unit is a removed
+declaration rather than a repository definition. Refresh has check, fetch, and
 default-branch refresh phases. Status inspects repositories through bounded
 parallel workers. Fetching status additionally keys workers by Git common
 directory. Add resolves worktree roots and origins sequentially, commits each
@@ -169,6 +176,16 @@ application errors.
 the conditions the use cases share, so their reason vocabularies map from one
 probe and their shared messages cannot drift.
 
+`removal` owns the assessment of `removed` declarations that sync acts on and
+status previews, the selection of declarations a targeted command covers, and
+the blocked-reason vocabulary both report. Assessment is side-effect free and
+settles ownership with probes that never run repository-configured commands
+before observing the working tree, as `inspection` does.
+
+`trash` owns the operating system trash boundary behind a trait that the
+application context injects, so tests never touch a real trash. It has no
+permanent-deletion fallback.
+
 `config` discovers the root file by ascending from the current directory to the
 nearest `grove.toml`, resolves one include level, decodes TOML, and
 validates the complete catalog without invoking Git or zoxide. Root repository
@@ -184,7 +201,9 @@ Discovery itself never treats a standalone override as a root. It rejects
 schema violations, unsupported versions, duplicate or nested includes, invalid
 names and branch refs, aliased groups within one merged file,
 duplicate or nested repository identities, absolute paths, paths outside the
-canonical grove root, and an override that exists but cannot be resolved. Its
+canonical grove root, and an override that exists but cannot be resolved.
+Removed declarations decode through the same entry grammar, resolve paths in
+the live repositories' namespace, and keep a name namespace of their own. Its
 addition session holds the selected base-directory lock, reuses an existing
 group spelling when the resolved group directory matches the worktree parent,
 edits TOML without changing unrelated formatting, validates prospective source
@@ -202,9 +221,10 @@ identity while retaining the configured display path.
 
 `git` owns Git availability, strict probe grammars, progress parsing, clone and
 fetch execution, worktree-root and origin discovery for configuration additions,
-and default-branch mutation. `command` owns the common process
-runner and bounded progress diagnostics; `probe`, `cache_entry`, and
-`branch_update` own their corresponding command families. Worktree branch and
+default-branch mutation, and the local-only state and origin repointing that
+removal needs. `command` owns the common process runner and bounded progress
+diagnostics; `probe`, `cache_entry`, `branch_update`, and `removal` own their
+corresponding command families. Worktree branch and
 cleanliness come from one Porcelain v2 observation. Local and remote
 default-branch refs come from one exact ref observation, while divergence,
 origin HEAD, remote URL, and the Git common directory retain their separate
