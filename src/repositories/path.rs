@@ -52,6 +52,21 @@ pub(crate) fn resolve_operational_path(
     }
 }
 
+/// Resolves like `resolve_operational_path` but keeps the final component as
+/// written: sync moves or trashes this path, so a symbolic link there must stay
+/// visible as the link rather than resolve to the directory it points at.
+pub(crate) fn resolve_entry_path(
+    candidate: &Path,
+    canonical_root: &Path,
+) -> Result<PathBuf, ResolutionError> {
+    let (Some(parent), Some(name)) = (candidate.parent(), candidate.file_name()) else {
+        return Err(ResolutionError::OutsideRoot);
+    };
+    let mut resolved = resolve_operational_path(parent, canonical_root)?;
+    resolved.push(name);
+    Ok(resolved)
+}
+
 pub(crate) fn normalize_lexically(path: &Path) -> PathBuf {
     let mut normalized = PathBuf::new();
     for component in path.components() {

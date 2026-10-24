@@ -141,7 +141,10 @@ share one, which is how a repository moving between groups is declared:
 `[removed.groups.A] tool = { url = "…", moved_to = "tool" }` beside
 `[groups.B] tool = "…"`. Removed entries are never CLI targets. Their paths
 share the live paths' namespace, so a removed path may neither equal nor nest
-with any live or other removed path. `gv sync` converges declared entries as
+with any live or other removed path. A removed path resolves its parent
+directories as live paths do but keeps its final component as written, so a
+symbolic link there is the path sync assesses, not its target. Each live
+repository is the `moved_to` of at most one removed entry. `gv sync` converges declared entries as
 described in [usage](usage.md#removed-repositories). A declaration can be
 dropped once every machine has synced it.
 
@@ -223,7 +226,8 @@ field types, plus:
 - a removed entry without `url`, with a field other than `url`, `path`, and
   `moved_to`, or with a name repeated among removed entries
 - a removed path equal to or nested with a live or another removed path
-- a `moved_to` that names no live repository
+- a `moved_to` that names no live repository, or a live repository another
+  removed entry already moves to
 - a `removed` table holding keys other than `repos` and `groups`
 - an absolute path, or a path outside the canonical grove root, for a
   repository's `path`

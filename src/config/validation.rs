@@ -1,13 +1,24 @@
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 
+use super::file::RawEntry;
 use super::include::{LoadedConfigFile, LoadedConfigTree};
 use super::resolved::{GroupDirectory, ResolvedConfig};
 use crate::AppError;
 use crate::repositories::{
     BranchName, RemoteUrl, RemovedRepository, RepositoryDefinition, RepositoryName,
-    ResolutionError, normalize_lexically, resolve_operational_path,
+    ResolutionError, normalize_lexically, resolve_entry_path, resolve_operational_path,
 };
+
+type PathResolution = fn(&Path, &Path) -> Result<PathBuf, ResolutionError>;
+
+/// The fields live and removed entries share, validated alike.
+struct ResolvedEntry {
+    name: RepositoryName,
+    path: PathBuf,
+    display_path: String,
+    url: RemoteUrl,
+}
 
 pub(super) fn resolve(tree: LoadedConfigTree) -> Result<ResolvedConfig, AppError> {
     let mut groups = Vec::new();
@@ -20,57 +31,27 @@ pub(super) fn resolve(tree: LoadedConfigTree) -> Result<ResolvedConfig, AppError
         groups.extend(resolve_group_directories(file, &tree.root_directory)?);
 
         for entry in &file.raw.repositories {
-            let name = entry.name.as_str();
             let raw = &entry.repository;
-            let path = match raw.path.as_deref() {
-                Some(path) => {
-                    required_field(Some(path), &file.path, &format!("{}.path", entry.field))?
-                }
-                None => entry.default_path.as_str(),
-            };
-            let url =
-                required_field(raw.url.as_deref(), &file.path, &format!("{}.url", entry.field))?;
-            let repository_name = RepositoryName::new(name)?;
-            let (resolved_path, display_path) = resolve_repository_path(
-                &file.directory,
-                path,
+            let resolved = resolve_entry(
+                file,
+                entry,
+                raw.path.as_deref(),
+                raw.url.as_deref(),
                 &tree.root_directory,
-                &file.path,
-                repository_name.as_str(),
+                resolve_operational_path,
             )?;
-            let source_config = file.path.clone();
             let default_branch =
                 validate_default_branch(raw.default_branch.as_deref(), &file.path)?;
-            let url = validate_url(url, &file.path, repository_name.as_str())?;
-
-            if let Some(existing) =
-                names.insert(repository_name.as_str().to_string(), file.path.clone())
-            {
-                return Err(AppError::config_error(format!(
-                    "{}: duplicate repository name '{}' already defined in {}",
-                    file.path.display(),
-                    repository_name,
-                    existing.display()
-                )));
-            }
-            if let Some(existing_name) =
-                paths.insert(resolved_path.clone(), repository_name.as_str().to_string())
-            {
-                return Err(AppError::config_error(format!(
-                    "{}: duplicate repository path '{}' also used by '{}'",
-                    file.path.display(),
-                    resolved_path.display(),
-                    existing_name
-                )));
-            }
+            claim_name(&mut names, &resolved.name, file, "repository")?;
+            claim_path(&mut paths, &resolved, file)?;
 
             repositories.push(RepositoryDefinition::new(
-                repository_name,
-                resolved_path,
-                display_path,
-                url,
+                resolved.name,
+                resolved.path,
+                resolved.display_path,
+                resolved.url,
                 default_branch,
-                source_config,
+                file.path.clone(),
                 tree.root_directory.clone(),
             ));
         }
@@ -90,7 +71,9 @@ pub(super) fn resolve(tree: LoadedConfigTree) -> Result<ResolvedConfig, AppError
 
 /// Removed names share no namespace with live ones: moving a repository
 /// between groups keeps its name, and the CLI never addresses a removed entry
-/// by name. Their paths do share one, because sync acts on them.
+/// by name. Their paths do share one, because sync acts on them. A destination
+/// takes at most one removed entry, since only the first could move into it
+/// and a dry run could not report what the others would then do.
 fn resolve_removed(
     tree: &LoadedConfigTree,
     live_names: &HashMap<String, PathBuf>,
@@ -98,57 +81,104 @@ fn resolve_removed(
 ) -> Result<Vec<RemovedRepository>, AppError> {
     let mut removed = Vec::new();
     let mut names = HashMap::new();
+    let mut destinations = HashMap::new();
 
     for file in &tree.files {
         for entry in &file.raw.removed {
             let raw = &entry.repository;
-            let path = match raw.path.as_deref() {
-                Some(path) => {
-                    required_field(Some(path), &file.path, &format!("{}.path", entry.field))?
-                }
-                None => entry.default_path.as_str(),
-            };
-            let url =
-                required_field(raw.url.as_deref(), &file.path, &format!("{}.url", entry.field))?;
-            let name = RepositoryName::new(&entry.name)?;
-            let (resolved_path, display_path) = resolve_repository_path(
-                &file.directory,
-                path,
+            let resolved = resolve_entry(
+                file,
+                entry,
+                raw.path.as_deref(),
+                raw.url.as_deref(),
                 &tree.root_directory,
-                &file.path,
-                name.as_str(),
+                resolve_entry_path,
             )?;
-            let url = validate_url(url, &file.path, name.as_str())?;
             let moved_to = raw
                 .moved_to
                 .as_deref()
-                .map(|target| validate_moved_to(target, live_names, &file.path, &name))
+                .map(|target| validate_moved_to(target, live_names, &file.path, &resolved.name))
                 .transpose()?;
-
-            if let Some(existing) = names.insert(name.as_str().to_string(), file.path.clone()) {
-                return Err(AppError::config_error(format!(
-                    "{}: duplicate removed repository name '{}' already defined in {}",
-                    file.path.display(),
-                    name,
-                    existing.display()
-                )));
-            }
-            if let Some(existing_name) =
-                paths.insert(resolved_path.clone(), name.as_str().to_string())
+            claim_name(&mut names, &resolved.name, file, "removed repository")?;
+            claim_path(paths, &resolved, file)?;
+            if let Some(target) = &moved_to
+                && let Some(existing) = destinations.insert(target.clone(), resolved.name.clone())
             {
                 return Err(AppError::config_error(format!(
-                    "{}: duplicate repository path '{}' also used by '{}'",
+                    "{}: removed repositories '{existing}' and '{}' both move to '{target}'",
                     file.path.display(),
-                    resolved_path.display(),
-                    existing_name
+                    resolved.name
                 )));
             }
 
-            removed.push(RemovedRepository::new(name, resolved_path, display_path, url, moved_to));
+            removed.push(RemovedRepository::new(
+                resolved.name,
+                resolved.path,
+                resolved.display_path,
+                resolved.url,
+                moved_to,
+            ));
         }
     }
 
     Ok(removed)
+}
+
+fn resolve_entry<T>(
+    file: &LoadedConfigFile,
+    entry: &RawEntry<T>,
+    path: Option<&str>,
+    url: Option<&str>,
+    root: &Path,
+    resolution: PathResolution,
+) -> Result<ResolvedEntry, AppError> {
+    let path = match path {
+        Some(path) => required_field(Some(path), &file.path, &format!("{}.path", entry.field))?,
+        None => entry.default_path.as_str(),
+    };
+    let url = required_field(url, &file.path, &format!("{}.url", entry.field))?;
+    let name = RepositoryName::new(&entry.name)?;
+    let (path, display_path) = resolve_repository_path(
+        &file.directory,
+        path,
+        root,
+        &file.path,
+        name.as_str(),
+        resolution,
+    )?;
+    let url = validate_url(url, &file.path, name.as_str())?;
+    Ok(ResolvedEntry { name, path, display_path, url })
+}
+
+fn claim_name(
+    names: &mut HashMap<String, PathBuf>,
+    name: &RepositoryName,
+    file: &LoadedConfigFile,
+    kind: &str,
+) -> Result<(), AppError> {
+    match names.insert(name.as_str().to_string(), file.path.clone()) {
+        Some(existing) => Err(AppError::config_error(format!(
+            "{}: duplicate {kind} name '{name}' already defined in {}",
+            file.path.display(),
+            existing.display()
+        ))),
+        None => Ok(()),
+    }
+}
+
+fn claim_path(
+    paths: &mut HashMap<PathBuf, String>,
+    entry: &ResolvedEntry,
+    file: &LoadedConfigFile,
+) -> Result<(), AppError> {
+    match paths.insert(entry.path.clone(), entry.name.as_str().to_string()) {
+        Some(existing_name) => Err(AppError::config_error(format!(
+            "{}: duplicate repository path '{}' also used by '{existing_name}'",
+            file.path.display(),
+            entry.path.display()
+        ))),
+        None => Ok(()),
+    }
 }
 
 fn validate_moved_to(
@@ -264,6 +294,7 @@ fn resolve_repository_path(
     root: &Path,
     source: &Path,
     name: &str,
+    resolution: PathResolution,
 ) -> Result<(PathBuf, String), AppError> {
     let path = Path::new(path);
     if path.is_absolute() {
@@ -281,7 +312,7 @@ fn resolve_repository_path(
         )));
     }
 
-    let resolved = match resolve_operational_path(&lexical, root) {
+    let resolved = match resolution(&lexical, root) {
         Ok(path) => path,
         Err(ResolutionError::OutsideRoot) => {
             return Err(AppError::config_error(format!(
@@ -333,9 +364,15 @@ mod tests {
         let root = Path::new("/workspace");
         let base = Path::new("/workspace/work");
 
-        let resolved =
-            resolve_repository_path(base, "../shared/repo", root, Path::new("grove.toml"), "repo")
-                .unwrap();
+        let resolved = resolve_repository_path(
+            base,
+            "../shared/repo",
+            root,
+            Path::new("grove.toml"),
+            "repo",
+            resolve_operational_path,
+        )
+        .unwrap();
 
         assert_eq!(resolved.0, PathBuf::from("/workspace/shared/repo"));
     }
@@ -345,8 +382,14 @@ mod tests {
         let root = Path::new("/workspace");
         let base = Path::new("/workspace/work");
 
-        let result =
-            resolve_repository_path(base, "../../outside", root, Path::new("grove.toml"), "repo");
+        let result = resolve_repository_path(
+            base,
+            "../../outside",
+            root,
+            Path::new("grove.toml"),
+            "repo",
+            resolve_operational_path,
+        );
 
         let error = result.expect_err("path outside the root should fail");
         assert_eq!(error.kind(), crate::AppErrorKind::Configuration);

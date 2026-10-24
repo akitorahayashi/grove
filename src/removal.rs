@@ -123,11 +123,15 @@ pub(crate) fn assess(
     if metadata.file_type().is_symlink() {
         return Ok(Assessment::Blocked(BlockedReason::SymbolicLink));
     }
-    if !metadata.is_dir() || !git.is_work_tree(path)? {
+    if !metadata.is_dir() {
         return Ok(Assessment::Blocked(BlockedReason::NotAWorkTree));
     }
-    if git.worktree_root(path)?.as_deref() != Some(path.canonicalize()?.as_path()) {
-        return Ok(Assessment::Blocked(BlockedReason::InsideAnotherRepository));
+    match git.worktree_root(path)? {
+        None => return Ok(Assessment::Blocked(BlockedReason::NotAWorkTree)),
+        Some(root) if root != path.canonicalize()? => {
+            return Ok(Assessment::Blocked(BlockedReason::InsideAnotherRepository));
+        }
+        Some(_) => {}
     }
     let Some(origin) = git.remote_url(path)? else {
         return Ok(Assessment::Blocked(BlockedReason::MissingOrigin));

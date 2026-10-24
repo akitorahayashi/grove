@@ -1138,6 +1138,17 @@ moved_to = "missing"
 version = 2
 [repos]
 keep = "git@example.com:keep.git"
+[removed.repos]
+first = { url = "git@example.com:first.git", moved_to = "keep" }
+second = { url = "git@example.com:second.git", moved_to = "keep" }
+"#,
+            "removed repositories 'first' and 'second' both move to 'keep'",
+        ),
+        (
+            r#"
+version = 2
+[repos]
+keep = "git@example.com:keep.git"
 [removed.repos.gone]
 moved_to = "keep"
 "#,

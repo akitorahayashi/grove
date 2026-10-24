@@ -11,7 +11,9 @@ mod url;
 pub use branch_name::BranchName;
 pub use definition::RepositoryDefinition;
 pub use name::RepositoryName;
-pub(crate) use path::{ResolutionError, normalize_lexically, resolve_operational_path};
+pub(crate) use path::{
+    ResolutionError, normalize_lexically, resolve_entry_path, resolve_operational_path,
+};
 pub use removed::RemovedRepository;
 pub use selection::select_repositories;
 pub use url::RemoteUrl;

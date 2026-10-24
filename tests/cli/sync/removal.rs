@@ -177,6 +177,26 @@ fn sync_leaves_paths_it_cannot_prove_it_owns() {
     assert!(ctx.workspace().join("old/.git").exists());
 }
 
+#[cfg(unix)]
+#[test]
+fn sync_leaves_a_symbolic_link_and_the_repository_it_points_to() {
+    let ctx = TestContext::new();
+    let old = ctx.create_remote("old");
+    let target = clone_into(&ctx, &old.url(), "actual");
+    std::os::unix::fs::symlink(&target, ctx.workspace().join("old")).unwrap();
+    let config = trash_config(&ctx, &old.url());
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("sync")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("x old path is a symbolic link"));
+    assert!(ctx.workspace().join("old").symlink_metadata().unwrap().file_type().is_symlink());
+    assert!(target.join(".git").exists());
+}
+
 #[test]
 fn sync_leaves_repositories_with_linked_worktrees() {
     let ctx = TestContext::new();

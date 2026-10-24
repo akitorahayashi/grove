@@ -130,7 +130,7 @@ pub(crate) fn execute_with_events(
     let removed = crate::removal::select(&config, &repositories, !targets.is_empty());
     let (removals, removed_summary) =
         removal::phase(ctx, &config, &removed, options.dry_run(), events)?;
-    let planned_moves = planned_moves(&config, &removals);
+    let planned_moves = planned_moves(&removals);
 
     let (decisions, checked) = check_phase(
         ctx.git(),
@@ -202,19 +202,11 @@ pub(crate) fn execute_with_events(
 
 /// Destinations a dry run plans to fill by moving an old directory, keyed by
 /// repository name, with the old display path they move from.
-fn planned_moves(
-    config: &config::ResolvedConfig,
-    removals: &[RemovalEntry],
-) -> HashMap<RepositoryName, String> {
+fn planned_moves(removals: &[RemovalEntry]) -> HashMap<RepositoryName, String> {
     removals
         .iter()
-        .filter_map(|entry| match entry.outcome() {
-            RemovalOutcome::Planned(RemovalPlan::Move { to }) => config
-                .repositories()
-                .iter()
-                .find(|repository| repository.display_path() == to)
-                .map(|repository| (repository.name().clone(), entry.repository().to_string())),
-            _ => None,
+        .filter_map(|entry| {
+            entry.planned_destination().map(|name| (name.clone(), entry.repository().to_string()))
         })
         .collect()
 }

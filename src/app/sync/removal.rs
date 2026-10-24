@@ -8,7 +8,7 @@ use crate::config::ResolvedConfig;
 use crate::git::{Removal, RepositoryProbe};
 use crate::phases::{Event, EventSink, Summary as PhaseSummary};
 use crate::removal::{self, Assessment, BlockedReason};
-use crate::repositories::{RemovedRepository, RepositoryDefinition};
+use crate::repositories::{RemovedRepository, RepositoryDefinition, RepositoryName};
 use crate::trash::Trash;
 
 use super::Phase;
@@ -45,6 +45,7 @@ pub struct RemovalEntry {
     outcome: RemovalOutcome,
     cache: CacheRemoval,
     warning: Option<String>,
+    planned_destination: Option<RepositoryName>,
 }
 
 impl RemovalEntry {
@@ -62,6 +63,11 @@ impl RemovalEntry {
 
     pub fn warning(&self) -> Option<&str> {
         self.warning.as_deref()
+    }
+
+    /// The live repository a dry run plans to fill by this move.
+    pub(super) fn planned_destination(&self) -> Option<&RepositoryName> {
+        self.planned_destination.as_ref()
     }
 
     fn is_reportable(&self) -> bool {
@@ -136,11 +142,18 @@ fn remove<Z>(
         Assessment::Move { .. } | Assessment::Trash => act(ctx, removed, destination)?,
     };
 
+    let planned_destination = match outcome {
+        RemovalOutcome::Planned(RemovalPlan::Move { .. }) => {
+            destination.map(|destination| destination.name().clone())
+        }
+        _ => None,
+    };
     let mut entry = RemovalEntry {
         repository: removed.display_path().to_string(),
         outcome,
         cache: CacheRemoval::Untouched,
         warning,
+        planned_destination,
     };
     remove_cache_entry(ctx, config, removed, dry_run, &mut entry)?;
     Ok(entry)

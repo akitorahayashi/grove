@@ -37,7 +37,10 @@ pub(crate) fn list(store: &Store) -> Result<Vec<EntryInfo>, AppError> {
 
 /// Whether a `gv cache clean` target names a cache identity rather than a
 /// configured repository. Repository names cannot contain `/`, and every
-/// remote identity has a host and a path, so the two never overlap.
+/// remote identity has a host and a path. Only a bare relative local path,
+/// which Git resolves against the working directory rather than the grove,
+/// yields an identity without one; such an entry is not addressable by
+/// identity and leaves with `gv cache clean` without targets.
 pub(crate) fn is_identity(target: &str) -> bool {
     target.contains('/')
 }
