@@ -71,6 +71,7 @@ src/
     validate.rs
   cache/
     mod.rs
+    shorthand.rs
   inspection.rs
   removal.rs
   trash.rs
@@ -154,7 +155,9 @@ and removes cache entries.
 transport-independent URL identity (`RemoteUrl::identity`), with entry layout,
 identity keying, origin repointing on reuse, advisory global and per-entry file
 locking, placement that borrows objects through `--reference --dissociate`, and
-seeding from an existing local clone. A failed entry refresh rebuilds the
+seeding from an existing local clone. `shorthand` owns naming an entry by the
+trailing segments of its identity, which `gv clone` resolves to the entry's
+origin URL. A failed entry refresh rebuilds the
 entry from the requested URL, so heuristic identity sharing reduces transfer
 at worst and never blocks placement. Placement, seeding, listing, named
 removal, and whole-cache cleaning use one lock order across processes. The
@@ -246,7 +249,9 @@ Standalone clone invocations retain their raw operating-system arguments and
 delegate final parsing to Git. The clone argument classifier only determines
 whether cache injection preserves the requested semantics. Eligible invocations
 insert `--reference-if-able` and `--dissociate` immediately before the operands;
-all other invocations execute unchanged. This keeps Git authoritative for
+all other invocations execute unchanged. A repository operand that is a cache
+shorthand is first replaced with its resolved URL and the invocation is
+classified again. This keeps Git authoritative for
 diagnostics and lets an entry removed after cache preparation degrade to a
 normal clone rather than a failure.
 

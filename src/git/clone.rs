@@ -11,12 +11,26 @@ pub(crate) struct CloneInvocation {
     arguments: Vec<OsString>,
     cache: CacheDecision,
     quiet: bool,
+    repository: Option<usize>,
 }
 
 impl CloneInvocation {
     pub(crate) fn new(arguments: Vec<OsString>) -> Self {
-        let (cache, quiet) = analyze(&arguments);
-        Self { arguments, cache, quiet }
+        let (cache, quiet, repository) = analyze(&arguments);
+        Self { arguments, cache, quiet, repository }
+    }
+
+    /// The repository operand, when option parsing located it. Delegated
+    /// invocations leave it unknown, so Git alone interprets their operands.
+    pub(crate) fn repository(&self) -> Option<&str> {
+        self.repository.and_then(|index| self.arguments[index].to_str())
+    }
+
+    pub(crate) fn with_repository(mut self, url: &RemoteUrl) -> Self {
+        if let Some(index) = self.repository {
+            self.arguments[index] = OsString::from(url.as_process_argument());
+        }
+        Self::new(self.arguments)
     }
 
     pub(crate) fn cache(&self) -> &CacheDecision {
@@ -68,7 +82,7 @@ impl CloneCommand for CommandGitClient {
     }
 }
 
-fn analyze(arguments: &[OsString]) -> (CacheDecision, bool) {
+fn analyze(arguments: &[OsString]) -> (CacheDecision, bool, Option<usize>) {
     let mut index = 0;
     let mut insertion_index = None;
     let mut bypass = None;
@@ -76,7 +90,7 @@ fn analyze(arguments: &[OsString]) -> (CacheDecision, bool) {
 
     while index < arguments.len() {
         let Some(argument) = arguments[index].to_str() else {
-            return (CacheDecision::Delegated, quiet);
+            return (CacheDecision::Delegated, quiet, None);
         };
         if argument == "--" {
             insertion_index = Some(index);
@@ -89,19 +103,19 @@ fn analyze(arguments: &[OsString]) -> (CacheDecision, bool) {
 
         match parse_option(arguments, index, &mut bypass, &mut quiet) {
             Some(next) => index = next,
-            None => return (CacheDecision::Delegated, quiet),
+            None => return (CacheDecision::Delegated, quiet, None),
         }
     }
 
     let operands = &arguments[index..];
     if !(1..=2).contains(&operands.len()) {
-        return (CacheDecision::Delegated, quiet);
+        return (CacheDecision::Delegated, quiet, None);
     }
     let Some(repository) = operands[0].to_str() else {
-        return (CacheDecision::Delegated, quiet);
+        return (CacheDecision::Delegated, quiet, None);
     };
     if let Some(reason) = bypass {
-        return (CacheDecision::Bypassed(reason), quiet);
+        return (CacheDecision::Bypassed(reason), quiet, Some(index));
     }
 
     let decision = match RemoteUrl::new(repository) {
@@ -110,7 +124,7 @@ fn analyze(arguments: &[OsString]) -> (CacheDecision, bool) {
         }
         Err(_) => CacheDecision::Delegated,
     };
-    (decision, quiet)
+    (decision, quiet, Some(index))
 }
 
 fn parse_option(
@@ -305,6 +319,7 @@ mod tests {
     use std::ffi::OsString;
 
     use super::{CacheDecision, CloneInvocation};
+    use crate::repositories::RemoteUrl;
 
     fn invocation(arguments: &[&str]) -> CloneInvocation {
         CloneInvocation::new(arguments.iter().map(OsString::from).collect())
@@ -477,5 +492,32 @@ mod tests {
         let invocation = invocation(&["--branch", "main", "--", "https://example.com/repo.git"]);
 
         assert!(matches!(invocation.cache(), CacheDecision::Eligible { insertion_index: 2, .. }));
+    }
+
+    #[test]
+    fn locates_the_repository_operand_when_the_cache_is_bypassed() {
+        let invocation = invocation(&["--depth", "1", "owner/repo", "dest"]);
+
+        assert!(matches!(invocation.cache(), CacheDecision::Bypassed(_)));
+        assert_eq!(invocation.repository(), Some("owner/repo"));
+    }
+
+    #[test]
+    fn leaves_the_repository_operand_unknown_when_delegated() {
+        assert_eq!(invocation(&["--future-option", "owner/repo"]).repository(), None);
+    }
+
+    #[test]
+    fn replaces_only_the_repository_operand() {
+        let url = RemoteUrl::new("https://example.com/owner/repo.git").unwrap();
+        let replaced =
+            invocation(&["--branch", "repo", "--", "repo", "repo"]).with_repository(&url);
+
+        assert_eq!(
+            replaced.arguments,
+            ["--branch", "repo", "--", "https://example.com/owner/repo.git", "repo"]
+                .map(std::ffi::OsString::from)
+        );
+        assert!(matches!(replaced.cache(), CacheDecision::Eligible { insertion_index: 2, .. }));
     }
 }

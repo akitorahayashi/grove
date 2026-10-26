@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use crate::AppError;
 use crate::app::AppContext;
-use crate::cache::Outcome as CacheOutcome;
+use crate::cache::{Outcome as CacheOutcome, Shorthand};
 use crate::git::{
     CacheEntry, CloneCacheDecision, CloneCommand, CloneInvocation, NoopGitProgressSink,
     RepositoryProbe,
@@ -28,9 +28,16 @@ pub(crate) struct CommandReport {
     status: ExitStatus,
     cache: CommandCache,
     quiet: bool,
+    resolved: Option<(Shorthand, RemoteUrl)>,
 }
 
 impl CommandReport {
+    /// The cache shorthand the repository operand named, and the URL it
+    /// resolved to.
+    pub(crate) fn resolved(&self) -> Option<(&Shorthand, &RemoteUrl)> {
+        self.resolved.as_ref().map(|(shorthand, url)| (shorthand, url))
+    }
+
     pub(crate) fn status(&self) -> ExitStatus {
         self.status
     }
@@ -85,11 +92,19 @@ pub fn execute<G: CacheEntry + RepositoryProbe, Z>(
     Ok(Report { destination, url: url.to_string(), cache, elapsed: started.elapsed() })
 }
 
-pub(crate) fn execute_command<G: CacheEntry + CloneCommand, Z>(
+pub(crate) fn execute_command<G: CacheEntry + CloneCommand + RepositoryProbe, Z>(
     ctx: &AppContext<G, Z>,
     arguments: Vec<OsString>,
 ) -> Result<CommandReport, AppError> {
-    let invocation = CloneInvocation::new(arguments);
+    let mut invocation = CloneInvocation::new(arguments);
+    let resolved = match invocation.repository().and_then(cache_shorthand) {
+        Some(shorthand) => {
+            let url = ctx.cache()?.resolve(ctx.git(), &shorthand)?;
+            invocation = invocation.with_repository(&url);
+            Some((shorthand, url))
+        }
+        None => None,
+    };
     let (reference, cache) = match invocation.cache() {
         CloneCacheDecision::Eligible { url, insertion_index } => {
             let mut progress = NoopGitProgressSink;
@@ -111,7 +126,18 @@ pub(crate) fn execute_command<G: CacheEntry + CloneCommand, Z>(
         &invocation,
         reference.as_ref().map(|(path, index)| (path.as_path(), *index)),
     )?;
-    Ok(CommandReport { status, cache, quiet: invocation.quiet() })
+    Ok(CommandReport { status, cache, quiet: invocation.quiet(), resolved })
+}
+
+/// Git reads an operand as a local repository when it, or it with `.git` or
+/// `.bundle` appended, exists; such an operand stays Git's so a local clone
+/// keeps its meaning.
+fn cache_shorthand(operand: &str) -> Option<Shorthand> {
+    let shorthand = Shorthand::parse(operand)?;
+    let local = ["", ".git", ".bundle"]
+        .into_iter()
+        .any(|suffix| Path::new(&format!("{operand}{suffix}")).exists());
+    (!local).then_some(shorthand)
 }
 
 fn resolve_destination(url: &RemoteUrl, destination: Option<PathBuf>) -> Result<PathBuf, AppError> {

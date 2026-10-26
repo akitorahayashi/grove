@@ -228,3 +228,97 @@ fn clone_rejects_config_flag() {
         .failure()
         .stderr(predicate::str::contains("--config cannot be used with clone"));
 }
+
+#[test]
+fn clone_resolves_a_cached_repository_by_shorthand() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    ctx.cli().arg("clone").arg(remote.url()).arg("first").assert().success();
+
+    ctx.cli()
+        .arg("clone")
+        .args(["blog", "copy"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(format!("gv: clone resolved blog to {}", remote.url())))
+        .stderr(predicate::str::contains("(from cache)"));
+
+    let config = fs::read_to_string(ctx.workspace().join("copy/.git/config")).unwrap();
+    assert!(config.contains(&format!("url = {}", remote.url())));
+}
+
+#[test]
+fn clone_rejects_an_ambiguous_shorthand_and_accepts_a_longer_one() {
+    let ctx = TestContext::new();
+    let first = ctx.create_remote("a/blog");
+    let second = ctx.create_remote("b/blog");
+    ctx.cli().arg("clone").arg(first.url()).arg("a-first").assert().success();
+    ctx.cli().arg("clone").arg(second.url()).arg("b-first").assert().success();
+
+    ctx.cli()
+        .arg("clone")
+        .arg("blog")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("'blog' matches several cache entries"))
+        .stderr(predicate::str::contains(first.url()))
+        .stderr(predicate::str::contains(second.url()))
+        .stderr(predicate::str::contains("Cloning into").not());
+    assert!(!ctx.workspace().join("blog").exists());
+
+    ctx.cli()
+        .arg("clone")
+        .arg("a/blog")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(format!("gv: clone resolved a/blog to {}", first.url())));
+    assert!(ctx.workspace().join("blog/.git").exists());
+}
+
+#[test]
+fn clone_fails_for_a_shorthand_without_a_cache_entry() {
+    let ctx = TestContext::new();
+
+    ctx.cli()
+        .arg("clone")
+        .arg("owner/nothing")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no cache entry matches 'owner/nothing'"))
+        .stderr(predicate::str::contains("Cloning into").not());
+    assert!(!ctx.workspace().join("nothing").exists());
+}
+
+#[test]
+fn clone_keeps_an_existing_local_path_as_a_local_clone() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    ctx.cli().arg("clone").arg(remote.url()).assert().success();
+
+    ctx.cli()
+        .arg("clone")
+        .args(["blog", "copy"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("clone resolved").not());
+
+    let config = fs::read_to_string(ctx.workspace().join("copy/.git/config")).unwrap();
+    assert!(!config.contains(&format!("url = {}", remote.url())));
+}
+
+#[test]
+fn clone_resolves_a_shorthand_even_when_the_cache_is_bypassed() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    ctx.cli().arg("clone").arg(remote.url()).arg("first").assert().success();
+
+    ctx.cli()
+        .arg("clone")
+        .args(["--depth", "1", "blog", "shallow"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(format!("gv: clone resolved blog to {}", remote.url())))
+        .stderr(predicate::str::contains("clone cache bypassed"));
+
+    assert!(ctx.workspace().join("shallow/.git").exists());
+}
