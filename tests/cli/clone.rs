@@ -2,6 +2,8 @@ use std::fs;
 
 use predicates::prelude::*;
 
+#[cfg(unix)]
+use crate::harness::path_with_wrapper;
 use crate::harness::{TestContext, git_command};
 
 #[test]
@@ -316,4 +318,61 @@ fn clone_resolves_a_shorthand_even_when_the_cache_is_bypassed() {
         .stderr(predicate::str::contains("clone cache bypassed"));
 
     assert!(ctx.workspace().join("shallow/.git").exists());
+}
+
+/// Raw passthrough keeps Git's own contract, including whatever routing the
+/// caller's environment selects; only the managed cache preparation declines.
+#[cfg(unix)]
+#[test]
+fn clone_skips_the_cache_but_forwards_inherited_routing_to_git() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    let foreign = ctx.root().join("foreign.git");
+    let log = ctx.root().join("final-clone");
+    let path = path_with_wrapper(
+        &ctx,
+        "clone",
+        &format!(
+            "if [ \"$1\" = clone ]; then printf '%s\\n' \"$GIT_DIR\" \"$@\" > \"{}\"; exit 0; fi",
+            log.display()
+        ),
+    );
+
+    ctx.cli()
+        .env("PATH", path)
+        .env("GIT_DIR", &foreign)
+        .arg("clone")
+        .arg(remote.url())
+        .arg("cloned")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("gv: clone cache unavailable; cloned without cache"))
+        .stderr(predicate::str::contains("GIT_DIR"))
+        .stderr(predicate::str::contains(foreign.to_str().unwrap()).not());
+
+    assert_eq!(
+        fs::read_to_string(log).unwrap().lines().collect::<Vec<_>>(),
+        [foreign.to_str().unwrap(), "clone", &remote.url(), "cloned"]
+    );
+    assert!(!ctx.cache_root().exists());
+    assert!(!foreign.exists());
+}
+
+#[test]
+fn clone_shorthand_resolution_rejects_inherited_routing() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    ctx.cli().arg("clone").arg(remote.url()).arg("first").assert().success();
+
+    ctx.cli()
+        .env("GIT_COMMON_DIR", ctx.root().join("foreign.git"))
+        .arg("clone")
+        .arg("blog")
+        .arg("second")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("GIT_COMMON_DIR"))
+        .stderr(predicate::str::contains("clone resolved").not());
+
+    assert!(!ctx.workspace().join("second").exists());
 }

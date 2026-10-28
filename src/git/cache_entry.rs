@@ -2,7 +2,8 @@ use std::fs;
 use std::path::Path;
 
 use super::command::run_with_progress;
-use super::probe::required_line;
+use super::probe::{malformed_output, stdout};
+use super::symbolic_ref;
 use super::{CacheEntry, CommandGitClient, GitProgressSink};
 use crate::AppError;
 use crate::repositories::{RemoteUrl, redact_urls_for_display};
@@ -133,9 +134,11 @@ impl CommandGitClient {
     }
 
     fn head_branch(&self, entry: &Path) -> Result<String, AppError> {
-        let args = ["symbolic-ref", "--short", "HEAD"];
+        let args = ["symbolic-ref", "HEAD"];
         let output = self.git_required(entry, &args)?;
-        required_line(entry, &args, &output)
+        symbolic_ref::branch(&output.stdout, "refs/heads/")
+            .map(|branch| branch.as_str().to_string())
+            .ok_or_else(|| malformed_output(entry, &args, &stdout(&output)))
     }
 }
 
@@ -143,8 +146,24 @@ impl CommandGitClient {
 mod tests {
     use tempfile::TempDir;
 
+    use super::super::command::tests::{initialize_committed_repository, run_git};
     use crate::git::{CacheEntry, CommandGitClient, NoopGitProgressSink};
     use crate::repositories::RemoteUrl;
+
+    #[test]
+    fn creation_tracks_the_remote_head_branch_despite_a_same_named_tag() {
+        let root = TempDir::new().unwrap();
+        let remote = root.path().join("remote");
+        initialize_committed_repository(&remote);
+        run_git(&remote, &["tag", "main"]);
+        let url = RemoteUrl::new(remote.to_str().unwrap()).unwrap();
+
+        let tracked = CommandGitClient::isolated()
+            .cache_create(&url, &root.path().join("entry"), None, None, &mut NoopGitProgressSink)
+            .unwrap();
+
+        assert_eq!(tracked, "main");
+    }
 
     #[cfg(unix)]
     #[test]

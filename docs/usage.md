@@ -99,7 +99,9 @@ Repositories are inspected concurrently with at most eight live tasks in both
 modes. Fetching status serializes linked worktrees sharing a Git common
 directory, matching sync and refresh. Its local repository, origin, and remote
 URL preflight completes before network access, so a missing or mismatched
-origin is never fetched. The common-directory lock remains held through the
+origin is never fetched. In both modes a declared path that is not a worktree
+root, such as a directory inside another worktree, is reported invalid without
+running `git status` in the enclosing repository. The common-directory lock remains held through the
 reported post-fetch observations. Report entries preserve selection order.
 
 Removed declarations whose old path still exists follow the table in a
@@ -123,9 +125,18 @@ The update flow is:
 ```text
 git fetch origin --prune
 git switch <default-branch>
-git merge --ff-only origin/<default-branch>
+git merge --ff-only refs/remotes/origin/<default-branch>
 git switch <original-branch>
 ```
+
+An existing path is managed only when it is the root of a Git worktree whose
+origin equals the configured `url` exactly. A directory inside another
+worktree is reported as not a Git repository, even when the enclosing
+repository has the same origin. Both checks complete before any probe that
+can run repository-configured commands such as a `core.fsmonitor` hook.
+Divergence and the merge use full ref names, `refs/heads/<default-branch>` and
+`refs/remotes/origin/<default-branch>`, so a tag sharing a branch's name never
+changes what is compared or merged.
 
 The current branch and clean working-tree preconditions are checked again at
 the mutation boundary. Every failure after a successful switch attempts to
@@ -163,14 +174,17 @@ by the first matching row:
 | Row | Old path | Action | Report |
 |---|---|---|---|
 | 1 | does not exist | nothing | none |
-| 2 | is a symbolic link, not a Git worktree root, without origin, or with an origin whose identity matches neither `url` nor the `moved_to` repository's URL | left in place | blocked |
+| 2 | is a symbolic link, not a Git worktree root, without origin, or with an origin that equals neither `url` nor the `moved_to` repository's URL | left in place | blocked |
 | 3 | is a linked worktree or has linked worktrees | left in place | blocked |
 | 4 | declares `moved_to` whose path does not exist | renamed to the destination, whose origin is then set to the destination URL | moved |
 | 5 | holds local-only state | left in place | blocked, naming the state |
 | 6 | anything else | moved to the operating system trash | trashed |
 
 Accepting the `moved_to` URL in row 2 covers a checkout whose origin was
-already repointed by hand. A move keeps everything in the directory, uncommitted
+already repointed by hand. The comparison is exact string equality, unlike the
+cache's transport-independent identity: an origin using another transport,
+SSH account, or path spelling of the same repository blocks until the
+configured URL or the origin is aligned. A move keeps everything in the directory, uncommitted
 work included, and the moved repository is then checked and updated in the
 same run under the normal rules. A rename that fails, for example across
 volumes, blocks rather than copying.
@@ -214,10 +228,11 @@ The refresh flow is:
 ```text
 git fetch origin --prune
 git switch <default-branch>
-git merge --ff-only origin/<default-branch>
+git merge --ff-only refs/remotes/origin/<default-branch>
 ```
 
-The switch is omitted when the default branch is already checked out. Ahead or
+Repositories are managed under the same worktree-root, origin, and full-ref
+rules as `gv sync`. The switch is omitted when the default branch is already checked out. Ahead or
 diverged default branches are blocked before switching. Equal and behind
 branches are accepted, and the previous branch is neither restored nor deleted.
 A failure after a successful switch also leaves the default branch checked out
@@ -282,6 +297,8 @@ the reason is reported on stderr. Unknown options are also delegated unchanged,
 so the installed Git remains the authority for validation and future options.
 Failure to prepare the cache is reported and falls back to the unchanged Git
 invocation, while a failure from the final clone is returned without retrying.
+The final clone inherits the caller's environment unchanged, including
+variables that the managed commands reject (see Requirements).
 
 A repository operand that is neither a URL nor an explicit path names a cache
 entry by the trailing `/`-separated segments of its identity: `frontend`,
@@ -313,6 +330,17 @@ Linux and macOS are the supported platforms. Windows has no runtime, test, CI,
 or release support.
 
 - Git 2.23.0 or newer is required.
+- Managed Git commands refuse to run while the environment carries a variable
+  that `git rev-parse --local-env-vars` lists, such as `GIT_DIR`,
+  `GIT_WORK_TREE`, `GIT_INDEX_FILE`, or `GIT_OBJECT_DIRECTORY`, because it
+  would route them away from the configured repository. The error names the
+  variables, never their values, and how to unset them. `GIT_CONFIG`,
+  `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`, and `GIT_PREFIX` stay
+  permitted, so `git -c`, environment-supplied configuration, and Git shell
+  aliases keep working. Git exports `GIT_INDEX_FILE` to pre-commit hooks, so
+  `status`, `sync`, `refresh`, `add`, and the clone cache refuse to run from
+  one. Raw `gv clone` passes the environment to its final `git clone`
+  unchanged; only its cache preparation and shorthand resolution are refused.
 - zoxide is optional. Registration requires `zoxide query --list --all` and
   `zoxide add`.
 

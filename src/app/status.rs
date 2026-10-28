@@ -398,7 +398,12 @@ fn status_for_repository(
         ));
     }
 
-    let Some(worktree) = git.worktree_status(repository.path())? else {
+    let worktree = if inspection::is_worktree_root(git, repository)? {
+        git.worktree_status(repository.path())?
+    } else {
+        None
+    };
+    let Some(worktree) = worktree else {
         return Ok(StatusEntry::from_repository(
             repository,
             None,
@@ -515,12 +520,8 @@ mod tests {
             Ok(repository.to_path_buf())
         }
 
-        fn is_work_tree(&self, _repository: &Path) -> Result<bool, AppError> {
-            Ok(true)
-        }
-
         fn worktree_root(&self, repository: &Path) -> Result<Option<PathBuf>, AppError> {
-            Ok(Some(repository.to_path_buf()))
+            Ok(Some(repository.canonicalize().unwrap()))
         }
 
         fn worktree_status(&self, _repository: &Path) -> Result<Option<WorktreeStatus>, AppError> {

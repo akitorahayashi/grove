@@ -99,6 +99,7 @@ pub(crate) fn execute_command<G: CacheEntry + CloneCommand + RepositoryProbe, Z>
     let mut invocation = CloneInvocation::new(arguments);
     let resolved = match invocation.repository().and_then(cache_shorthand) {
         Some(shorthand) => {
+            ctx.git().verify_available()?;
             let url = ctx.cache()?.resolve(ctx.git(), &shorthand)?;
             invocation = invocation.with_repository(&url);
             Some((shorthand, url))
@@ -109,7 +110,9 @@ pub(crate) fn execute_command<G: CacheEntry + CloneCommand + RepositoryProbe, Z>
         CloneCacheDecision::Eligible { url, insertion_index } => {
             let mut progress = NoopGitProgressSink;
             match ctx
-                .cache()
+                .git()
+                .verify_available()
+                .and_then(|()| ctx.cache())
                 .and_then(|store| store.prepare_clone_reference(ctx.git(), url, &mut progress))
             {
                 Ok((reference, outcome)) => {

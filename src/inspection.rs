@@ -9,8 +9,8 @@ use crate::AppError;
 use crate::git::{BranchTracking, RepositoryProbe};
 use crate::repositories::{BranchName, RepositoryDefinition};
 
-/// Whether grove owns the repository at an existing path: a work tree whose
-/// origin matches the declaration.
+/// Whether grove owns the repository at an existing path: a worktree rooted at
+/// the declared path whose origin matches the declaration.
 pub(crate) enum Ownership {
     NotAWorkTree,
     MissingOrigin,
@@ -26,14 +26,12 @@ pub(crate) enum Ownership {
 /// external hook command, while `rev-parse` and `config --get` never invoke
 /// one. Establishing ownership from those two first keeps sync and refresh
 /// from running repository-configured behavior in a repository they go on to
-/// decline. `worktree_status` alone would report the absent work tree, so
-/// `is_work_tree` looks redundant in `inspect`; it is the side-effect-free
-/// gate that makes the later observation safe to reach.
+/// decline.
 pub(crate) fn ownership(
     git: &impl RepositoryProbe,
     repository: &RepositoryDefinition,
 ) -> Result<Ownership, AppError> {
-    if !repository.path().is_dir() || !git.is_work_tree(repository.path())? {
+    if !is_worktree_root(git, repository)? {
         return Ok(Ownership::NotAWorkTree);
     }
 
@@ -47,6 +45,24 @@ pub(crate) fn ownership(
         });
     }
     Ok(Ownership::Owned)
+}
+
+/// Whether the declared path is itself a worktree root. Git answers from any
+/// directory inside a worktree, so a declared subdirectory would otherwise
+/// lend its declaration the enclosing repository's identity, and a mutation
+/// would act on that repository. Settled with `rev-parse` alone, so it is safe
+/// to ask before any probe that may run repository-configured commands.
+pub(crate) fn is_worktree_root(
+    git: &impl RepositoryProbe,
+    repository: &RepositoryDefinition,
+) -> Result<bool, AppError> {
+    if !repository.path().is_dir() {
+        return Ok(false);
+    }
+    let Some(root) = git.worktree_root(repository.path())? else {
+        return Ok(false);
+    };
+    Ok(root == repository.path().canonicalize()?)
 }
 
 /// A repository's operability at an existing path, independent of any use

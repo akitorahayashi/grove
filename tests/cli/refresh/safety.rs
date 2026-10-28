@@ -1,6 +1,10 @@
 use predicates::prelude::*;
 
-use crate::harness::{TestContext, current_branch, git_stdout, path_with_wrapper, run_git};
+#[cfg(unix)]
+use crate::harness::fsmonitor_marker;
+use crate::harness::{
+    TestContext, current_branch, git_stdout, path_with_wrapper, repository_state, run_git,
+};
 
 #[cfg(unix)]
 #[test]
@@ -146,4 +150,107 @@ url = "{}"
         git_stdout(&primary, &["rev-parse", "main"]),
         git_stdout(&primary, &["rev-parse", "origin/main"])
     );
+}
+
+#[test]
+fn refresh_rejects_inherited_repository_selectors_without_touching_either_repository() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
+    ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
+    let repository = ctx.workspace().join("blog");
+    let other = ctx.root().join("other");
+    run_git(ctx.root(), &["clone", &remote.url(), other.to_str().unwrap()]);
+    run_git(&repository, &["switch", "-c", "feature"]);
+    run_git(&other, &["switch", "-c", "feature"]);
+    remote.add_commit("second.txt", "second\n");
+    let before = (repository_state(&repository), repository_state(&other));
+
+    ctx.cli()
+        .env("GIT_DIR", other.join(".git"))
+        .env("GIT_WORK_TREE", &repository)
+        .arg("--config")
+        .arg(config)
+        .arg("refresh")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("GIT_DIR"))
+        .stderr(predicate::str::contains("GIT_WORK_TREE"))
+        .stderr(predicate::str::contains("unset them"))
+        .stderr(predicate::str::contains(other.to_str().unwrap()).not());
+
+    assert_eq!((repository_state(&repository), repository_state(&other)), before);
+}
+
+/// A declared directory inside an undeclared clone shares the clone's origin,
+/// so only the worktree-root comparison distinguishes it from a repository
+/// grove owns.
+#[cfg(unix)]
+#[test]
+fn refresh_blocks_a_declared_directory_inside_another_worktree() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("outer");
+    let outer = ctx.workspace().join("outer");
+    run_git(ctx.workspace(), &["clone", &remote.url(), outer.to_str().unwrap()]);
+    run_git(&outer, &["switch", "-c", "feature"]);
+    std::fs::create_dir(outer.join("sub")).unwrap();
+    remote.add_commit("second.txt", "second\n");
+    run_git(&outer, &["fetch", "origin"]);
+    let config = ctx.write_config(&format!(
+        "version = 2\n[repos.sub]\npath = \"outer/sub\"\nurl = \"{}\"\n",
+        remote.url()
+    ));
+    let before = repository_state(&outer);
+    let marker = fsmonitor_marker(&ctx, &outer);
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("refresh")
+        .arg("sub")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not a Git repository"));
+
+    assert!(!marker.exists(), "refresh ran the enclosing repository's fsmonitor hook");
+    assert_eq!(repository_state(&outer), before);
+}
+
+#[cfg(unix)]
+#[test]
+fn refresh_updates_a_repository_declared_through_an_in_root_symlink() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    let real = ctx.workspace().join("real");
+    run_git(ctx.workspace(), &["clone", &remote.url(), real.to_str().unwrap()]);
+    std::os::unix::fs::symlink(&real, ctx.workspace().join("alias")).unwrap();
+    remote.add_commit("second.txt", "second\n");
+    let config = ctx.write_config(&format!(
+        "version = 2\n[repos.blog]\npath = \"alias\"\nurl = \"{}\"\n",
+        remote.url()
+    ));
+
+    ctx.cli().arg("--config").arg(config).arg("refresh").assert().success();
+
+    assert_eq!(
+        git_stdout(&real, &["rev-parse", "refs/heads/main"]),
+        git_stdout(std::path::Path::new(&remote.url()), &["rev-parse", "refs/heads/main"])
+    );
+}
+
+#[test]
+fn refresh_updates_a_repository_at_the_grove_root() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    run_git(ctx.workspace(), &["clone", &remote.url(), "."]);
+    std::fs::write(ctx.workspace().join(".git/info/exclude"), "grove.toml\n").unwrap();
+    remote.add_commit("second.txt", "second\n");
+    let config = ctx.write_config(&format!(
+        "version = 2\n[repos.blog]\npath = \".\"\nurl = \"{}\"\n",
+        remote.url()
+    ));
+
+    ctx.cli().arg("--config").arg(config).arg("refresh").assert().success();
+
+    assert!(ctx.workspace().join("second.txt").is_file());
 }

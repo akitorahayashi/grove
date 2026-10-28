@@ -6,7 +6,7 @@ use std::process::Output;
 use super::command::{command_message, format_probe};
 use super::{
     BranchTracking, CommandGitClient, GitProgressSink, RepositoryLock, RepositoryProbe,
-    WorktreeStatus, default_branch, tracking, worktree,
+    WorktreeStatus, symbolic_ref, tracking, worktree,
 };
 use crate::AppError;
 use crate::repositories::{BranchName, RemoteUrl, redact_urls_for_display};
@@ -32,7 +32,7 @@ impl RepositoryProbe for CommandGitClient {
                 version.0, version.1, version.2
             )));
         }
-        Ok(())
+        self.reject_routing_environment()
     }
 
     fn lock_repository(&self, common_directory: &Path) -> Result<RepositoryLock, AppError> {
@@ -68,24 +68,6 @@ impl RepositoryProbe for CommandGitClient {
             )
             .into()
         })
-    }
-
-    fn is_work_tree(&self, repository: &Path) -> Result<bool, AppError> {
-        let args = ["rev-parse", "--is-inside-work-tree"];
-        let output = self.git_probe(repository, &args)?;
-        if !output.status.success() {
-            if output.status.code() == Some(128)
-                && command_message(&output).contains("not a git repository")
-            {
-                return Ok(false);
-            }
-            return Err(probe_failure(repository, &args, &output));
-        }
-        match stdout(&output).trim() {
-            "true" => Ok(true),
-            "false" => Ok(false),
-            value => Err(malformed_output(repository, &args, value)),
-        }
     }
 
     fn worktree_root(&self, repository: &Path) -> Result<Option<PathBuf>, AppError> {
@@ -158,19 +140,14 @@ impl RepositoryProbe for CommandGitClient {
             return Ok(Some(configured.clone()));
         }
 
-        let args = ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"];
+        let args = ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"];
         let output = self.git_probe(repository, &args)?;
         let Some(output) = optional_probe(repository, &args, output, 1)? else {
             return Ok(None);
         };
-        let value = required_line(repository, &args, &output)?;
-        let Some(parsed) = default_branch::parse_origin_head(&value) else {
-            return Err(malformed_output(repository, &args, &value));
-        };
-        let Ok(branch) = BranchName::new(&parsed) else {
-            return Err(malformed_output(repository, &args, &value));
-        };
-        Ok(Some(branch))
+        symbolic_ref::branch(&output.stdout, "refs/remotes/origin/")
+            .map(Some)
+            .ok_or_else(|| malformed_output(repository, &args, &stdout(&output)))
     }
 
     fn branch_tracking(
@@ -191,15 +168,31 @@ impl RepositoryProbe for CommandGitClient {
 }
 
 impl CommandGitClient {
+    fn is_work_tree(&self, repository: &Path) -> Result<bool, AppError> {
+        let args = ["rev-parse", "--is-inside-work-tree"];
+        let output = self.git_probe(repository, &args)?;
+        if !output.status.success() {
+            if output.status.code() == Some(128)
+                && command_message(&output).contains("not a git repository")
+            {
+                return Ok(false);
+            }
+            return Err(probe_failure(repository, &args, &output));
+        }
+        match stdout(&output).trim() {
+            "true" => Ok(true),
+            "false" => Ok(false),
+            value => Err(malformed_output(repository, &args, value)),
+        }
+    }
+
     fn symbolic_head_branch(&self, repository: &Path) -> Result<Option<String>, AppError> {
-        let args = ["symbolic-ref", "--quiet", "--short", "HEAD"];
+        let args = ["symbolic-ref", "--quiet", "HEAD"];
         let output = self.git_probe(repository, &args)?;
         match optional_probe(repository, &args, output, 1)? {
-            Some(output) => {
-                let value = required_line(repository, &args, &output)?;
-                BranchName::new(&value).map_err(|_| malformed_output(repository, &args, &value))?;
-                Ok(Some(value))
-            }
+            Some(output) => symbolic_ref::branch(&output.stdout, "refs/heads/")
+                .map(|branch| Some(branch.as_str().to_string()))
+                .ok_or_else(|| malformed_output(repository, &args, &stdout(&output))),
             None => Ok(None),
         }
     }
@@ -224,7 +217,7 @@ impl CommandGitClient {
         repository: &Path,
         branch: &BranchName,
     ) -> Result<(u32, u32), AppError> {
-        let range = format!("{branch}...origin/{branch}");
+        let range = format!("refs/heads/{branch}...refs/remotes/origin/{branch}");
         let args = ["rev-list", "--left-right", "--count", &range];
         let output = self.git_required(repository, &args)?;
         let output_text = stdout(&output);
@@ -256,19 +249,6 @@ pub(super) fn optional_probe(
     } else {
         Err(probe_failure(repository, args, &output))
     }
-}
-
-pub(super) fn required_line(
-    repository: &Path,
-    args: &[&str],
-    output: &Output,
-) -> Result<String, AppError> {
-    let value = stdout(output);
-    let trimmed = value.trim();
-    if trimmed.is_empty() || trimmed.split_whitespace().count() != 1 {
-        return Err(malformed_output(repository, args, &value));
-    }
-    Ok(trimmed.to_string())
 }
 
 fn probe_failure(repository: &Path, args: &[&str], output: &Output) -> AppError {
@@ -325,7 +305,8 @@ mod tests {
     use tempfile::TempDir;
 
     use super::super::command::tests::{
-        create_updatable_repository, git_wrapper, initialize_committed_repository, run_git,
+        create_updatable_repository, git_stdout, git_wrapper, initialize_committed_repository,
+        run_git,
     };
     use crate::git::{BranchTracking, CommandGitClient, RepositoryProbe};
     use crate::repositories::BranchName;
@@ -500,5 +481,40 @@ mod tests {
             Some((2, 39, 5))
         );
         assert_eq!(super::parse_git_version("unexpected"), None);
+    }
+
+    #[test]
+    fn origin_head_and_tracking_read_full_refs_under_colliding_tags() {
+        let root = TempDir::new().unwrap();
+        let repository = create_updatable_repository(root.path());
+        run_git(&repository, &["tag", "origin/main", "refs/heads/feature"]);
+        run_git(&repository, &["tag", "main", "refs/remotes/origin/main"]);
+        let client = CommandGitClient::isolated();
+
+        let branch = client.default_branch(&repository, None).unwrap().unwrap();
+        let tracking = client.branch_tracking(&repository, &branch).unwrap();
+
+        assert_eq!(branch.as_str(), "main");
+        let behind = git_stdout(
+            &repository,
+            &["rev-list", "--count", "refs/heads/main..refs/remotes/origin/main"],
+        );
+        assert_eq!(
+            tracking,
+            BranchTracking::Divergence { ahead: 0, behind: behind.parse().unwrap() }
+        );
+    }
+
+    #[test]
+    fn current_branch_fallback_reads_the_full_ref_under_a_colliding_tag() {
+        let root = TempDir::new().unwrap();
+        let repository = root.path().join("repo");
+        initialize_committed_repository(&repository);
+        run_git(&repository, &["switch", "-c", "(detached)"]);
+        run_git(&repository, &["tag", "(detached)"]);
+
+        let status = CommandGitClient::isolated().worktree_status(&repository).unwrap().unwrap();
+
+        assert_eq!(status.branch(), Some("(detached)"));
     }
 }

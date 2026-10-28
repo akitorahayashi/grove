@@ -103,11 +103,12 @@ src/
     cache_entry.rs
     client.rs
     command.rs
-    default_branch.rs
+    environment.rs
     mod.rs
     probe.rs
     progress.rs
     removal.rs
+    symbolic_ref.rs
     tracking.rs
     update.rs
     worktree.rs
@@ -177,7 +178,10 @@ application errors.
 
 `inspection` owns repository readiness probing and the canonical diagnostics for
 the conditions the use cases share, so their reason vocabularies map from one
-probe and their shared messages cannot drift.
+probe and their shared messages cannot drift. Ownership requires the declared
+path to be its worktree's root before the origin comparison, so a declared
+directory inside another worktree never borrows that repository's identity;
+plain status applies the same root check before its first `git status`.
 
 `removal` owns the assessment of `removed` declarations that sync acts on and
 status previews, the selection of declarations a targeted command covers, and
@@ -227,7 +231,13 @@ fetch execution, worktree-root and origin discovery for configuration additions,
 default-branch mutation, and the local-only state and origin repointing that
 removal needs. `command` owns the common process runner and bounded progress
 diagnostics; `probe`, `cache_entry`, `branch_update`, and `removal` own their
-corresponding command families. Worktree branch and
+corresponding command families. `environment` owns the preflight that
+availability checks run: managed commands select their repository by working
+directory, so inherited variables from `git rev-parse --local-env-vars` other
+than configuration and `GIT_PREFIX` are refused. Raw clone passthrough builds
+its command without that preflight. `symbolic_ref` reads symbolic-ref targets in
+full, and range and merge operands use full ref names, so a tag sharing a
+branch's name cannot redirect observation or mutation. Worktree branch and
 cleanliness come from one Porcelain v2 observation. Local and remote
 default-branch refs come from one exact ref observation, while divergence,
 origin HEAD, remote URL, and the Git common directory retain their separate

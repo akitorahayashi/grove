@@ -56,6 +56,10 @@ domain depends on `app/` or `cli/`.
   and never spawns threads itself.
 - `git stash`, `git reset --hard`, `git rebase`, `git clean`, forced checkout,
   and forced push are never issued.
+- Managed Git commands select their repository by working directory and full
+  ref names alone: `RepositoryProbe::verify_available` refuses inherited
+  repository-routing variables before any probe, and only raw `gv clone`
+  passthrough forwards the caller's environment to Git.
 - Configuration additions preserve existing TOML formatting, validate the
   prospective merged tree, and replace one destination atomically.
 

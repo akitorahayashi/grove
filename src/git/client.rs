@@ -42,6 +42,9 @@ impl Drop for RepositoryLock {
 /// local branch. This is the whole surface the status and inspection consumers
 /// need, so their doubles implement only this trait.
 pub trait RepositoryProbe: Sync {
+    /// Whether Git can run managed commands: a supported version, and no
+    /// inherited environment that would route them to another repository.
+    /// Every managed workflow calls this before its first probe.
     fn verify_available(&self) -> Result<(), AppError>;
 
     fn lock_repository(&self, _common_directory: &Path) -> Result<RepositoryLock, AppError> {
@@ -51,8 +54,6 @@ pub trait RepositoryProbe: Sync {
     fn fetch(&self, repository: &Path, progress: &mut dyn GitProgressSink) -> Result<(), AppError>;
 
     fn common_directory(&self, repository: &Path) -> Result<PathBuf, AppError>;
-
-    fn is_work_tree(&self, repository: &Path) -> Result<bool, AppError>;
 
     fn worktree_root(&self, repository: &Path) -> Result<Option<PathBuf>, AppError>;
 

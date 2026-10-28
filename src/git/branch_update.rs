@@ -135,7 +135,7 @@ impl CommandGitClient {
         repository: &Path,
         branch: &BranchName,
     ) -> Result<(), AppError> {
-        let merge_target = format!("origin/{branch}");
+        let merge_target = format!("refs/remotes/origin/{branch}");
         self.git_required(repository, &["merge", "--ff-only", "--", &merge_target])?;
         Ok(())
     }
@@ -356,5 +356,51 @@ mod tests {
             git_stdout(&repository, &["rev-parse", "main"]),
             git_stdout(&repository, &["rev-parse", "origin/main"])
         );
+    }
+
+    /// Tags named `main` and `origin/main` precede the branches in Git's
+    /// revision lookup, so short operands would measure and merge the tags.
+    fn tag_ambiguous_names(repository: &Path) {
+        run_git(repository, &["switch", "--detach", "refs/remotes/origin/main"]);
+        std::fs::write(repository.join("tagged.txt"), "tagged\n").unwrap();
+        run_git(repository, &["add", "tagged.txt"]);
+        commit(repository, "tagged");
+        run_git(repository, &["tag", "origin/main"]);
+        run_git(repository, &["tag", "main"]);
+        run_git(repository, &["switch", "feature"]);
+    }
+
+    #[test]
+    fn colliding_tags_never_steer_the_update() {
+        let root = TempDir::new().unwrap();
+        let repository = create_updatable_repository(root.path());
+        tag_ambiguous_names(&repository);
+        let remote_tip = git_stdout(&repository, &["rev-parse", "refs/remotes/origin/main"]);
+
+        let outcome = update(&CommandGitClient::isolated(), &repository);
+
+        let GitUpdateOutcome::Completed { update, restoration: Restoration::Restored } = outcome
+        else {
+            panic!("unexpected outcome: {outcome:?}");
+        };
+        assert!(remote_tip.starts_with(update.after()), "{remote_tip} vs {}", update.after());
+        assert_eq!(git_stdout(&repository, &["rev-parse", "refs/heads/main"]), remote_tip);
+    }
+
+    #[test]
+    fn colliding_tags_never_steer_the_refresh() {
+        let root = TempDir::new().unwrap();
+        let repository = create_updatable_repository(root.path());
+        tag_ambiguous_names(&repository);
+        let remote_tip = git_stdout(&repository, &["rev-parse", "refs/remotes/origin/main"]);
+
+        let outcome = refresh(&CommandGitClient::isolated(), &repository);
+
+        assert!(
+            matches!(outcome, GitRefreshOutcome::Completed { ref update, .. } if update.changed()),
+            "{outcome:?}"
+        );
+        assert_eq!(git_stdout(&repository, &["rev-parse", "refs/heads/main"]), remote_tip);
+        assert_eq!(git_stdout(&repository, &["symbolic-ref", "HEAD"]), "refs/heads/main");
     }
 }

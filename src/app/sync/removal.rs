@@ -355,4 +355,91 @@ mod tests {
         assert_eq!(summary.count(), 0);
         assert!(old.join(".git").exists());
     }
+
+    /// A clean clone at `old`, declared removed with `declared` and
+    /// optionally moving to a live `new` repository at `moved_to`, whose
+    /// origin is then repointed at `origin`.
+    fn declared_with_origin(
+        declared: &str,
+        moved_to: Option<&str>,
+        origin: &str,
+    ) -> (TempDir, config::ResolvedConfig) {
+        let (root, old, _) = workspace();
+        run_git(&old, &["remote", "set-url", "origin", origin]);
+        let mut contents = match moved_to {
+            Some(_) => format!(
+                "version = 2\n[removed.repos]\nold = {{ url = \"{declared}\", moved_to = \"new\" }}\n"
+            ),
+            None => format!("version = 2\n[removed.repos]\nold = \"{declared}\"\n"),
+        };
+        if let Some(url) = moved_to {
+            contents.push_str(&format!("[repos]\nnew = \"{url}\"\n"));
+        }
+        let config_path = root.path().join("workspace/grove.toml");
+        std::fs::write(&config_path, contents).unwrap();
+        let config = config::load(Some(&config_path)).unwrap();
+        (root, config)
+    }
+
+    fn removal_outcome(root: &TempDir, config: &config::ResolvedConfig) -> RemovalOutcome {
+        let ctx = AppContext::new(CommandGitClient::isolated())
+            .with_trash(RecordingTrash::default())
+            .with_cache(Store::with_root(root.path().join("cache")));
+        let removed = config.removed().iter().collect::<Vec<_>>();
+        let (entries, _) = phase(&ctx, config, &removed, true, &DiscardEvents).unwrap();
+        assert!(ctx.trash().trashed.lock().unwrap().is_empty());
+        entries[0].outcome().clone()
+    }
+
+    #[test]
+    fn a_shared_cache_identity_never_authorizes_removal() {
+        for (declared, origin) in [
+            ("alice@example.com:repo.git", "bob@example.com:repo.git"),
+            ("https://example.com/org/repo.git", "git@example.com:org/repo.git"),
+            ("example.com:repo.git", "example.com:/repo.git"),
+        ] {
+            let (root, config) = declared_with_origin(declared, None, origin);
+            assert_eq!(
+                removal_outcome(&root, &config),
+                RemovalOutcome::Blocked { reason: BlockedReason::RemoteUrlMismatch },
+                "{origin} authorized removing {declared}"
+            );
+
+            let (root, config) =
+                declared_with_origin("https://example.com/old.git", Some(declared), origin);
+            assert_eq!(
+                removal_outcome(&root, &config),
+                RemovalOutcome::Blocked { reason: BlockedReason::RemoteUrlMismatch },
+                "{origin} authorized moving to {declared}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_exact_match_to_either_configured_url_authorizes_removal() {
+        let (root, config) = declared_with_origin(
+            "git@example.com:org/old.git",
+            None,
+            "git@example.com:org/old.git",
+        );
+        assert_eq!(
+            removal_outcome(&root, &config),
+            RemovalOutcome::Planned(super::RemovalPlan::Trash)
+        );
+
+        for origin in ["git@example.com:org/old.git", "git@example.com:org/new.git"] {
+            let (root, config) = declared_with_origin(
+                "git@example.com:org/old.git",
+                Some("git@example.com:org/new.git"),
+                origin,
+            );
+            assert!(
+                matches!(
+                    removal_outcome(&root, &config),
+                    RemovalOutcome::Planned(super::RemovalPlan::Move { .. })
+                ),
+                "{origin} should authorize the move"
+            );
+        }
+    }
 }

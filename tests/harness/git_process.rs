@@ -65,3 +65,40 @@ pub(crate) fn path_with_wrapper(
     paths.insert(0, bin);
     std::env::join_paths(paths).expect("failed to join PATH")
 }
+
+/// Configures `repository`'s `core.fsmonitor` as a hook that leaves the
+/// returned marker behind. `git status` runs that hook while the ownership
+/// probes do not, so the marker shows whether grove reached `git status`.
+#[cfg(unix)]
+pub(crate) fn fsmonitor_marker(ctx: &TestContext, repository: &Path) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let marker = ctx.root().join("fsmonitor-ran");
+    let hook = ctx.root().join("fsmonitor-hook");
+    std::fs::write(&hook, format!("#!/bin/sh\n: > \"{}\"\nexit 1\n", marker.display()))
+        .expect("failed to write fsmonitor hook");
+    let mut permissions =
+        std::fs::metadata(&hook).expect("failed to inspect fsmonitor hook").permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&hook, permissions).expect("failed to chmod fsmonitor hook");
+    run_git(repository, &["config", "core.fsmonitor", hook.to_str().unwrap()]);
+    marker
+}
+
+/// Refs, the checked-out branch, and working-tree changes: what a managed
+/// Git command that reached the wrong repository would alter.
+pub(crate) fn repository_state(repository: &Path) -> String {
+    let output = git_command(repository)
+        .args(["for-each-ref", "--format=%(refname) %(objectname)"])
+        .output()
+        .expect("failed to list references");
+    let status = git_command(repository)
+        .args(["status", "--porcelain=v2", "--branch", "--untracked-files=all"])
+        .output()
+        .expect("failed to inspect working tree");
+    format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&status.stdout)
+    )
+}

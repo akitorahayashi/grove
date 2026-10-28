@@ -59,8 +59,8 @@ impl RemoteUrl {
         self.0.trim() == other.0.trim()
     }
 
-    /// Whether two URLs name the same repository by `identity`, so an
-    /// `https://` origin still proves ownership of a `git@` declaration.
+    /// Whether two URLs share a cache entry by `identity`. This is a transfer
+    /// hint, never proof of ownership.
     pub(crate) fn same_identity(&self, other: &RemoteUrl) -> bool {
         self.identity() == other.identity()
     }
@@ -428,6 +428,20 @@ mod tests {
             "git@GitHub.com:/Org/Repo/",
         ] {
             assert_eq!(RemoteUrl::new(url).unwrap().identity(), "github.com/Org/Repo", "{url}");
+        }
+    }
+
+    #[test]
+    fn identity_collides_where_exact_matching_does_not() {
+        for (left, right) in [
+            ("alice@example.com:repo.git", "bob@example.com:repo.git"),
+            ("https://example.com/org/repo.git", "git@example.com:org/repo.git"),
+            ("example.com:repo.git", "example.com:/repo.git"),
+        ] {
+            let left = RemoteUrl::new(left).unwrap();
+            let right = RemoteUrl::new(right).unwrap();
+            assert!(left.same_identity(&right), "{left} and {right} should share a cache entry");
+            assert!(!left.matches(&right), "{left} and {right} should not match exactly");
         }
     }
 
