@@ -459,15 +459,15 @@ fn default_branch_status(
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
-    use std::sync::{Arc, Barrier};
 
     use super::{AppError, StatusCondition, StatusEntry, collect_entries};
     use crate::git::{BranchTracking, GitProgressSink, RepositoryProbe, WorktreeStatus};
+    use crate::phases::Rendezvous;
     use crate::repositories::{BranchName, RemoteUrl, RepositoryDefinition, RepositoryName};
 
-    struct BarrierGit {
-        fetch_barrier: Option<Arc<Barrier>>,
-        worktree_barrier: Option<Arc<Barrier>>,
+    struct RendezvousGit {
+        fetch: Option<Rendezvous>,
+        worktree: Option<Rendezvous>,
     }
 
     #[cfg(unix)]
@@ -495,7 +495,7 @@ mod tests {
         assert_eq!(entry.source_config().as_os_str().as_bytes(), source.as_os_str().as_bytes());
     }
 
-    impl RepositoryProbe for BarrierGit {
+    impl RepositoryProbe for RendezvousGit {
         fn verify_available(&self) -> Result<(), AppError> {
             Ok(())
         }
@@ -505,8 +505,8 @@ mod tests {
             _repository: &Path,
             _progress: &mut dyn GitProgressSink,
         ) -> Result<(), AppError> {
-            if let Some(barrier) = &self.fetch_barrier {
-                barrier.wait();
+            if let Some(rendezvous) = &self.fetch {
+                rendezvous.wait();
             }
             Ok(())
         }
@@ -524,8 +524,8 @@ mod tests {
         }
 
         fn worktree_status(&self, _repository: &Path) -> Result<Option<WorktreeStatus>, AppError> {
-            if let Some(barrier) = &self.worktree_barrier {
-                barrier.wait();
+            if let Some(rendezvous) = &self.worktree {
+                rendezvous.wait();
             }
             Ok(Some(WorktreeStatus::new(Some("main".to_string()), true)))
         }
@@ -572,14 +572,12 @@ mod tests {
             .collect::<Vec<_>>();
         let repositories = definitions.iter().collect::<Vec<_>>();
 
-        // A serial fetch would leave every fetch after the first waiting on a
-        // barrier that never fills; concurrent execution lets all `count`
-        // fetches arrive together and proceed. Each repository has a distinct
-        // common directory, so none serialize against another.
-        let git = BarrierGit {
-            fetch_barrier: Some(Arc::new(Barrier::new(count))),
-            worktree_barrier: None,
-        };
+        // A serial fetch would leave the first fetch waiting on a rendezvous
+        // that never fills until its deadline fails the test; concurrent
+        // execution lets all `count` fetches arrive together and proceed. Each
+        // repository has a distinct common directory, so none serialize
+        // against another.
+        let git = RendezvousGit { fetch: Some(Rendezvous::new(count)), worktree: None };
         let entries = collect_entries(&git, &repositories, true, count).unwrap();
 
         assert_eq!(entries.len(), count);
@@ -606,10 +604,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let repositories = definitions.iter().collect::<Vec<_>>();
-        let git = BarrierGit {
-            fetch_barrier: None,
-            worktree_barrier: Some(Arc::new(Barrier::new(count))),
-        };
+        let git = RendezvousGit { fetch: None, worktree: Some(Rendezvous::new(count)) };
 
         let entries = collect_entries(&git, &repositories, false, count).unwrap();
 

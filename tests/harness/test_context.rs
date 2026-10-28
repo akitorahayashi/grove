@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use tempfile::TempDir;
 
+use super::git_process::{ISOLATED_CONFIGURATION, git_command, inherited_git_variables};
+
 pub struct TestContext {
     root: TempDir,
     workspace: PathBuf,
@@ -59,7 +61,17 @@ impl TestContext {
     }
 
     pub fn cli(&self) -> Command {
-        let mut command = Command::cargo_bin("gv").expect("failed to locate gv binary");
+        Command::from_std(self.gv_process())
+    }
+
+    /// The `cli` child as a plain process, for tests that wire its stdio
+    /// themselves.
+    pub fn gv_process(&self) -> ProcessCommand {
+        let mut command = ProcessCommand::new(assert_cmd::cargo::cargo_bin!("gv"));
+        for name in inherited_git_variables() {
+            command.env_remove(name);
+        }
+        command.envs(ISOLATED_CONFIGURATION);
         command.current_dir(&self.workspace);
         command.env("XDG_CACHE_HOME", self.cache_home());
         command
@@ -136,11 +148,7 @@ impl RemoteRepository {
 }
 
 pub fn run_git(directory: &Path, args: &[&str]) {
-    let output = ProcessCommand::new("git")
-        .current_dir(directory)
-        .args(args)
-        .output()
-        .expect("failed to run git");
+    let output = git_command(directory).args(args).output().expect("failed to run git");
     assert!(
         output.status.success(),
         "git {} failed\nstdout:\n{}\nstderr:\n{}",
@@ -151,11 +159,8 @@ pub fn run_git(directory: &Path, args: &[&str]) {
 }
 
 pub fn git_stdout(directory: &Path, args: &[&str]) -> String {
-    let output = ProcessCommand::new("git")
-        .current_dir(directory)
-        .args(args)
-        .output()
-        .expect("failed to inspect Git repository");
+    let output =
+        git_command(directory).args(args).output().expect("failed to inspect Git repository");
     assert!(
         output.status.success(),
         "git {} failed: {}",

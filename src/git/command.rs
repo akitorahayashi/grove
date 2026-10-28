@@ -11,22 +11,42 @@ use crate::repositories::redact_urls_for_display;
 #[derive(Debug, Clone)]
 pub struct CommandGitClient {
     executable: OsString,
+    #[cfg(test)]
+    isolated: bool,
 }
 
 impl Default for CommandGitClient {
     fn default() -> Self {
-        Self { executable: OsString::from("git") }
+        Self {
+            executable: OsString::from("git"),
+            #[cfg(test)]
+            isolated: false,
+        }
     }
 }
 
 impl CommandGitClient {
+    /// A client whose Git processes run under the fixtures' isolated
+    /// configuration, so a developer's global hooks, signing, or inherited
+    /// repository selectors cannot change what a unit test observes.
+    #[cfg(test)]
+    pub(crate) fn isolated() -> Self {
+        Self::with_executable("git")
+    }
+
     #[cfg(test)]
     pub(in crate::git) fn with_executable(executable: impl AsRef<std::ffi::OsStr>) -> Self {
-        Self { executable: executable.as_ref().to_os_string() }
+        Self { executable: executable.as_ref().to_os_string(), isolated: true }
     }
 
     pub(super) fn command(&self) -> Command {
-        Command::new(&self.executable)
+        #[cfg_attr(not(test), allow(unused_mut))]
+        let mut command = Command::new(&self.executable);
+        #[cfg(test)]
+        if self.isolated {
+            tests::isolate(&mut command);
+        }
+        command
     }
 
     pub(super) fn git_required(
@@ -383,7 +403,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn git_stdout(directory: &Path, args: &[&str]) -> String {
-        let output = Command::new("git").current_dir(directory).args(args).output().unwrap();
+        let output = git(directory).args(args).output().unwrap();
         assert!(output.status.success(), "git {} failed", args.join(" "));
         String::from_utf8_lossy(&output.stdout).trim().to_string()
     }
@@ -405,13 +425,33 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn run_git(directory: &Path, args: &[&str]) {
-        let output = Command::new("git").current_dir(directory).args(args).output().unwrap();
+        let output = git(directory).args(args).output().unwrap();
         assert!(
             output.status.success(),
             "git {} failed: {}",
             args.join(" "),
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    /// Strips every inherited `GIT_*` variable and replaces global and system
+    /// configuration with nothing, so fixtures and isolated clients neither read
+    /// a developer's signing or hook settings nor follow an ambient `GIT_DIR`.
+    /// Applied per command; the test process environment is never mutated.
+    pub(crate) fn isolate(command: &mut Command) {
+        for (name, _) in std::env::vars_os() {
+            if name.to_str().is_some_and(|name| name.starts_with("GIT_")) {
+                command.env_remove(name);
+            }
+        }
+        command.env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_NOSYSTEM", "1");
+    }
+
+    fn git(directory: &Path) -> Command {
+        let mut command = Command::new("git");
+        command.current_dir(directory);
+        isolate(&mut command);
+        command
     }
 
     struct FailingProgressSink;

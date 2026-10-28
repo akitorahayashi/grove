@@ -65,8 +65,8 @@ Unit tests are colocated as `#[cfg(test)] mod tests` at the foot of the module
 they verify. Integration tests live in `tests/` as two Cargo binaries —
 `tests/cli.rs` for CLI boundary behavior and `tests/library.rs` for the `lib.rs`
 facade — sharing `tests/harness/`, which owns the temporary workspace, the
-isolated cache home, the pre-wired `gv` command, and Git remote creation. Layout
-and CI stages are in docs/testing.md.
+isolated cache home, Git process isolation, the pre-wired `gv` command, and Git
+remote creation. Layout and CI stages are in docs/testing.md.
 
 ## Verify Commands
 

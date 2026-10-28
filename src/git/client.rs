@@ -197,7 +197,7 @@ mod tests {
     #[test]
     fn repository_locks_coordinate_independent_file_handles() {
         let root = TempDir::new().unwrap();
-        let client = CommandGitClient::default();
+        let client = CommandGitClient::isolated();
         let held = client.lock_repository(root.path()).unwrap();
         let competing = OpenOptions::new()
             .read(true)

@@ -1,6 +1,33 @@
+use std::ffi::OsString;
 use std::path::Path;
+use std::process::Command;
 
 use super::{TestContext, run_git};
+
+/// Global and system configuration replaced with nothing, so a developer's
+/// signing, hooks, aliases, or templates reach neither fixtures nor `gv`.
+pub(crate) const ISOLATED_CONFIGURATION: [(&str, &str); 2] =
+    [("GIT_CONFIG_GLOBAL", "/dev/null"), ("GIT_CONFIG_NOSYSTEM", "1")];
+
+/// Every inherited `GIT_*` variable, including repository selectors such as
+/// `GIT_DIR` that would otherwise point a child at an ambient repository.
+/// Children drop them individually; the test process environment is never
+/// mutated, because tests run in parallel.
+pub(crate) fn inherited_git_variables() -> impl Iterator<Item = OsString> {
+    std::env::vars_os()
+        .map(|(name, _)| name)
+        .filter(|name| name.to_str().is_some_and(|name| name.starts_with("GIT_")))
+}
+
+pub(crate) fn git_command(directory: &Path) -> Command {
+    let mut command = Command::new("git");
+    command.current_dir(directory);
+    for name in inherited_git_variables() {
+        command.env_remove(name);
+    }
+    command.envs(ISOLATED_CONFIGURATION);
+    command
+}
 
 pub(crate) fn commit_file(repository: &Path, file: &str) {
     std::fs::write(repository.join(file), "local\n").expect("failed to write local commit file");

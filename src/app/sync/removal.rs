@@ -311,7 +311,7 @@ mod tests {
     #[test]
     fn trashes_a_clean_removed_repository_through_the_trash_boundary() {
         let (root, old, config) = workspace();
-        let ctx = AppContext::new(CommandGitClient::default())
+        let ctx = AppContext::new(CommandGitClient::isolated())
             .with_trash(RecordingTrash::default())
             .with_cache(Store::with_root(root.path().join("cache")));
         let removed = config.removed().iter().collect::<Vec<_>>();
@@ -326,7 +326,7 @@ mod tests {
     #[test]
     fn a_trash_failure_blocks_and_leaves_the_repository_in_place() {
         let (root, old, config) = workspace();
-        let ctx = AppContext::new(CommandGitClient::default())
+        let ctx = AppContext::new(CommandGitClient::isolated())
             .with_trash(FailingTrash)
             .with_cache(Store::with_root(root.path().join("cache")));
         let removed = config.removed().iter().collect::<Vec<_>>();
@@ -344,7 +344,7 @@ mod tests {
     #[test]
     fn a_dry_run_plans_the_trash_without_calling_it() {
         let (root, old, config) = workspace();
-        let ctx = AppContext::new(CommandGitClient::default())
+        let ctx = AppContext::new(CommandGitClient::isolated())
             .with_trash(FailingTrash)
             .with_cache(Store::with_root(root.path().join("cache")));
         let removed = config.removed().iter().collect::<Vec<_>>();

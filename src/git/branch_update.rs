@@ -181,7 +181,7 @@ mod tests {
         let root = TempDir::new().unwrap();
         let repository = root.path().join("repo");
         initialize_committed_repository(&repository);
-        let client = CommandGitClient::default();
+        let client = CommandGitClient::isolated();
 
         std::fs::write(repository.join("dirty.txt"), "dirty\n").unwrap();
         assert_eq!(
@@ -202,7 +202,7 @@ mod tests {
         let repository = root.path().join("repo");
         initialize_committed_repository(&repository);
 
-        let result = update(&CommandGitClient::default(), &repository);
+        let result = update(&CommandGitClient::isolated(), &repository);
 
         assert_eq!(result, GitUpdateOutcome::Blocked(GitUpdateBlock::MissingRemoteBranch));
     }
@@ -212,7 +212,7 @@ mod tests {
         let root = TempDir::new().unwrap();
         let repository = create_updatable_repository(root.path());
 
-        let outcome = update(&CommandGitClient::default(), &repository);
+        let outcome = update(&CommandGitClient::isolated(), &repository);
 
         assert!(matches!(
             outcome,
@@ -231,7 +231,7 @@ mod tests {
         let root = TempDir::new().unwrap();
         let repository = root.path().join("repo");
         initialize_committed_repository(&repository);
-        let client = CommandGitClient::default();
+        let client = CommandGitClient::isolated();
 
         std::fs::write(repository.join("dirty.txt"), "dirty\n").unwrap();
         assert_eq!(
@@ -251,7 +251,7 @@ mod tests {
         let root = TempDir::new().unwrap();
         let repository = create_updatable_repository(root.path());
 
-        let outcome = refresh(&CommandGitClient::default(), &repository);
+        let outcome = refresh(&CommandGitClient::isolated(), &repository);
 
         assert!(matches!(
             outcome,
@@ -301,7 +301,7 @@ mod tests {
         let before = git_stdout(&repository, &["rev-parse", "main"]);
         run_git(&repository, &["switch", "feature"]);
 
-        let outcome = update(&CommandGitClient::default(), &repository);
+        let outcome = update(&CommandGitClient::isolated(), &repository);
 
         assert_eq!(outcome, GitUpdateOutcome::Blocked(GitUpdateBlock::Diverged));
         assert_eq!(git_stdout(&repository, &["branch", "--show-current"]), "feature");

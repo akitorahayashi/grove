@@ -809,7 +809,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let remote = make_remote(&tmp.path().join("origin"), false);
         let store = Store::with_root(tmp.path().join("cache"));
-        let git = CommandGitClient::default();
+        let git = CommandGitClient::isolated();
         let url = url_of(&remote);
 
         let first = store
@@ -880,7 +880,7 @@ mod tests {
         let remote = make_remote(&tmp.path().join("origin"), false);
         let cache_root = tmp.path().join("cache");
         let store = Store::with_root(cache_root.clone());
-        let git = CommandGitClient::default();
+        let git = CommandGitClient::isolated();
         let url = url_of(&remote);
 
         store
@@ -900,7 +900,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let remote = make_remote(&tmp.path().join("origin"), true);
         let store = Store::with_root(tmp.path().join("cache"));
-        let git = CommandGitClient::default();
+        let git = CommandGitClient::isolated();
         let url = url_of(&remote);
         let feature = BranchName::new("feature").unwrap();
 
@@ -927,7 +927,7 @@ mod tests {
         let remote = make_remote(&tmp.path().join("origin"), false);
         let cache_root = tmp.path().join("cache");
         let store = Store::with_root(cache_root.clone());
-        let git = CommandGitClient::default();
+        let git = CommandGitClient::isolated();
         let path_form = url_of(&remote);
         let file_form = RemoteUrl::new(&format!("file://{}", remote.display())).unwrap();
 
@@ -956,7 +956,7 @@ mod tests {
         let remote = make_remote(&tmp.path().join("origin"), false);
         let cache_root = tmp.path().join("cache");
         let store = Store::with_root(cache_root.clone());
-        let git = CommandGitClient::default();
+        let git = CommandGitClient::isolated();
         let url = url_of(&remote);
 
         store
@@ -976,7 +976,7 @@ mod tests {
         let remote = make_remote(&tmp.path().join("origin"), false);
         let cache_root = tmp.path().join("cache");
         let store = Store::with_root(cache_root.clone());
-        let git = CommandGitClient::default();
+        let git = CommandGitClient::isolated();
         let url = url_of(&remote);
 
         store
@@ -997,7 +997,7 @@ mod tests {
         let remote = make_remote(&tmp.path().join("origin"), false);
         let cache_root = tmp.path().join("cache");
         let store = Store::with_root(cache_root.clone());
-        let git = CommandGitClient::default();
+        let git = CommandGitClient::isolated();
         let url = url_of(&remote);
         // Establish the current cache format before planting the fixture, so
         // placement meets the stale staging directory instead of invalidation
@@ -1023,7 +1023,7 @@ mod tests {
         let remote = make_remote(&tmp.path().join("origin"), false);
         let cache_root = tmp.path().join("cache");
         let store = Store::with_root(cache_root.clone());
-        let git = CommandGitClient::default();
+        let git = CommandGitClient::isolated();
         let url = url_of(&remote);
 
         store
@@ -1059,7 +1059,7 @@ mod tests {
         fs::create_dir_all(&stale).unwrap();
         fs::write(stale.join("url"), "https://example.com/repository.git").unwrap();
         let store = Store::with_root(cache_root.clone());
-        let git = CommandGitClient::default();
+        let git = CommandGitClient::isolated();
         let url = url_of(&remote);
 
         assert!(store.list().unwrap().is_empty(), "an unrecognized root is emptied");
@@ -1076,7 +1076,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let remote = make_remote(&tmp.path().join("origin"), false);
         let store = Store::with_root(tmp.path().join("cache"));
-        let git = CommandGitClient::default();
+        let git = CommandGitClient::isolated();
         let url = url_of(&remote);
 
         store
@@ -1097,7 +1097,7 @@ mod tests {
         let remote = make_remote(&origin, false);
         let cache_root = tmp.path().join("cache");
         let store = Store::with_root(cache_root.clone());
-        let git = CommandGitClient::default();
+        let git = CommandGitClient::isolated();
         let url = url_of(&remote);
 
         store
@@ -1129,7 +1129,7 @@ mod tests {
         let remote = make_remote(&tmp.path().join("origin"), false);
         let cache_root = tmp.path().join("cache");
         let store = Store::with_root(cache_root.clone());
-        let git = CommandGitClient::default();
+        let git = CommandGitClient::isolated();
         let url = url_of(&remote);
 
         store
@@ -1167,7 +1167,7 @@ mod tests {
         let remote = make_remote(&tmp.path().join("origin"), false);
         let cache_root = tmp.path().join("cache");
         let store = Store::with_root(cache_root.clone());
-        let git = CommandGitClient::default();
+        let git = CommandGitClient::isolated();
         let url = url_of(&remote);
         store
             .place(&git, &url, &tmp.path().join("a"), None, None, &mut NoopGitProgressSink)
@@ -1187,7 +1187,7 @@ mod tests {
         let remote = make_remote(&tmp.path().join("origin"), false);
         let cache_root = tmp.path().join("cache");
         let store = Store::with_root(cache_root.clone());
-        let git = CommandGitClient::default();
+        let git = CommandGitClient::isolated();
         let url = url_of(&remote);
 
         // A clone the user already has on disk, with no cache entry yet.

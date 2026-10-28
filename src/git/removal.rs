@@ -70,7 +70,7 @@ mod tests {
     fn a_fresh_clone_has_no_local_only_state() {
         let root = TempDir::new().unwrap();
         let clone = clone_of(root.path());
-        let git = CommandGitClient::default();
+        let git = CommandGitClient::isolated();
 
         assert!(!git.is_linked_worktree(&clone).unwrap());
         assert!(!git.has_linked_worktrees(&clone).unwrap());
@@ -83,7 +83,7 @@ mod tests {
         let root = TempDir::new().unwrap();
         let clone = clone_of(root.path());
         run_git(&clone, &["worktree", "add", "--quiet", "-b", "side", "../linked"]);
-        let git = CommandGitClient::default();
+        let git = CommandGitClient::isolated();
 
         assert!(git.has_linked_worktrees(&clone).unwrap());
         assert!(!git.is_linked_worktree(&clone).unwrap());
@@ -107,14 +107,14 @@ mod tests {
             ],
         );
 
-        assert!(CommandGitClient::default().has_stash(&clone).unwrap());
+        assert!(CommandGitClient::isolated().has_stash(&clone).unwrap());
     }
 
     #[test]
     fn detects_commits_on_unpushed_branches_and_detached_heads() {
         let root = TempDir::new().unwrap();
         let clone = clone_of(root.path());
-        let git = CommandGitClient::default();
+        let git = CommandGitClient::isolated();
 
         run_git(&clone, &["switch", "--quiet", "-c", "local"]);
         std::fs::write(clone.join("local.txt"), "local\n").unwrap();
@@ -133,7 +133,7 @@ mod tests {
         run_git(root.path(), &["init", "--quiet", "empty"]);
 
         assert!(
-            !CommandGitClient::default().has_unpushed_commits(&root.path().join("empty")).unwrap()
+            !CommandGitClient::isolated().has_unpushed_commits(&root.path().join("empty")).unwrap()
         );
     }
 }

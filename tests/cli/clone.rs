@@ -2,7 +2,7 @@ use std::fs;
 
 use predicates::prelude::*;
 
-use crate::harness::TestContext;
+use crate::harness::{TestContext, git_command};
 
 #[test]
 fn clone_places_repository_and_populates_cache() {
@@ -94,13 +94,8 @@ fn clone_forwards_git_config_options() {
 #[test]
 fn clone_preserves_git_help_and_invalid_option_behavior() {
     let ctx = TestContext::new();
-    let git_help_code = std::process::Command::new("git")
-        .args(["clone", "-h"])
-        .output()
-        .unwrap()
-        .status
-        .code()
-        .unwrap();
+    let git_help_code =
+        git_command(ctx.workspace()).args(["clone", "-h"]).output().unwrap().status.code().unwrap();
 
     ctx.cli()
         .arg("clone")

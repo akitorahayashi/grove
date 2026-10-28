@@ -339,7 +339,7 @@ mod tests {
         initialize_committed_repository(&main);
         run_git(&main, &["worktree", "add", "-b", "linked", linked.to_str().unwrap()]);
 
-        let client = CommandGitClient::default();
+        let client = CommandGitClient::isolated();
         assert_eq!(
             client.common_directory(&main).unwrap(),
             client.common_directory(&linked).unwrap()
@@ -354,7 +354,7 @@ mod tests {
         let nested = repository.join("nested");
         std::fs::create_dir(&nested).unwrap();
 
-        let resolved = CommandGitClient::default().worktree_root(&nested).unwrap();
+        let resolved = CommandGitClient::isolated().worktree_root(&nested).unwrap();
 
         assert_eq!(resolved, Some(repository.canonicalize().unwrap()));
     }
@@ -364,7 +364,7 @@ mod tests {
         let root = TempDir::new().unwrap();
         let bare = root.path().join("bare.git");
         run_git(root.path(), &["init", "--bare", bare.to_str().unwrap()]);
-        let client = CommandGitClient::default();
+        let client = CommandGitClient::isolated();
 
         assert_eq!(client.worktree_root(root.path()).unwrap(), None);
         assert_eq!(client.worktree_root(&bare).unwrap(), None);
@@ -377,7 +377,7 @@ mod tests {
         run_git(root.path(), &["init", "-b", "main", repository.to_str().unwrap()]);
         std::fs::write(repository.join(".git").join("config"), "[bad\n").unwrap();
 
-        let result = CommandGitClient::default().worktree_status(&repository);
+        let result = CommandGitClient::isolated().worktree_status(&repository);
 
         assert!(result.is_err_and(|err| {
             err.to_string().contains("git command failed") && err.to_string().contains("status")
@@ -391,7 +391,7 @@ mod tests {
         run_git(root.path(), &["init", "-b", "main", repository.to_str().unwrap()]);
         std::fs::write(repository.join(".git").join("config"), "[bad\n").unwrap();
 
-        let result = CommandGitClient::default().remote_url(&repository);
+        let result = CommandGitClient::isolated().remote_url(&repository);
 
         assert!(result.is_err_and(|err| {
             err.to_string().contains("git command failed") && err.to_string().contains("config")
@@ -404,7 +404,7 @@ mod tests {
         let repository = root.path().join("repo");
         initialize_committed_repository(&repository);
         run_git(&repository, &["checkout", "--detach"]);
-        let client = CommandGitClient::default();
+        let client = CommandGitClient::isolated();
 
         assert_eq!(client.worktree_status(&repository).unwrap().unwrap().branch(), None);
         assert_eq!(client.remote_url(&repository).unwrap(), None);
@@ -419,7 +419,7 @@ mod tests {
         let root = TempDir::new().unwrap();
         let repository = root.path().join("repo");
         initialize_committed_repository(&repository);
-        let client = CommandGitClient::default();
+        let client = CommandGitClient::isolated();
 
         run_git(&repository, &["switch", "-c", "(detached)"]);
         let named = client.worktree_status(&repository).unwrap().unwrap();
@@ -436,7 +436,7 @@ mod tests {
         let root = TempDir::new().unwrap();
         let repository = root.path().join("repo");
         run_git(root.path(), &["init", "-b", "main", repository.to_str().unwrap()]);
-        let client = CommandGitClient::default();
+        let client = CommandGitClient::isolated();
 
         let unborn = client.worktree_status(&repository).unwrap().unwrap();
         assert_eq!(unborn.branch(), Some("main"));
@@ -456,7 +456,7 @@ mod tests {
         let configured = BranchName::new("release/stable").unwrap();
 
         let branch =
-            CommandGitClient::default().default_branch(&repository, Some(&configured)).unwrap();
+            CommandGitClient::isolated().default_branch(&repository, Some(&configured)).unwrap();
 
         assert_eq!(branch, Some(configured));
     }
