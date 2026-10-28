@@ -4,9 +4,9 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 use crate::AppError;
-use crate::app::{AppContext, add, cache, clone, init, refresh, status, sync, validate};
+use crate::app::{AppContext, add, cache, clone, init, refresh, retire, status, sync, validate};
 use crate::git::CommandGitClient;
-use crate::phases::EventSink;
+use crate::phases::{DiscardEvents, EventSink};
 
 fn default_context() -> AppContext<CommandGitClient> {
     AppContext::new(CommandGitClient::default())
@@ -102,4 +102,22 @@ pub(crate) fn sync_with_events(
 ) -> Result<sync::Report, AppError> {
     let ctx = default_context();
     sync::execute_with_events(&ctx, config_path.as_deref(), &targets, options, events)
+}
+
+pub(crate) fn retire(
+    config_path: Option<PathBuf>,
+    target: Option<PathBuf>,
+    dry_run: bool,
+) -> Result<retire::Report, AppError> {
+    retire_with_events(config_path, target, dry_run, &DiscardEvents)
+}
+
+pub(crate) fn retire_with_events(
+    config_path: Option<PathBuf>,
+    target: Option<PathBuf>,
+    dry_run: bool,
+    events: &impl EventSink<retire::Phase>,
+) -> Result<retire::Report, AppError> {
+    let ctx = default_context();
+    retire::execute(&ctx, config_path.as_deref(), target.as_deref(), dry_run, events)
 }

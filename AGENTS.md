@@ -6,8 +6,10 @@
 repositories declared in `grove.toml`. It clones missing repositories through a
 local object cache, reports repository state, and fast-forwards existing
 repositories' default branches through the system `git` command. Existing Git
-worktrees can be registered in the configuration with `gv add`. The crate ships
-both the binary and a library whose supported surface is the `src/lib.rs` facade.
+worktrees can be registered in the configuration with `gv add`, and `gv retire`
+removes an override together with the repositories only it declares. The crate
+ships both the binary and a library whose supported surface is the `src/lib.rs`
+facade.
 
 ## Directory Structure
 
@@ -17,14 +19,14 @@ src/
   lib.rs         Public facade: the complete supported library API
   error.rs       AppError, its stable categories, and every error constructor
   inspection.rs  Repository readiness probing and the diagnostics the use cases share
-  removal.rs     Assessment of `removed` declarations shared by sync and status
   trash.rs       The operating system trash boundary
   assets/        Templates embedded in the binary
   cli/           Clap parsing and rendering; commands/ holds one module per subcommand, tty/ the presentation over the single output sink
   app/           One use case per subcommand, plus the default dependency wiring, the external-boundary context, and the report row sync and refresh share
   cache/         The local clone cache store: entry layout, identity keying, locking, placement, seeding
   phases/        Bounded-parallel phase execution shared by the repository use cases
-  config/        grove.toml discovery, format-preserving additions, override/include loading, and validation
+  removal/       Removed declarations: the assessment status previews and the convergence sync and retire act through
+  config/        grove.toml discovery, format-preserving additions, override retirement, override/include loading, and validation
   repositories/  Validated repository values: name, path, URL, branch, selection
   git/           The system `git` boundary: probes, process runner, cache entries, branch updates
   zoxide/        The optional zoxide boundary

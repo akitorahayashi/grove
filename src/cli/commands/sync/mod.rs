@@ -7,8 +7,7 @@ use owo_colors::OwoColorize;
 use crate::AppError;
 use crate::app::api;
 use crate::app::sync::{
-    CacheRemoval, Outcome, Phase, PhaseSummary, Plan, RemovalEntry, RemovalOutcome, RemovalPlan,
-    Report, SyncOptions, ZoxideOutcome, ZoxideReport,
+    Outcome, Phase, PhaseSummary, Plan, Report, SyncOptions, ZoxideOutcome, ZoxideReport,
 };
 
 use crate::cli::Completion;
@@ -16,7 +15,7 @@ use crate::cli::output::{Output, terminal_text};
 use crate::cli::tty::progress::{ProgressPhase, run_with_progress};
 use crate::cli::tty::report::{
     cache_annotation, entry_line, print_blocked_details, print_count, print_count_with_elapsed,
-    print_phase, safe_message, write_line,
+    print_phase, print_removals, safe_message, write_line,
 };
 use crate::cli::tty::table::Paint;
 
@@ -88,7 +87,7 @@ fn print_report(report: &Report, dry_run: bool, output: &mut Output<'_>) -> io::
 
     print_count("Skipped", report.skipped(), output)?;
     print_count("Blocked", report.blocked(), output)?;
-    print_removals(report, output)?;
+    print_removals(report.removals(), output)?;
     print_entries(report, output)?;
     print_zoxide_report(report.zoxide(), dry_run, output)
 }
@@ -216,58 +215,6 @@ fn print_entries(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
                 ),
             )?;
         }
-    }
-    Ok(())
-}
-
-fn print_removals(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
-    let mut entries = report.removals().iter().collect::<Vec<_>>();
-    entries.sort_by_key(|entry| entry.repository());
-
-    for entry in entries {
-        print_removal(entry, output)?;
-    }
-    Ok(())
-}
-
-fn print_removal(entry: &RemovalEntry, output: &mut Output<'_>) -> io::Result<()> {
-    let repository = entry.repository();
-    match entry.outcome() {
-        RemovalOutcome::Planned(RemovalPlan::Move { to }) => {
-            let detail = terminal_text(&format!("would move to {to}"));
-            entry_line(output, ">", Paint::Cyan, repository, &detail)?;
-        }
-        RemovalOutcome::Planned(RemovalPlan::Trash) => {
-            entry_line(output, "-", Paint::Cyan, repository, "would move to the trash")?;
-        }
-        RemovalOutcome::Moved { to } => {
-            let detail = terminal_text(&format!("moved to {to}"));
-            entry_line(output, ">", Paint::Green, repository, &detail)?;
-        }
-        RemovalOutcome::Trashed => {
-            entry_line(output, "-", Paint::Green, repository, "moved to the trash")?;
-        }
-        RemovalOutcome::Blocked { reason } => {
-            entry_line(output, "x", Paint::Red, repository, &safe_message(&reason.message()))?;
-        }
-        RemovalOutcome::Absent => {
-            write_line(
-                output,
-                format_args!(" {} {}", "=".cyan(), terminal_text(repository).bold()),
-            )?;
-        }
-    }
-
-    let cache = match entry.cache() {
-        CacheRemoval::Removed => Some("clone cache entry removed"),
-        CacheRemoval::WouldRemove => Some("clone cache entry would be removed"),
-        _ => None,
-    };
-    if let Some(cache) = cache {
-        write_line(output, format_args!("    {}", cache.dimmed()))?;
-    }
-    if let Some(warning) = entry.warning() {
-        write_line(output, format_args!("    {}", safe_message(warning).dimmed()))?;
     }
     Ok(())
 }

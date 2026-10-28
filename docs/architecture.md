@@ -33,6 +33,7 @@ src/
       init.rs
       refresh/
         mod.rs
+      retire.rs
       status.rs
       sync/
         mod.rs
@@ -59,12 +60,12 @@ src/
       report.rs
       task.rs
       update.rs
+    retire.rs
     status.rs
     sync/
       check.rs
       mod.rs
       prepare.rs
-      removal.rs
       report.rs
       update.rs
       zoxide.rs
@@ -73,7 +74,10 @@ src/
     mod.rs
     shorthand.rs
   inspection.rs
-  removal.rs
+  removal/
+    assessment.rs
+    convergence.rs
+    mod.rs
   trash.rs
   phases/
     events.rs
@@ -86,8 +90,10 @@ src/
     discovery.rs
     file.rs
     include.rs
+    lock.rs
     mod.rs
     resolved.rs
+    retirement.rs
     validation.rs
   repositories/
     branch_name.rs
@@ -122,9 +128,9 @@ src/
 `cli` owns Clap parsing, stream selection, terminal-safe text, styling, progress,
 and command completion. Subcommand implementations live under `commands`, while
 `tty` owns the terminal presentation vocabulary built on the shared `output`
-sink. The progress pump, the blocked-reason detail rendering, and the
-repository-count wording are shared across the phase-emitting commands rather
-than duplicated per command. The column-aligned table is shared between the
+sink. The progress pump, the blocked-reason detail rendering, the removal lines
+sync and retire print, and the repository-count wording are shared across the
+phase-emitting commands rather than duplicated per command. The column-aligned table is shared between the
 status and cache listings, which emit styling unconditionally and let `output`
 strip ANSI when the destination or environment calls for plain text.
 Configuration-reading subcommands resolve the `grove.toml` path before invoking
@@ -140,9 +146,10 @@ that sync and refresh share, generic over each use case's outcome vocabulary and
 carrying the structured blocked-reason detail a caller renders beyond the
 message. It holds one module per subcommand and a facade that delegates to each
 without embedding command logic. Sync has removal, check, clone/fetch
-preparation, update, seeding, and optional zoxide phases; the removal phase runs
-its few entries sequentially, outside `phases`, because its unit is a removed
-declaration rather than a repository definition. Refresh has check, fetch, and
+preparation, update, seeding, and optional zoxide phases. Retire has an
+assessment phase over every declaration leaving with the override and, only when
+none is blocked, a retiring phase, after which it trashes the override itself.
+Refresh has check, fetch, and
 default-branch refresh phases. Status inspects repositories through bounded
 parallel workers. Fetching status additionally keys workers by Git common
 directory. Add resolves worktree roots and origins sequentially, commits each
@@ -179,11 +186,15 @@ application errors.
 the conditions the use cases share, so their reason vocabularies map from one
 probe and their shared messages cannot drift.
 
-`removal` owns the assessment of `removed` declarations that sync acts on and
-status previews, the selection of declarations a targeted command covers, and
-the blocked-reason vocabulary both report. Assessment is side-effect free and
-settles ownership with probes that never run repository-configured commands
-before observing the working tree, as `inspection` does.
+`removal` owns the assessment of removed declarations that status previews, the
+convergence sync and retire act through, the selection of declarations a
+targeted command covers, and the outcome and blocked-reason vocabulary they
+report. Assessment is side-effect free and settles ownership with probes that
+never run repository-configured commands before observing the working tree, as
+`inspection` does. Convergence runs its few entries sequentially, outside
+`phases`, because its unit is a removed declaration rather than a repository
+definition; it assesses again under the repository lock before moving or
+trashing, and receives the Git client, trash, and cache from its caller.
 
 `trash` owns the operating system trash boundary behind a trait that the
 application context injects, so tests never touch a real trash. It has no
@@ -213,7 +224,11 @@ edits TOML without changing unrelated formatting, validates prospective source
 contents through the normal loader, verifies the resulting repository identity,
 and atomically replaces one base or override destination. Non-cooperating
 filesystem actors retain the residual race between the final content check and
-replacement.
+replacement. Its retirement session takes the same root-directory lock, loads
+the configuration with and without one override, expresses each declaration
+whose path leaves with the override as a removed declaration, and rejects a
+remaining configuration that fails validation or a retiring path that overlaps
+a remaining one.
 
 `repositories` owns validated repository values. `RemoteUrl` exposes raw text
 only through its process-argument accessor; `Display` and `Debug` are redacted,

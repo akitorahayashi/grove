@@ -11,7 +11,7 @@ binaries plus a shared fixture module:
 
 - `tests/cli.rs` is the crate root for CLI boundary behavior. It pulls in
 `tests/cli/`, one file per subcommand: `add.rs`, `cache.rs`, `clone.rs`, `init.rs`,
-  `status.rs`, and `validate.rs`, plus responsibility-oriented `refresh/` and
+  `retire.rs`, `status.rs`, and `validate.rs`, plus responsibility-oriented `refresh/` and
   `sync/` modules. `refresh/` splits out `planning` and `safety`; `sync/`
   splits out `planning`, `cache`, `progress`, `removal`, and `zoxide`. Each `mod.rs`
   keeps the module wiring and its subcommand's core flow.
@@ -25,9 +25,9 @@ binaries plus a shared fixture module:
   fixtures used by failure-path suites.
 
 Filesystem and process tests use temporary directories. Nothing reaches the
-real trash: unit tests inject a trash double, and the CLI test that trashes a
-repository runs on Linux only, with `XDG_DATA_HOME` inside its temporary
-directory. Git observation parsers
+real trash: unit tests inject a trash double, and the CLI tests that trash
+repositories or an override run on Linux only, with `XDG_DATA_HOME` inside their
+temporary directory. Git observation parsers
 are tested against independent machine-readable fixtures. Status concurrency
 tests use synchronization primitives rather than elapsed-time assumptions and
 assert the externally visible ordering rather than Git invocation counts.

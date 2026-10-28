@@ -4,12 +4,15 @@ mod addition;
 mod discovery;
 mod file;
 mod include;
+mod lock;
 mod resolved;
+mod retirement;
 mod validation;
 
 pub(crate) use addition::{Addition, EditSession};
 pub(crate) use discovery::locate;
 pub use resolved::ResolvedConfig;
+pub(crate) use retirement::Retirement;
 
 use std::path::Path;
 
