@@ -73,7 +73,15 @@ pub(crate) fn execute<Z>(
     let remaining = retirement.remaining();
     let converge = |dry_run| {
         move |removed: &RemovedRepository| {
-            removal::converge(ctx.git(), ctx.trash(), &|| ctx.cache(), remaining, removed, dry_run)
+            removal::converge(
+                ctx.git(),
+                ctx.trash(),
+                &|| ctx.cache(),
+                remaining,
+                removed,
+                dry_run,
+                removal::BlockedCache::Keep,
+            )
         }
     };
 
@@ -245,6 +253,18 @@ mod tests {
         assert_eq!(report.override_outcome(), &OverrideOutcome::Kept);
         assert!(grove.store().is_cached(&grove.url));
         assert!(report.has_failures());
+    }
+
+    #[test]
+    fn a_repository_that_fails_to_trash_keeps_its_cache_entry_and_the_override() {
+        let grove = Grove::new(&["first", "second"]);
+        grove.seed_cache();
+
+        let (report, _) = grove.retire(RecordingTrash { fails: true, ..Default::default() }, false);
+
+        assert!(grove.directory.join("first/.git").exists());
+        assert!(grove.store().is_cached(&grove.url));
+        assert_eq!(report.override_outcome(), &OverrideOutcome::Kept);
     }
 
     #[test]

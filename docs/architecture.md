@@ -194,7 +194,9 @@ never run repository-configured commands before observing the working tree, as
 `inspection` does. Convergence runs its few entries sequentially, outside
 `phases`, because its unit is a removed declaration rather than a repository
 definition; it assesses again under the repository lock before moving or
-trashing, and receives the Git client, trash, and cache from its caller.
+trashing, and receives the Git client, trash, and cache from its caller. Sync
+removes a removed declaration's cache entry whatever its path's state, while
+retire keeps it for a blocked path, whose declaration stays in force.
 
 `trash` owns the operating system trash boundary behind a trait that the
 application context injects, so tests never touch a real trash. It has no
@@ -227,8 +229,10 @@ filesystem actors retain the residual race between the final content check and
 replacement. Its retirement session takes the same root-directory lock, loads
 the configuration with and without one override, expresses each declaration
 whose path leaves with the override as a removed declaration, and rejects a
-remaining configuration that fails validation or a retiring path that overlaps
-a remaining one.
+remaining configuration that fails validation, a path the two configurations
+declare for different repositories, a retiring path that overlaps a remaining
+one, and a retiring directory holding a file the remaining configuration is
+read from.
 
 `repositories` owns validated repository values. `RemoteUrl` exposes raw text
 only through its process-argument accessor; `Display` and `Debug` are redacted,

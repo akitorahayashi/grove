@@ -138,6 +138,7 @@ pub(crate) fn execute_with_events(
                 &config,
                 removed,
                 options.dry_run(),
+                removal::BlockedCache::Remove,
             )
         })?;
     let planned_moves = planned_moves(&removals);

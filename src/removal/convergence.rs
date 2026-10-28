@@ -28,6 +28,17 @@ pub enum Outcome {
     Blocked { reason: BlockedReason },
 }
 
+/// What a blocked declaration does with its clone cache entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BlockedCache {
+    /// Removed regardless: a removed declaration's URL serves no configured
+    /// repository, whatever its old path's state.
+    Remove,
+    /// Kept: a blocked path keeps its declaration in force, so the URL still
+    /// serves a configured repository.
+    Keep,
+}
+
 /// What happened to the clone cache entry of a removed declaration's URL.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -123,6 +134,7 @@ pub(crate) fn converge<'s>(
     config: &ResolvedConfig,
     removed: &RemovedRepository,
     dry_run: bool,
+    blocked_cache: BlockedCache,
 ) -> Result<Entry, AppError> {
     let destination = destination(config, removed);
     let assessment = assess(git, removed, destination)?;
@@ -147,7 +159,10 @@ pub(crate) fn converge<'s>(
         warning,
         planned_destination,
     };
-    remove_cache_entry(cache, config, removed, dry_run, &mut entry)?;
+    let blocked = matches!(entry.outcome, Outcome::Blocked { .. });
+    if !(blocked && blocked_cache == BlockedCache::Keep) {
+        remove_cache_entry(cache, config, removed, dry_run, &mut entry)?;
+    }
     Ok(entry)
 }
 
@@ -196,10 +211,9 @@ fn act(
     }
 }
 
-/// The cache entry goes whatever state the old path is in, since it serves no
-/// configured repository — unless a live repository shares its identity, as
-/// when a repository merely moves between groups. A failure is a note, as
-/// with seeding: the cache never affects correctness.
+/// A live repository sharing the entry's identity keeps it, as when a
+/// repository merely moves between groups. A failure is a note, as with
+/// seeding: the cache never affects correctness.
 fn remove_cache_entry<'s>(
     cache: &dyn Fn() -> Result<&'s Store, AppError>,
     config: &ResolvedConfig,
@@ -249,12 +263,12 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use super::{Entry, Outcome, Plan, converge, run_phase};
+    use super::{BlockedCache, CacheChange, Entry, Outcome, Plan, converge, run_phase};
     use crate::AppError;
     use crate::cache::Store;
     use crate::config;
-    use crate::git::CommandGitClient;
     use crate::git::process_fixtures::{initialize_committed_repository, run_git};
+    use crate::git::{CommandGitClient, NoopGitProgressSink};
     use crate::phases::{DiscardEvents, Summary};
     use crate::removal::BlockedReason;
     use crate::trash::Trash;
@@ -307,14 +321,23 @@ mod tests {
         root: &TempDir,
         config: &config::ResolvedConfig,
         dry_run: bool,
+        blocked_cache: BlockedCache,
     ) -> (Vec<Entry>, Summary) {
         let git = CommandGitClient::default();
         let store = Store::with_root(root.path().join("cache"));
         let removed = config.removed().iter().collect::<Vec<_>>();
         run_phase(&removed, Removing, &DiscardEvents, |removed| {
-            converge(&git, trash, &|| Ok(&store), config, removed, dry_run)
+            converge(&git, trash, &|| Ok(&store), config, removed, dry_run, blocked_cache)
         })
         .unwrap()
+    }
+
+    fn seed_cache(root: &TempDir, config: &config::ResolvedConfig, old: &Path) -> Store {
+        let store = Store::with_root(root.path().join("cache"));
+        let url = config.removed()[0].url();
+        let git = CommandGitClient::default();
+        store.seed_from_local(&git, url, &old.join(".git"), &mut NoopGitProgressSink).unwrap();
+        store
     }
 
     #[test]
@@ -322,7 +345,7 @@ mod tests {
         let (root, old, config) = workspace();
         let trash = RecordingTrash::default();
 
-        let (entries, summary) = converge_all(&trash, &root, &config, false);
+        let (entries, summary) = converge_all(&trash, &root, &config, false, BlockedCache::Remove);
 
         assert_eq!(entries[0].outcome(), &Outcome::Trashed);
         assert_eq!(summary.count(), 1);
@@ -333,7 +356,7 @@ mod tests {
     fn a_trash_failure_blocks_and_leaves_the_repository_in_place() {
         let (root, old, config) = workspace();
 
-        let (entries, _) = converge_all(&FailingTrash, &root, &config, false);
+        let (entries, _) = converge_all(&FailingTrash, &root, &config, false, BlockedCache::Remove);
 
         assert!(matches!(
             entries[0].outcome(),
@@ -347,10 +370,27 @@ mod tests {
     fn a_dry_run_plans_the_trash_without_calling_it() {
         let (root, old, config) = workspace();
 
-        let (entries, summary) = converge_all(&FailingTrash, &root, &config, true);
+        let (entries, summary) =
+            converge_all(&FailingTrash, &root, &config, true, BlockedCache::Remove);
 
         assert_eq!(entries[0].outcome(), &Outcome::Planned(Plan::Trash));
         assert_eq!(summary.count(), 0);
         assert!(old.join(".git").exists());
+    }
+
+    #[test]
+    fn a_blocked_path_keeps_its_cache_entry_only_when_asked_to() {
+        let (root, old, config) = workspace();
+        let store = seed_cache(&root, &config, &old);
+
+        let (kept, _) = converge_all(&FailingTrash, &root, &config, false, BlockedCache::Keep);
+
+        assert_eq!(kept[0].cache(), CacheChange::Untouched);
+        assert!(store.is_cached(config.removed()[0].url()));
+
+        let (removed, _) = converge_all(&FailingTrash, &root, &config, false, BlockedCache::Remove);
+
+        assert_eq!(removed[0].cache(), CacheChange::Removed);
+        assert!(!store.is_cached(config.removed()[0].url()));
     }
 }

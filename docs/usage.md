@@ -245,22 +245,31 @@ override retires; an operand names the override of the root or of an included
 file, through a symbolic link or its target.
 
 The configuration as loaded is compared with the configuration that remains
-without the override:
+without the override, path by path. Repositories are the same when their URLs
+share an identity, as cache entries are keyed:
 
 | Declaration with the override | Its path without the override | Result |
 |---|---|---|
 | live repository | not declared | retired; a repository the remaining configuration keeps under another path moves back there |
-| live repository | declared | unchanged |
 | removed declaration | not declared | retired; `moved_to` applies only when its destination remains |
+| live or removed | declared for the same repository | unchanged |
+| live or removed | declared for another repository | the command stops |
+
+A stop for another repository covers an override that points a repository at a
+fork, or one that places a different repository at a path the base configuration
+uses: the checkout there would not be the one the remaining configuration
+expects. Removing that declaration from the override and settling the checkout
+by hand lets retirement proceed.
 
 Each retiring path is assessed by the table under
-[Removed repositories](#removed-repositories), and the clone cache entry for its
-URL is removed unless a remaining repository shares its identity. A repository
-whose override only changed `url` stays in place, and `gv sync` then reports its
-origin as mismatched. A missing override, an operand that is not an override of
-the configuration, a remaining configuration that fails validation, a retiring
-repository at the grove root, and a retiring path equal to or nested with a
-remaining path stop the command before any change.
+[Removed repositories](#removed-repositories). Once a path is gone, the clone
+cache entry for its URL is removed unless a remaining repository shares its
+identity; a blocked path keeps it, because the override still declares the
+repository. A missing override, an operand that is not an override of the
+configuration, a remaining configuration that fails validation, a retiring
+repository at the grove root, a retiring path nested with a remaining path, and
+a retiring directory holding a file the remaining configuration is read from,
+such as an included configuration file, stop the command before any change.
 
 Retirement acts on the override as a whole. Every retiring path is assessed
 first; when any is blocked, nothing is moved, trashed, or removed from the

@@ -1,3 +1,4 @@
+use std::io;
 use std::path::{Path, PathBuf};
 
 use super::ResolvedConfig;
@@ -9,7 +10,8 @@ use super::lock::DirectoryLock;
 use super::validation;
 use crate::AppError;
 use crate::repositories::{
-    RemovedRepository, RepositoryDefinition, RepositoryName, ResolutionError, resolve_entry_path,
+    RemoteUrl, RemovedRepository, RepositoryDefinition, RepositoryName, ResolutionError,
+    resolve_entry_path,
 };
 
 /// One override's retirement, settled under the root configuration's
@@ -55,8 +57,11 @@ impl Retirement {
             return Err(AppError::config_error(format!("{display_path}: no override to retire")));
         }
 
-        let remaining = include::load_tree_without_override_of(&root_path, &base)
-            .and_then(validation::resolve)
+        let (remaining, sources) = include::load_tree_without_override_of(&root_path, &base)
+            .and_then(|tree| {
+                let sources = sources(&tree, &base)?;
+                Ok((validation::resolve(tree)?, sources))
+            })
             .map_err(|error| {
                 AppError::config_source(
                     format!(
@@ -65,8 +70,9 @@ impl Retirement {
                     error,
                 )
             })?;
-        let retiring = retiring(&current, &remaining, &display_path)?;
-        validate_no_overlap(&retiring, &remaining, &display_path)?;
+        let declared = declarations(&remaining)?;
+        let retiring = retiring(&current, &remaining, &declared, &display_path)?;
+        validate_containment(&retiring, &declared, &sources, &display_path)?;
 
         Ok(Self { override_path, display_path, remaining, retiring, _lock: lock })
     }
@@ -112,6 +118,33 @@ fn paired_base(tree: &LoadedConfigTree, target: &Path) -> Result<PathBuf, AppErr
         })
 }
 
+/// The files the remaining configuration is read from: every loaded base file
+/// and every override still merged into one.
+fn sources(tree: &LoadedConfigTree, retired_base: &Path) -> Result<Vec<PathBuf>, AppError> {
+    let mut sources = Vec::new();
+    for file in &tree.files {
+        sources.push(file.path.clone());
+        if file.path != retired_base
+            && let Some(resolved) = resolve_sibling_override_path(&file.path)?
+        {
+            sources.push(resolved);
+        }
+    }
+    Ok(sources)
+}
+
+/// Every path the remaining configuration declares, live or removed, with the
+/// repository declared there.
+fn declarations(config: &ResolvedConfig) -> Result<Vec<(PathBuf, &RemoteUrl)>, AppError> {
+    config
+        .repositories()
+        .iter()
+        .map(|repository| (repository.path(), repository.url()))
+        .chain(config.removed().iter().map(|removed| (removed.path(), removed.url())))
+        .map(|(path, url)| Ok((on_disk(path)?, url)))
+        .collect()
+}
+
 /// Every declaration whose path the remaining configuration no longer
 /// declares. A live repository the remaining configuration keeps under another
 /// path moves back there, and a removed declaration keeps its destination only
@@ -119,16 +152,17 @@ fn paired_base(tree: &LoadedConfigTree, target: &Path) -> Result<PathBuf, AppErr
 fn retiring(
     current: &ResolvedConfig,
     remaining: &ResolvedConfig,
+    declared: &[(PathBuf, &RemoteUrl)],
     label: &str,
 ) -> Result<Vec<RemovedRepository>, AppError> {
-    let kept = declared_paths(remaining);
     let remains = |name: &RepositoryName| {
         remaining.repositories().iter().any(|repository| repository.name() == name)
     };
 
     let mut retiring = Vec::new();
     for repository in current.repositories() {
-        if kept.contains(&repository.path()) {
+        if is_kept(declared, repository.path(), repository.url(), repository.display_path(), label)?
+        {
             continue;
         }
         retiring.push(RemovedRepository::new(
@@ -140,7 +174,7 @@ fn retiring(
         ));
     }
     for removed in current.removed() {
-        if kept.contains(&removed.path()) {
+        if is_kept(declared, removed.path(), removed.url(), removed.display_path(), label)? {
             continue;
         }
         retiring.push(RemovedRepository::new(
@@ -152,6 +186,29 @@ fn retiring(
         ));
     }
     Ok(retiring)
+}
+
+/// Whether the remaining configuration declares `path` for the same repository.
+/// Declaring it for another one is a substitution retirement cannot settle:
+/// the checkout there serves the override's repository, not the one the
+/// remaining configuration expects.
+fn is_kept(
+    declared: &[(PathBuf, &RemoteUrl)],
+    path: &Path,
+    url: &RemoteUrl,
+    display_path: &str,
+    label: &str,
+) -> Result<bool, AppError> {
+    let path = on_disk(path)?;
+    match declared.iter().find(|(kept, _)| *kept == path) {
+        None => Ok(false),
+        Some((_, kept)) if kept.same_identity(url) => Ok(true),
+        Some((_, kept)) => Err(AppError::config_error(format!(
+            "{label}: '{display_path}' points at {url} with the override but at {kept} without \
+             it; remove that declaration from the override and settle the checkout by hand \
+             before retiring"
+        ))),
+    }
 }
 
 /// Resolves as a removed declaration's path does, so a symbolic link at the
@@ -173,34 +230,47 @@ fn entry_path(repository: &RepositoryDefinition, label: &str) -> Result<PathBuf,
 }
 
 /// Retiring moves or trashes whole directories, so none may hold, or sit
-/// inside, a path the remaining configuration still declares.
-fn validate_no_overlap(
+/// inside, a path the remaining configuration declares, nor hold a file that
+/// configuration is read from.
+fn validate_containment(
     retiring: &[RemovedRepository],
-    remaining: &ResolvedConfig,
+    declared: &[(PathBuf, &RemoteUrl)],
+    sources: &[PathBuf],
     label: &str,
 ) -> Result<(), AppError> {
-    for kept in declared_paths(remaining) {
-        let overlapping = retiring
-            .iter()
-            .find(|retired| retired.path().starts_with(kept) || kept.starts_with(retired.path()));
-        if let Some(retired) = overlapping {
+    for retired in retiring {
+        let path = on_disk(retired.path())?;
+        let overlapping =
+            declared.iter().find(|(kept, _)| kept.starts_with(&path) || path.starts_with(kept));
+        if let Some((kept, _)) = overlapping {
             return Err(AppError::config_error(format!(
                 "{label}: retiring '{}' would affect '{}', which remains configured",
-                retired.path().display(),
+                path.display(),
                 kept.display()
+            )));
+        }
+        if let Some(source) = sources.iter().find(|source| source.starts_with(&path)) {
+            return Err(AppError::config_error(format!(
+                "{label}: retiring '{}' would remove '{}', which the remaining configuration is \
+                 read from",
+                path.display(),
+                source.display()
             )));
         }
     }
     Ok(())
 }
 
-fn declared_paths(config: &ResolvedConfig) -> Vec<&Path> {
-    config
-        .repositories()
-        .iter()
-        .map(RepositoryDefinition::path)
-        .chain(config.removed().iter().map(RemovedRepository::path))
-        .collect()
+/// The path as the filesystem spells it when it exists, so comparisons agree
+/// with canonical paths on case-insensitive volumes. A final symbolic link
+/// stays the link, as assessment treats it.
+fn on_disk(path: &Path) -> Result<PathBuf, AppError> {
+    match path.symlink_metadata() {
+        Ok(metadata) if metadata.file_type().is_symlink() => Ok(path.to_path_buf()),
+        Ok(_) => Ok(path.canonicalize()?),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(path.to_path_buf()),
+        Err(err) => Err(err.into()),
+    }
 }
 
 #[cfg(test)]
@@ -339,6 +409,59 @@ mod tests {
         let error = grove.open(None).err().unwrap();
 
         assert!(error.to_string().contains("which remains configured"));
+    }
+
+    #[test]
+    fn fails_when_a_retiring_repository_holds_a_file_the_remaining_configuration_reads() {
+        let grove = Grove::new(
+            "version = 2\ninclude = [\"foo/repos.toml\"]\n",
+            Some(&format!("[repos]\nfoo = \"{WORK}\"\n")),
+        );
+        grove.write("foo/repos.toml", "version = 2\n");
+
+        let error = grove.open(None).err().unwrap();
+
+        assert!(error.to_string().contains("which the remaining configuration is read from"));
+    }
+
+    #[test]
+    fn fails_when_a_path_names_another_repository_without_the_override() {
+        let grove = Grove::new(
+            &format!("version = 2\n[repos.alpha]\nurl = \"{BASE}\"\npath = \"shared\"\n"),
+            Some(&format!(
+                "[repos.alpha]\npath = \"other\"\n\n[repos.beta]\nurl = \"{WORK}\"\npath = \"shared\"\n"
+            )),
+        );
+
+        let error = grove.open(None).err().unwrap();
+
+        assert!(error.to_string().contains("'shared' points at"));
+    }
+
+    #[test]
+    fn fails_when_the_override_points_a_repository_at_another_url() {
+        let grove = Grove::new(
+            &base_with_one_repository(),
+            Some(&format!("[repos.base]\nurl = \"{WORK}\"\n")),
+        );
+
+        let error = grove.open(None).err().unwrap();
+
+        assert!(error.to_string().contains("'base' points at"));
+    }
+
+    #[test]
+    fn a_path_declared_for_the_same_repository_without_the_override_stays() {
+        let grove = Grove::new(
+            &format!("version = 2\n[repos.alpha]\nurl = \"{BASE}\"\npath = \"shared\"\n"),
+            Some(&format!(
+                "[repos.alpha]\npath = \"other\"\n\n[repos.gamma]\nurl = \"{BASE}\"\npath = \"shared\"\n"
+            )),
+        );
+
+        let retirement = grove.open(None).unwrap();
+
+        assert_eq!(retiring(&retirement), [("other", Some("alpha"))]);
     }
 
     #[test]
