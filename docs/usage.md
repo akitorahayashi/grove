@@ -26,6 +26,10 @@ gv refresh frontend
 gv refresh --dry-run
 gv --config ~/workspace/grove.toml status
 
+gv retire --dry-run
+gv retire
+gv retire work/repositories.override.toml
+
 gv clone git@github.com:company/frontend.git
 gv clone git@github.com:company/frontend.git frontend
 gv clone frontend
@@ -43,6 +47,9 @@ configuration. With no path it registers the worktree containing the current
 directory.
 `gv validate`, with the alias `gv vl`, checks `grove.toml` without inspecting
 repositories.
+`gv retire` removes an override together with the repositories and clone cache
+entries only it declares. It has no alias, because a short form would sit one
+keystroke from `gv rf`.
 
 `gv clone`, with the alias `gv cl`, and `gv cache`, with the alias `gv c`, expose the
 local clone cache from the command line. `gv cache list`, with the alias `gv c ls`,
@@ -114,7 +121,9 @@ them changes nothing.
 existing repositories' default branches. Missing repositories are cloned through the local clone cache
 (see Clone Cache). Existing repositories are updated through system `git`
 commands, and an existing repository grove could reach whose URL has no cache
-entry seeds one from its local objects (see Clone Cache). Independent repository
+entry seeds one from its local objects (see Clone Cache). Sync holds the root
+configuration directory's lock for its whole run, shared with other syncs, so
+`gv add` and `gv retire` wait until it finishes. Independent repository
 tasks run concurrently with at most eight live tasks. Linked worktrees that
 share a Git common directory remain serialized.
 
@@ -226,6 +235,65 @@ and is reported as a blocked refresh that already switched branches.
 `gv refresh --dry-run` performs local validation without fetching or mutating
 Git state. Divergence in a dry run reflects the locally available
 remote-tracking refs, which may be older than the remote repository.
+
+## Retire
+
+`gv retire [<override>]` removes an override file together with the
+repositories and clone cache entries only it declares, so deleting the override
+leaves nothing unmanaged behind. Leaving a repository out of the configuration
+never removes it ([configuration](config.md#removed-repositories)); retiring is
+the explicit act that does. Without an operand the root configuration's sibling
+override retires; an operand names the override of the root or of an included
+file, through a symbolic link or its target.
+
+The configuration as loaded is compared with the configuration that remains
+without the override, path by path. Repositories are the same when their URLs
+share an identity, as cache entries are keyed:
+
+| Declaration with the override | Its path without the override | Result |
+|---|---|---|
+| live repository | not declared | retired; when the remaining configuration keeps the same repository under another path, it moves back there |
+| removed declaration | not declared | retired; `moved_to` applies only when its destination remains |
+| live or removed | declared for the same repository | unchanged |
+| live or removed | declared for another repository | the command stops |
+
+The command also stops when the remaining configuration keeps a repository of
+the same name under another path but for another repository. Both stops cover an
+override that points a repository at a fork, whether or not it also moves it, and
+one that places a different repository at a path the base configuration uses:
+the checkout would not be the one the remaining configuration expects. Removing
+that declaration from the override and settling the checkout by hand lets
+retirement proceed.
+
+Each retiring path is assessed by the table under
+[Removed repositories](#removed-repositories). A missing override, an operand
+that is not an override of the configuration, a remaining configuration that
+fails validation, a retiring repository at the grove root, a retiring path
+nested with a remaining path, and a retiring directory holding a file the
+remaining configuration is read from, such as an included configuration file,
+stop the command before any change. Remaining paths count both as written and
+where they lead, so a symbolic link inside a retiring directory protects what it
+reaches.
+
+The clone cache entries for the retired URLs that no remaining repository shares
+are removed once the override has moved to the trash; until then the override
+still declares their repositories, so a run that keeps it removes none.
+
+Retirement acts on the override as a whole. Every retiring path is assessed
+first; when any is blocked, nothing is moved, trashed, or removed from the
+cache, the override stays, and the command fails after reporting every
+assessment. Otherwise each path is assessed again under its repository lock and
+acted on, and the override then moves to the operating system trash; a symbolic
+link there moves as the link. A repository that gains local-only state between
+the two assessments blocks, and the override then stays for a later run, which
+skips paths already gone. The root configuration's directory stays locked
+throughout, and `gv add` and `gv sync` take the same lock, so neither acts on an
+override retirement is removing.
+
+`gv retire --dry-run` reports the assessment, the cache entries that would be
+removed, and whether the override would move to the trash, without changing
+anything; a blocked repository fails it too. Empty group directories and zoxide
+entries are left as they are.
 
 ## Clone cache
 

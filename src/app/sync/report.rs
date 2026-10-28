@@ -4,9 +4,8 @@ use crate::app::entry::Entry;
 use crate::cache::Outcome as CacheOutcome;
 use crate::inspection;
 use crate::phases::Summary as PhaseSummary;
+use crate::removal;
 use crate::repositories::RepositoryDefinition;
-
-use super::removal::{RemovalEntry, RemovalOutcome, RemovalPlan};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -131,7 +130,7 @@ impl PhaseSummaries {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Report {
-    removals: Vec<RemovalEntry>,
+    removals: Vec<removal::Entry>,
     entries: Vec<Entry<Outcome>>,
     elapsed: Duration,
     phases: PhaseSummaries,
@@ -140,7 +139,7 @@ pub struct Report {
 
 impl Report {
     pub(super) fn new(
-        removals: Vec<RemovalEntry>,
+        removals: Vec<removal::Entry>,
         entries: Vec<Entry<Outcome>>,
         elapsed: Duration,
         phases: PhaseSummaries,
@@ -151,7 +150,7 @@ impl Report {
 
     /// The removed declarations sync acted on or would act on; an absent old
     /// path with no cache entry to drop is omitted.
-    pub fn removals(&self) -> &[RemovalEntry] {
+    pub fn removals(&self) -> &[removal::Entry] {
         &self.removals
     }
 
@@ -163,7 +162,7 @@ impl Report {
         self.removals
             .iter()
             .filter(|entry| {
-                matches!(entry.outcome(), RemovalOutcome::Planned(RemovalPlan::Move { .. }))
+                matches!(entry.outcome(), removal::Outcome::Planned(removal::Plan::Move { .. }))
             })
             .count()
     }
@@ -171,7 +170,9 @@ impl Report {
     pub fn planned_trashes(&self) -> usize {
         self.removals
             .iter()
-            .filter(|entry| matches!(entry.outcome(), RemovalOutcome::Planned(RemovalPlan::Trash)))
+            .filter(|entry| {
+                matches!(entry.outcome(), removal::Outcome::Planned(removal::Plan::Trash))
+            })
             .count()
     }
 
@@ -242,7 +243,7 @@ impl Report {
     fn blocked_removals(&self) -> usize {
         self.removals
             .iter()
-            .filter(|entry| matches!(entry.outcome(), RemovalOutcome::Blocked { .. }))
+            .filter(|entry| matches!(entry.outcome(), removal::Outcome::Blocked { .. }))
             .count()
     }
 

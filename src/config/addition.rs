@@ -6,6 +6,7 @@ use tempfile::NamedTempFile;
 use toml_edit::{DocumentMut, InlineTable, Item, Table, Value, value};
 
 use super::include::{resolve_sibling_override_path, sibling_override_path};
+use super::lock::DirectoryLock;
 use super::{ResolvedConfig, load, load_with_replacement};
 use crate::AppError;
 use crate::repositories::{RemoteUrl, RepositoryName};
@@ -229,28 +230,6 @@ fn verify_added_repository(
         )));
     }
     Ok(())
-}
-
-struct DirectoryLock {
-    file: File,
-}
-
-impl DirectoryLock {
-    fn acquire(directory: &Path, shared: bool) -> Result<Self, AppError> {
-        let file = File::open(directory)?;
-        if shared {
-            file.lock_shared()?;
-        } else {
-            file.lock()?;
-        }
-        Ok(Self { file })
-    }
-}
-
-impl Drop for DirectoryLock {
-    fn drop(&mut self) {
-        let _ = File::unlock(&self.file);
-    }
 }
 
 fn relative_path(root: &Path, repository: &Path) -> Result<String, AppError> {

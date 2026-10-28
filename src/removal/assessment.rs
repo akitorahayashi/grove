@@ -1,21 +1,11 @@
-//! Assessment of `removed` declarations, shared by sync (which acts on it)
-//! and status (which previews it), and the diagnostics both report.
-//!
-//! Absence from the configuration never implies removal; only an explicit
-//! declaration reaches this module, and even then a directory grove cannot
-//! prove it owns, or whose loss would take local-only work with it, is left
-//! in place.
-
-use std::collections::HashSet;
 use std::path::Path;
 
 use crate::AppError;
-use crate::config::ResolvedConfig;
 use crate::git::{Removal, RepositoryProbe};
 use crate::repositories::{RemovedRepository, RepositoryDefinition};
 
-/// What sync would do with a removed declaration's old path, decided by the
-/// first matching row of the documented judgment table.
+/// What converging a removed declaration would do with its old path, decided
+/// by the first matching row of the documented judgment table.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Assessment {
     Absent,
@@ -24,7 +14,7 @@ pub(crate) enum Assessment {
     Trash,
 }
 
-/// Why sync leaves a removed declaration's old path in place.
+/// Why a removed declaration's old path is left in place.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum BlockedReason {
@@ -79,31 +69,6 @@ impl LocalState {
             Self::UnpushedCommits => "unpushed commits",
         }
     }
-}
-
-/// The removed declarations a command covers: all of them, or with explicit
-/// targets only those moving to a selected repository, so `gv sync <repo>`
-/// never touches anything unrelated to `<repo>`.
-pub(crate) fn select<'a>(
-    config: &'a ResolvedConfig,
-    selected: &[&RepositoryDefinition],
-    targeted: bool,
-) -> Vec<&'a RemovedRepository> {
-    let names = selected.iter().map(|repository| repository.name()).collect::<HashSet<_>>();
-    config
-        .removed()
-        .iter()
-        .filter(|removed| !targeted || removed.moved_to().is_some_and(|to| names.contains(to)))
-        .collect()
-}
-
-/// The live repository a removed declaration moves to.
-pub(crate) fn destination<'a>(
-    config: &'a ResolvedConfig,
-    removed: &RemovedRepository,
-) -> Option<&'a RepositoryDefinition> {
-    let target = removed.moved_to()?;
-    config.repositories().iter().find(|repository| repository.name() == target)
 }
 
 /// The probe order mirrors `inspection::ownership`: ownership is settled with

@@ -192,6 +192,10 @@ included base file without inspecting their sibling overrides. The base
 configuration's `include` array is used unchanged, and the resulting base-only
 tree must pass the normal validation rules.
 
+Deleting an override leaves the repositories only it declared on disk,
+unmanaged. `gv retire` removes one override together with those repositories
+and their clone cache entries, as described in [usage](usage.md#retire).
+
 ## Includes
 
 Root configuration files can include one level of child configuration files.

@@ -8,19 +8,18 @@ use crate::cache::Store;
 use crate::config;
 use crate::git::{CacheEntry, DefaultBranch, GitClient, RepositoryProbe};
 use crate::phases::{self, DiscardEvents, EventProgress, EventSink, Slots, Task as PhaseTask};
+use crate::removal;
 use crate::repositories::{RepositoryDefinition, RepositoryName, select_repositories};
 use crate::trash::Trash;
 
 mod check;
 mod prepare;
-mod removal;
 mod report;
 mod update;
 mod zoxide;
 
 pub(crate) use crate::app::entry::BlockedReasonDetails;
 pub use crate::phases::Summary as PhaseSummary;
-pub use removal::{CacheRemoval, RemovalEntry, RemovalOutcome, RemovalPlan};
 pub use report::{
     BlockedReason, Outcome, PhaseSummaries, Plan, Report, SkippedReason, ZoxideEntry,
     ZoxideOutcome, ZoxideReport,
@@ -117,6 +116,9 @@ pub(crate) fn execute_with_events(
     events: &impl EventSink<Phase>,
 ) -> Result<Report, AppError> {
     ctx.git().verify_available()?;
+    // Retirement takes this lock exclusively, so an override cannot disappear
+    // between loading the configuration and placing its repositories.
+    let _configuration_lock = config::share_root_lock(config_path)?;
     let config = if options.ignores_overrides() {
         config::load_without_overrides(config_path)?
     } else {
@@ -127,9 +129,20 @@ pub(crate) fn execute_with_events(
     let started = Instant::now();
     let mut entries = Slots::new(repositories.len());
 
-    let removed = crate::removal::select(&config, &repositories, !targets.is_empty());
+    // Removals run before checking so a move lands before its destination
+    // would be cloned afresh.
+    let removed = removal::select(&config, &repositories, !targets.is_empty());
     let (removals, removed_summary) =
-        removal::phase(ctx, &config, &removed, options.dry_run(), events)?;
+        removal::run_phase(&removed, Phase::Removing, events, |removed| {
+            removal::converge(
+                ctx.git(),
+                ctx.trash(),
+                Some(&|| ctx.cache()),
+                &config,
+                removed,
+                options.dry_run(),
+            )
+        })?;
     let planned_moves = planned_moves(&removals);
 
     let (decisions, checked) = check_phase(
@@ -202,7 +215,7 @@ pub(crate) fn execute_with_events(
 
 /// Destinations a dry run plans to fill by moving an old directory, keyed by
 /// repository name, with the old display path they move from.
-fn planned_moves(removals: &[RemovalEntry]) -> HashMap<RepositoryName, String> {
+fn planned_moves(removals: &[removal::Entry]) -> HashMap<RepositoryName, String> {
     removals
         .iter()
         .filter_map(|entry| {
