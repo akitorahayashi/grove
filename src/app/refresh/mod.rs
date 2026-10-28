@@ -146,7 +146,7 @@ fn refresh_phase(
         Phase::Refreshing,
         &tasks,
         parallelism,
-        |task| Ok((task.index(), update::repository(git, task))),
+        |task| update::repository(git, task).map(|entry| (task.index(), entry)),
         |(_, entry)| {
             matches!(
                 entry.outcome(),

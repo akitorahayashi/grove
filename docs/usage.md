@@ -370,7 +370,11 @@ planned, as `SyncRemovalEntry` values with a `SyncRemovalOutcome` and a
 `RemovalBlockedReason`, listing any `RemovalLocalState`.
 `AppError::kind()` exposes stable categories without exposing the error storage
 layout. Domain accessors retain typed details and underlying causes through
-`std::error::Error::source`; Git and zoxide failures expose process kind,
+`std::error::Error::source`. Error messages and `Debug` output redact URL
+credentials, with one exception: a configuration error's `source()` is the
+unredacted `toml::de::Error` or I/O error, whose rendering can quote the
+configuration document, so callers that print source chains own their
+redaction; Git and zoxide failures expose process kind,
 command, exit code, and bounded diagnostics. `StatusEntry::absolute_path()` and
 `source_config()` return `&Path`, including non-UTF-8 paths on Unix. `cli`
 returns an `ExitCode` and does not terminate its host process.

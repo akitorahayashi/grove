@@ -21,6 +21,11 @@ mod tests {
                 .map(|branch| branch.as_str().to_string()),
             Some("release/stable".to_string())
         );
+        assert_eq!(
+            branch("refs/heads/caf\u{e9}\u{a0}\n".as_bytes(), "refs/heads/")
+                .map(|branch| branch.as_str().to_string()),
+            Some("caf\u{e9}\u{a0}".to_string())
+        );
     }
 
     #[test]

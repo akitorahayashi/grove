@@ -41,7 +41,11 @@ A repository table carries exceptional fields:
 - `path` is optional and replaces the derived path. It remains relative to the
   defining configuration file, not to the group.
 - `default_branch` is optional. An explicit branch takes precedence over the
-  local `origin/HEAD`; `origin/HEAD` is used when the field is absent.
+  local `origin/HEAD`; `origin/HEAD` is used when the field is absent. The
+  value is a literal branch name under Git's rules, as
+  `git check-ref-format --branch` applies them, checked without running Git.
+  Non-ASCII characters, Unicode whitespace included, are accepted; `HEAD` and
+  `@` are rejected, the latter because `git switch` reads it as `HEAD`.
 
 Root repositories use the same detail form under `repos.<name>`. Repository
 declaration order is root entries followed by each group and its entries in

@@ -1,12 +1,11 @@
 use std::fs;
-use std::time::Instant;
 
 use crate::AppError;
 use crate::app::AppContext;
 use crate::cache::Store;
 use crate::config::ResolvedConfig;
 use crate::git::{Removal, RepositoryProbe};
-use crate::phases::{Event, EventSink, Summary as PhaseSummary};
+use crate::phases::{self, EventSink, Summary as PhaseSummary};
 use crate::removal::{self, Assessment, BlockedReason};
 use crate::repositories::{RemovedRepository, RepositoryDefinition, RepositoryName};
 use crate::trash::Trash;
@@ -87,38 +86,14 @@ pub(super) fn phase<Z>(
     dry_run: bool,
     events: &impl EventSink<Phase>,
 ) -> Result<(Vec<RemovalEntry>, PhaseSummary), AppError> {
-    if removed.is_empty() {
-        return Ok((Vec::new(), PhaseSummary::default()));
-    }
-
-    events.emit(Event::PhaseStarted { phase: Phase::Removing, total: removed.len() })?;
-    let started = Instant::now();
-    let mut entries = Vec::new();
-    for removed in removed {
-        let repository = removed.display_path().to_string();
-        events.emit(Event::RepositoryStarted {
-            repository: repository.clone(),
-            phase: Phase::Removing,
-        })?;
-        let entry = match remove(ctx, config, removed, dry_run) {
-            Ok(entry) => entry,
-            Err(error) => {
-                events.emit(Event::PhaseFailed { phase: Phase::Removing })?;
-                return Err(error);
-            }
-        };
-        events.emit(Event::RepositoryFinished { repository, phase: Phase::Removing })?;
-        entries.push(entry);
-    }
-
-    let changed = entries
-        .iter()
-        .filter(|entry| {
-            matches!(entry.outcome, RemovalOutcome::Moved { .. } | RemovalOutcome::Trashed)
-        })
-        .count();
-    let summary = PhaseSummary::new(changed, started.elapsed());
-    events.emit(Event::PhaseCompleted { phase: Phase::Removing, summary })?;
+    let (mut entries, summary) = phases::run_sequential(
+        events,
+        Phase::Removing,
+        removed,
+        |removed| removed.display_path(),
+        |removed| remove(ctx, config, removed, dry_run),
+        |entry| matches!(entry.outcome, RemovalOutcome::Moved { .. } | RemovalOutcome::Trashed),
+    )?;
     entries.retain(RemovalEntry::is_reportable);
     Ok((entries, summary))
 }

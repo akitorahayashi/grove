@@ -142,7 +142,8 @@ carrying the structured blocked-reason detail a caller renders beyond the
 message. It holds one module per subcommand and a facade that delegates to each
 without embedding command logic. Sync has removal, check, clone/fetch
 preparation, update, seeding, and optional zoxide phases; the removal phase runs
-its few entries sequentially, outside `phases`, because its unit is a removed
+its few entries through the sequential phase envelope, because a move must not
+race another entry's probes over the same tree and its unit is a removed
 declaration rather than a repository definition. Refresh has check, fetch, and
 default-branch refresh phases. Status inspects repositories through bounded
 parallel workers. Fetching status additionally keys workers by Git common
@@ -160,15 +161,17 @@ seeding from an existing local clone. `shorthand` owns naming an entry by the
 trailing segments of its identity, which `gv clone` resolves to the entry's
 origin URL. A failed entry refresh rebuilds the
 entry from the requested URL, so heuristic identity sharing reduces transfer
-at worst and never blocks placement. Placement, seeding, listing, named
+at worst and never blocks placement. An internal failure is never treated as
+a stale entry: it propagates without a rebuild or placement. Placement, seeding, listing, named
 removal, and whole-cache cleaning use one lock order across processes. The
 owner-only cache root records its format version and is emptied under the
 exclusive global lock when the recorded format is not current; it contains
 stable lock files and only real entry directories are inspected. The sync, clone, and cache use cases share it.
 
 `phases` owns phase-structured bounded-parallel execution. `events` owns the
-phase-generic event, sink, and progress adapter; `run` owns the check and worker
-phase envelopes; `workers` owns the bounded worker pool; `slots` owns the
+phase-generic event, sink, and progress adapter; `run` owns the check, worker,
+and sequential phase envelopes, which share one event order and keep an
+action's error primary over a failure to report it; `workers` owns the bounded worker pool; `slots` owns the
 selection-ordered result slots and the invariant that every selected item ends
 with exactly one result. Each use case supplies its own phase marker,
 per-repository action, and change predicate. Worker execution is bounded by the
@@ -230,7 +233,8 @@ identity while retaining the configured display path.
 fetch execution, worktree-root and origin discovery for configuration additions,
 default-branch mutation, and the local-only state and origin repointing that
 removal needs. `command` owns the common process runner and bounded progress
-diagnostics; `probe`, `cache_entry`, `branch_update`, and `removal` own their
+diagnostics, which keep every finished stderr line whatever its content and
+drop only progress refreshes that a later carriage-return segment overwrote; `probe`, `cache_entry`, `branch_update`, and `removal` own their
 corresponding command families. `environment` owns the preflight that
 availability checks run: managed commands select their repository by working
 directory, so inherited variables from `git rev-parse --local-env-vars` other
@@ -261,7 +265,8 @@ whether cache injection preserves the requested semantics. Eligible invocations
 insert `--reference-if-able` and `--dissociate` immediately before the operands;
 all other invocations execute unchanged. A repository operand that is a cache
 shorthand is first replaced with its resolved URL and the invocation is
-classified again. This keeps Git authoritative for
+classified again. A failed cache preparation falls back to the unchanged
+invocation unless the failure is internal, which aborts before Git runs. This keeps Git authoritative for
 diagnostics and lets an entry removed after cache preparation degrade to a
 normal clone rather than a failure.
 
@@ -274,6 +279,11 @@ categories, domain accessors expose typed configuration, cache, argument, Git,
 and zoxide details, and the standard error source chain retains underlying
 parsing, I/O, and process-spawn failures. Process exits expose command, exit
 status, and bounded diagnostics while `Display` remains the human rendering.
+`demote` is the one rule for per-repository failures: a boundary failure
+becomes the entry's reported message, while an internal failure aborts the run.
+`config` redacts URL credentials from every message it builds around a parser,
+decoder, or I/O source, and `ConfigError`'s `Debug` omits that source, because
+parser errors quote the raw document.
 
 ## Public facade
 

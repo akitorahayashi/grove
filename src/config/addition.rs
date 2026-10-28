@@ -69,7 +69,7 @@ impl EditSession {
         let contents = baseline.as_deref().unwrap_or_default();
         let label = destination.display().to_string();
         let document = contents.parse::<DocumentMut>().map_err(|error| {
-            AppError::config_source(format!("{label}: invalid TOML: {error}"), error)
+            super::source_error(format!("{label}: invalid TOML: {error}"), error)
         })?;
         if document.to_string() != contents {
             return Err(AppError::config_error(format!(

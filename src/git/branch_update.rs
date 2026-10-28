@@ -159,8 +159,8 @@ mod tests {
     use tempfile::TempDir;
 
     use super::super::command::tests::{
-        commit, create_updatable_repository, git_stdout, git_wrapper,
-        initialize_committed_repository, run_git,
+        commit, create_updatable_repository, create_updatable_repository_on, git_stdout,
+        git_wrapper, initialize_committed_repository, run_git,
     };
     use crate::git::{
         CommandGitClient, DefaultBranch, GitRefreshOutcome, GitUpdateBlock, GitUpdateOutcome,
@@ -402,5 +402,46 @@ mod tests {
         );
         assert_eq!(git_stdout(&repository, &["rev-parse", "refs/heads/main"]), remote_tip);
         assert_eq!(git_stdout(&repository, &["symbolic-ref", "HEAD"]), "refs/heads/main");
+    }
+
+    /// Git accepts non-ASCII whitespace in a branch name, so discovery,
+    /// tracking, the update, and restoration must carry it intact.
+    #[test]
+    fn unicode_branch_names_survive_discovery_tracking_and_update() {
+        use crate::git::{BranchTracking, CacheEntry, NoopGitProgressSink, RepositoryProbe};
+        use crate::repositories::RemoteUrl;
+
+        let root = TempDir::new().unwrap();
+        let name = "release/caf\u{e9}\u{a0}";
+        let repository = create_updatable_repository_on(root.path(), name);
+        let client = CommandGitClient::isolated();
+
+        let branch = client.default_branch(&repository, None).unwrap().unwrap();
+        assert_eq!(branch.as_str(), name);
+        assert_eq!(
+            client.branch_tracking(&repository, &branch).unwrap(),
+            BranchTracking::Divergence { ahead: 0, behind: 1 }
+        );
+        let outcome = client.update_default_branch(&repository, &branch).unwrap();
+        assert!(
+            matches!(
+                outcome,
+                GitUpdateOutcome::Completed { ref update, restoration: Restoration::Restored }
+                    if update.changed()
+            ),
+            "{outcome:?}"
+        );
+        assert_eq!(
+            git_stdout(&repository, &["rev-parse", &format!("refs/heads/{name}")]),
+            git_stdout(&repository, &["rev-parse", &format!("refs/remotes/origin/{name}")])
+        );
+
+        run_git(&repository, &["switch", name]);
+        assert_eq!(client.worktree_status(&repository).unwrap().unwrap().branch(), Some(name));
+        let url = RemoteUrl::new(root.path().join("remote.git").to_str().unwrap()).unwrap();
+        let tracked = client
+            .cache_create(&url, &root.path().join("entry"), None, None, &mut NoopGitProgressSink)
+            .unwrap();
+        assert_eq!(tracked, name);
     }
 }

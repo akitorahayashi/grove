@@ -368,11 +368,15 @@ impl Store {
         // entry, and an upstream rename can delete the tracked branch. The
         // entry must only ever reduce transfer, never block placement, so a
         // failed refresh falls back to rebuilding from the requested URL; a
-        // remote that is genuinely unreachable fails that rebuild instead.
+        // remote that is genuinely unreachable fails that rebuild instead. An
+        // internal failure says nothing about the entry and is never retried.
         if let Some(wanted) = wanted
             && read_metadata(container, "branch")?.as_deref() != Some(wanted)
         {
-            if git.cache_retarget(bare, url, wanted, progress).is_err() {
+            if let Err(error) = git.cache_retarget(bare, url, wanted, progress) {
+                if error.is_internal() {
+                    return Err(error);
+                }
                 self.build_entry(git, url, container, Some(wanted), None, progress)?;
                 return Ok(Outcome::Rebuilt);
             }
@@ -380,7 +384,10 @@ impl Store {
             return Ok(Outcome::Retargeted);
         }
 
-        if git.cache_update(bare, url, progress).is_err() {
+        if let Err(error) = git.cache_update(bare, url, progress) {
+            if error.is_internal() {
+                return Err(error);
+            }
             self.build_entry(git, url, container, wanted, None, progress)?;
             return Ok(Outcome::Rebuilt);
         }
@@ -704,9 +711,104 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{LOCK_DIRECTORY, LockMode, Outcome, Store, entry_directory_name, temporary_path};
+    use crate::AppError;
     use crate::git::process_fixtures::{git_stdout, run_git};
-    use crate::git::{CommandGitClient, NoopGitProgressSink};
+    use crate::git::{CacheEntry, CommandGitClient, GitProgressSink, NoopGitProgressSink};
     use crate::repositories::{BranchName, RemoteUrl};
+
+    /// Real cache Git, except that refreshing an existing entry fails
+    /// internally; records whether a rebuild or a placement was attempted.
+    #[derive(Default)]
+    struct InternallyFailingRefresh {
+        git: CommandGitClient,
+        attempts: std::sync::Mutex<Vec<&'static str>>,
+    }
+
+    impl CacheEntry for InternallyFailingRefresh {
+        fn cache_create(
+            &self,
+            url: &RemoteUrl,
+            entry: &Path,
+            branch: Option<&str>,
+            reference: Option<&Path>,
+            progress: &mut dyn GitProgressSink,
+        ) -> Result<String, AppError> {
+            self.attempts.lock().unwrap().push("create");
+            self.git.cache_create(url, entry, branch, reference, progress)
+        }
+
+        fn cache_update(
+            &self,
+            _entry: &Path,
+            _url: &RemoteUrl,
+            _progress: &mut dyn GitProgressSink,
+        ) -> Result<(), AppError> {
+            Err(AppError::internal("injected update failure"))
+        }
+
+        fn cache_retarget(
+            &self,
+            _entry: &Path,
+            _url: &RemoteUrl,
+            _branch: &str,
+            _progress: &mut dyn GitProgressSink,
+        ) -> Result<(), AppError> {
+            Err(AppError::internal("injected retarget failure"))
+        }
+
+        fn cache_verify(&self, entry: &Path) -> Result<bool, AppError> {
+            self.git.cache_verify(entry)
+        }
+
+        fn clone_with_reference(
+            &self,
+            url: &RemoteUrl,
+            destination: &Path,
+            reference: &Path,
+            progress: &mut dyn GitProgressSink,
+        ) -> Result<(), AppError> {
+            self.attempts.lock().unwrap().push("clone");
+            self.git.clone_with_reference(url, destination, reference, progress)
+        }
+    }
+
+    #[test]
+    fn internal_refresh_failures_propagate_without_rebuilding_or_placing() {
+        let tmp = TempDir::new().unwrap();
+        let remote = make_remote(&tmp.path().join("origin"), true);
+        let store = Store::with_root(tmp.path().join("cache"));
+        let url = url_of(&remote);
+        store
+            .place(
+                &CommandGitClient::isolated(),
+                &url,
+                &tmp.path().join("a"),
+                None,
+                None,
+                &mut NoopGitProgressSink,
+            )
+            .unwrap();
+        let git =
+            InternallyFailingRefresh { git: CommandGitClient::isolated(), ..Default::default() };
+        let feature = BranchName::new("feature").unwrap();
+
+        for (destination, branch) in [("b", None), ("c", Some(&feature))] {
+            let error = store
+                .place(
+                    &git,
+                    &url,
+                    &tmp.path().join(destination),
+                    None,
+                    branch,
+                    &mut NoopGitProgressSink,
+                )
+                .unwrap_err();
+
+            assert!(error.is_internal(), "{error}");
+            assert!(!tmp.path().join(destination).exists());
+        }
+        assert!(git.attempts.lock().unwrap().is_empty(), "{:?}", git.attempts.lock().unwrap());
+    }
 
     #[test]
     fn list_ignores_staging_and_noncanonical_directories() {
