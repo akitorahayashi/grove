@@ -211,7 +211,10 @@ include = [
 
 Child configuration files define repositories relative to their own directory
 and cannot include other configuration files. Each base child file declares
-`version = 2` and can have its own sibling override.
+`version = 2` and can have its own sibling override. `gv add` guarantees only
+the selected root's catalog, so an addition that edits a child file through
+another root leaves each including catalog to `gv validate`
+([usage](usage.md#add)).
 
 ## Validation
 

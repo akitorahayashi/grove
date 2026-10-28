@@ -80,6 +80,16 @@ directory fails after replacement, the current operand is reported as written
 with unconfirmed durability and processing stops. Logs and the stop summary use
 stderr; stdout remains empty.
 
+Each addition validates the prospective catalog of the selected root
+configuration — the file discovered or named by `--config`, with its overrides
+and includes — and replaces one destination file atomically. Only that root's
+catalog is guaranteed valid afterwards. A file reached through another root's
+`include` belongs to a separate transaction domain: an addition made with that
+file as the selected root, or through a root that does not include it, does not
+validate the other including catalogs, which `gv validate` checks separately.
+Locks cover the selected root's directory and the destination's directory, not
+every file the validated catalog reads.
+
 `gv add --override` writes to the selected base file's sibling override. A
 missing override is created only when the first repository is successfully
 added, without a `version` field. The option selects the destination and does not

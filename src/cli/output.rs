@@ -1,5 +1,5 @@
 use std::fmt::Arguments;
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, Write};
 
 use anstream::AutoStream;
 use anstream::ColorChoice;
@@ -8,7 +8,6 @@ use anstream::adapter::strip_str;
 pub(in crate::cli) struct Output<'a> {
     stdout: &'a mut dyn Write,
     stderr: &'a mut dyn Write,
-    stdout_is_terminal: bool,
     stdout_choice: ColorChoice,
     stderr_choice: ColorChoice,
 }
@@ -21,7 +20,6 @@ impl<'a> Output<'a> {
         Self {
             stdout,
             stderr,
-            stdout_is_terminal: io::stdout().is_terminal(),
             stdout_choice: AutoStream::choice(&io::stdout()),
             stderr_choice: AutoStream::choice(&io::stderr()),
         }
@@ -32,14 +30,9 @@ impl<'a> Output<'a> {
         Self {
             stdout,
             stderr,
-            stdout_is_terminal: false,
             stdout_choice: ColorChoice::Never,
             stderr_choice: ColorChoice::Never,
         }
-    }
-
-    pub(in crate::cli) fn stdout_is_terminal(&self) -> bool {
-        self.stdout_is_terminal
     }
 
     pub(in crate::cli) fn stdout(&mut self, arguments: Arguments<'_>) -> io::Result<()> {
