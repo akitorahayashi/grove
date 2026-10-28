@@ -4,10 +4,11 @@ use std::path::Path;
 use crate::AppError;
 
 /// An advisory lock on a configuration directory. `gv add` and `gv retire`
-/// take it on the root configuration's directory before reading, so neither
-/// acts on a configuration the other is changing; editors outside grove do not
+/// take it exclusively on the root configuration's directory before reading,
+/// and `gv sync` shares it while placing repositories, so none acts on a
+/// configuration another is changing; editors outside grove do not
 /// participate.
-pub(super) struct DirectoryLock {
+pub(crate) struct DirectoryLock {
     file: File,
 }
 

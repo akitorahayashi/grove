@@ -16,8 +16,8 @@ use crate::repositories::{RemovedRepository, RepositoryDefinition};
 
 pub(crate) use assessment::{Assessment, assess};
 pub use assessment::{BlockedReason, LocalState};
-pub(crate) use convergence::{BlockedCache, converge, run_phase};
 pub use convergence::{CacheChange, Entry, Outcome, Plan};
+pub(crate) use convergence::{converge, drop_cache_entry, run_phase};
 
 /// The removed declarations a command covers: all of them, or with explicit
 /// targets only those moving to a selected repository, so `gv sync <repo>`

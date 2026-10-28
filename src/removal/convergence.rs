@@ -6,7 +6,7 @@ use crate::cache::Store;
 use crate::config::ResolvedConfig;
 use crate::git::{Removal, RepositoryProbe};
 use crate::phases::{Event, EventSink, Summary};
-use crate::repositories::{RemovedRepository, RepositoryDefinition, RepositoryName};
+use crate::repositories::{RemoteUrl, RemovedRepository, RepositoryDefinition, RepositoryName};
 use crate::trash::Trash;
 
 use super::{Assessment, BlockedReason, assess, destination};
@@ -26,17 +26,6 @@ pub enum Outcome {
     Moved { to: String },
     Trashed,
     Blocked { reason: BlockedReason },
-}
-
-/// What a blocked declaration does with its clone cache entry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BlockedCache {
-    /// Removed regardless: a removed declaration's URL serves no configured
-    /// repository, whatever its old path's state.
-    Remove,
-    /// Kept: a blocked path keeps its declaration in force, so the URL still
-    /// serves a configured repository.
-    Keep,
 }
 
 /// What happened to the clone cache entry of a removed declaration's URL.
@@ -127,14 +116,16 @@ pub(crate) fn run_phase<P: Copy>(
 
 /// `config` is the configuration that stays in force: destinations resolve
 /// against its repositories, and a cache entry one of them shares is kept.
+/// Given `cache`, the entry for the declaration's URL goes whatever the old
+/// path's state, since that URL serves no configured repository; without it the
+/// caller settles the cache.
 pub(crate) fn converge<'s>(
     git: &(impl RepositoryProbe + Removal),
     trash: &impl Trash,
-    cache: &dyn Fn() -> Result<&'s Store, AppError>,
+    cache: Option<&dyn Fn() -> Result<&'s Store, AppError>>,
     config: &ResolvedConfig,
     removed: &RemovedRepository,
     dry_run: bool,
-    blocked_cache: BlockedCache,
 ) -> Result<Entry, AppError> {
     let destination = destination(config, removed);
     let assessment = assess(git, removed, destination)?;
@@ -159,8 +150,7 @@ pub(crate) fn converge<'s>(
         warning,
         planned_destination,
     };
-    let blocked = matches!(entry.outcome, Outcome::Blocked { .. });
-    if !(blocked && blocked_cache == BlockedCache::Keep) {
+    if let Some(cache) = cache {
         remove_cache_entry(cache, config, removed, dry_run, &mut entry)?;
     }
     Ok(entry)
@@ -228,22 +218,7 @@ fn remove_cache_entry<'s>(
     if shared {
         return Ok(());
     }
-    let result = cache().and_then(|cache| {
-        if dry_run {
-            Ok(if cache.is_cached(removed.url()) {
-                CacheChange::WouldRemove
-            } else {
-                CacheChange::Untouched
-            })
-        } else {
-            Ok(if cache.remove(removed.url())? {
-                CacheChange::Removed
-            } else {
-                CacheChange::Untouched
-            })
-        }
-    });
-    match result {
+    match cache().and_then(|cache| drop_cache_entry(cache, removed.url(), dry_run)) {
         Ok(cache) => entry.cache = cache,
         Err(error) => {
             let message = format!("clone cache entry not removed: {}", error.demote()?);
@@ -256,6 +231,23 @@ fn remove_cache_entry<'s>(
     Ok(())
 }
 
+/// Removes the clone cache entry for `url`, or in a dry run reports whether
+/// there is one to remove.
+pub(crate) fn drop_cache_entry(
+    cache: &Store,
+    url: &RemoteUrl,
+    dry_run: bool,
+) -> Result<CacheChange, AppError> {
+    if dry_run {
+        return Ok(if cache.is_cached(url) {
+            CacheChange::WouldRemove
+        } else {
+            CacheChange::Untouched
+        });
+    }
+    Ok(if cache.remove(url)? { CacheChange::Removed } else { CacheChange::Untouched })
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
@@ -263,7 +255,7 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use super::{BlockedCache, CacheChange, Entry, Outcome, Plan, converge, run_phase};
+    use super::{CacheChange, Entry, Outcome, Plan, converge, run_phase};
     use crate::AppError;
     use crate::cache::Store;
     use crate::config;
@@ -321,13 +313,15 @@ mod tests {
         root: &TempDir,
         config: &config::ResolvedConfig,
         dry_run: bool,
-        blocked_cache: BlockedCache,
+        with_cache: bool,
     ) -> (Vec<Entry>, Summary) {
         let git = CommandGitClient::default();
         let store = Store::with_root(root.path().join("cache"));
+        let cache = || Ok(&store);
+        let cache: Option<&dyn Fn() -> _> = with_cache.then_some(&cache);
         let removed = config.removed().iter().collect::<Vec<_>>();
         run_phase(&removed, Removing, &DiscardEvents, |removed| {
-            converge(&git, trash, &|| Ok(&store), config, removed, dry_run, blocked_cache)
+            converge(&git, trash, cache, config, removed, dry_run)
         })
         .unwrap()
     }
@@ -345,7 +339,7 @@ mod tests {
         let (root, old, config) = workspace();
         let trash = RecordingTrash::default();
 
-        let (entries, summary) = converge_all(&trash, &root, &config, false, BlockedCache::Remove);
+        let (entries, summary) = converge_all(&trash, &root, &config, false, true);
 
         assert_eq!(entries[0].outcome(), &Outcome::Trashed);
         assert_eq!(summary.count(), 1);
@@ -356,7 +350,7 @@ mod tests {
     fn a_trash_failure_blocks_and_leaves_the_repository_in_place() {
         let (root, old, config) = workspace();
 
-        let (entries, _) = converge_all(&FailingTrash, &root, &config, false, BlockedCache::Remove);
+        let (entries, _) = converge_all(&FailingTrash, &root, &config, false, true);
 
         assert!(matches!(
             entries[0].outcome(),
@@ -370,8 +364,7 @@ mod tests {
     fn a_dry_run_plans_the_trash_without_calling_it() {
         let (root, old, config) = workspace();
 
-        let (entries, summary) =
-            converge_all(&FailingTrash, &root, &config, true, BlockedCache::Remove);
+        let (entries, summary) = converge_all(&FailingTrash, &root, &config, true, true);
 
         assert_eq!(entries[0].outcome(), &Outcome::Planned(Plan::Trash));
         assert_eq!(summary.count(), 0);
@@ -379,16 +372,16 @@ mod tests {
     }
 
     #[test]
-    fn a_blocked_path_keeps_its_cache_entry_only_when_asked_to() {
+    fn a_blocked_path_drops_its_cache_entry_only_when_given_the_cache() {
         let (root, old, config) = workspace();
         let store = seed_cache(&root, &config, &old);
 
-        let (kept, _) = converge_all(&FailingTrash, &root, &config, false, BlockedCache::Keep);
+        let (untouched, _) = converge_all(&FailingTrash, &root, &config, false, false);
 
-        assert_eq!(kept[0].cache(), CacheChange::Untouched);
+        assert_eq!(untouched[0].cache(), CacheChange::Untouched);
         assert!(store.is_cached(config.removed()[0].url()));
 
-        let (removed, _) = converge_all(&FailingTrash, &root, &config, false, BlockedCache::Remove);
+        let (removed, _) = converge_all(&FailingTrash, &root, &config, false, true);
 
         assert_eq!(removed[0].cache(), CacheChange::Removed);
         assert!(!store.is_cached(config.removed()[0].url()));

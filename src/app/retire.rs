@@ -8,8 +8,8 @@ use crate::app::AppContext;
 use crate::config::Retirement;
 use crate::git::{Removal, RepositoryProbe};
 use crate::phases::EventSink;
-use crate::removal;
-use crate::repositories::RemovedRepository;
+use crate::removal::{self, CacheChange};
+use crate::repositories::{RemoteUrl, RemovedRepository};
 use crate::trash::Trash;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,11 +28,34 @@ pub(crate) enum OverrideOutcome {
     TrashFailed(String),
 }
 
+/// A clone cache entry that only the retired declarations' URLs name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CacheRemoval {
+    identity: String,
+    change: CacheChange,
+    warning: Option<String>,
+}
+
+impl CacheRemoval {
+    pub(crate) fn identity(&self) -> &str {
+        &self.identity
+    }
+
+    pub(crate) fn change(&self) -> CacheChange {
+        self.change
+    }
+
+    pub(crate) fn warning(&self) -> Option<&str> {
+        self.warning.as_deref()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Report {
     override_display_path: String,
     entries: Vec<removal::Entry>,
     override_outcome: OverrideOutcome,
+    cache: Vec<CacheRemoval>,
 }
 
 impl Report {
@@ -50,6 +73,10 @@ impl Report {
         &self.override_outcome
     }
 
+    pub(crate) fn cache(&self) -> &[CacheRemoval] {
+        &self.cache
+    }
+
     pub(crate) fn has_failures(&self) -> bool {
         matches!(self.override_outcome, OverrideOutcome::Kept | OverrideOutcome::TrashFailed(_))
     }
@@ -59,7 +86,8 @@ impl Report {
 /// assessed before anything changes, and a single blocked one leaves all of
 /// them, their cache entries, and the override untouched. Acting assesses each
 /// again under its repository lock; one that gained local work in between
-/// still blocks and keeps the override for a later run.
+/// still blocks and keeps the override for a later run. Cache entries go only
+/// after the override, since until then it still declares their repositories.
 pub(crate) fn execute<Z>(
     ctx: &AppContext<impl RepositoryProbe + Removal, Z, impl Trash>,
     config_path: Option<&Path>,
@@ -73,38 +101,63 @@ pub(crate) fn execute<Z>(
     let remaining = retirement.remaining();
     let converge = |dry_run| {
         move |removed: &RemovedRepository| {
-            removal::converge(
-                ctx.git(),
-                ctx.trash(),
-                &|| ctx.cache(),
-                remaining,
-                removed,
-                dry_run,
-                removal::BlockedCache::Keep,
-            )
+            removal::converge(ctx.git(), ctx.trash(), None, remaining, removed, dry_run)
         }
     };
 
     let (assessed, _) = removal::run_phase(&retiring, Phase::Assessing, events, converge(true))?;
-    if dry_run || assessed.iter().any(is_blocked) {
-        let outcome = if assessed.iter().any(is_blocked) {
-            OverrideOutcome::Kept
-        } else {
-            OverrideOutcome::WouldTrash
-        };
-        return Ok(report(&retirement, assessed, outcome));
+    if assessed.iter().any(is_blocked) {
+        return Ok(report(&retirement, assessed, OverrideOutcome::Kept, Vec::new()));
+    }
+    if dry_run {
+        let cache = drop_cache(ctx, &retirement, true)?;
+        return Ok(report(&retirement, assessed, OverrideOutcome::WouldTrash, cache));
     }
 
     let (retired, _) = removal::run_phase(&retiring, Phase::Retiring, events, converge(false))?;
-    let outcome = if retired.iter().any(is_blocked) {
-        OverrideOutcome::Kept
-    } else {
-        match ctx.trash().trash(retirement.override_path()) {
-            Ok(()) => OverrideOutcome::Trashed,
-            Err(error) => OverrideOutcome::TrashFailed(error.demote()?),
+    if retired.iter().any(is_blocked) {
+        return Ok(report(&retirement, retired, OverrideOutcome::Kept, Vec::new()));
+    }
+    if let Err(error) = ctx.trash().trash(retirement.override_path()) {
+        let outcome = OverrideOutcome::TrashFailed(error.demote()?);
+        return Ok(report(&retirement, retired, outcome, Vec::new()));
+    }
+    let cache = drop_cache(ctx, &retirement, false)?;
+    Ok(report(&retirement, retired, OverrideOutcome::Trashed, cache))
+}
+
+/// Each identity the retired URLs name goes once, unless a remaining
+/// repository shares it. A failure is a note: the cache never affects
+/// correctness.
+fn drop_cache<Z>(
+    ctx: &AppContext<impl RepositoryProbe + Removal, Z, impl Trash>,
+    retirement: &Retirement,
+    dry_run: bool,
+) -> Result<Vec<CacheRemoval>, AppError> {
+    let mut urls: Vec<&RemoteUrl> = Vec::new();
+    for removed in retirement.retiring() {
+        let url = removed.url();
+        let shared = retirement
+            .remaining()
+            .repositories()
+            .iter()
+            .any(|repository| repository.url().same_identity(url));
+        if !shared && !urls.iter().any(|seen| seen.same_identity(url)) {
+            urls.push(url);
         }
-    };
-    Ok(report(&retirement, retired, outcome))
+    }
+
+    let mut removals = Vec::new();
+    for url in urls {
+        let (change, warning) =
+            match ctx.cache().and_then(|cache| removal::drop_cache_entry(cache, url, dry_run)) {
+                Ok(CacheChange::Untouched) => continue,
+                Ok(change) => (change, None),
+                Err(error) => (CacheChange::Untouched, Some(error.demote()?)),
+            };
+        removals.push(CacheRemoval { identity: url.identity(), change, warning });
+    }
+    Ok(removals)
 }
 
 fn is_blocked(entry: &removal::Entry) -> bool {
@@ -115,11 +168,13 @@ fn report(
     retirement: &Retirement,
     entries: Vec<removal::Entry>,
     override_outcome: OverrideOutcome,
+    cache: Vec<CacheRemoval>,
 ) -> Report {
     Report {
         override_display_path: retirement.display_path().to_string(),
         entries,
         override_outcome,
+        cache,
     }
 }
 
@@ -142,17 +197,26 @@ mod tests {
     use crate::repositories::RemoteUrl;
     use crate::trash::Trash;
 
-    /// Records every path handed to it, failing each move when `fails` is set.
-    #[derive(Default)]
+    /// Records every path handed to it, failing the moves `fails` selects.
     struct RecordingTrash {
-        fails: bool,
+        fails: fn(&Path) -> bool,
         paths: Mutex<Vec<PathBuf>>,
+    }
+
+    impl RecordingTrash {
+        fn new() -> Self {
+            Self::failing(|_| false)
+        }
+
+        fn failing(fails: fn(&Path) -> bool) -> Self {
+            Self { fails, paths: Mutex::default() }
+        }
     }
 
     impl Trash for RecordingTrash {
         fn trash(&self, path: &Path) -> Result<(), AppError> {
             self.paths.lock().unwrap().push(path.to_path_buf());
-            if self.fails {
+            if (self.fails)(path) {
                 return Err(std::io::Error::other("trash unavailable").into());
             }
             Ok(())
@@ -215,12 +279,16 @@ mod tests {
         report.entries().iter().map(|entry| entry.outcome()).collect()
     }
 
+    fn cache_changes(report: &Report) -> Vec<(String, CacheChange)> {
+        report.cache().iter().map(|entry| (entry.identity().to_string(), entry.change())).collect()
+    }
+
     #[test]
     fn retires_every_repository_and_its_cache_entry_before_the_override() {
         let grove = Grove::new(&["first", "second"]);
         grove.seed_cache();
 
-        let (report, trashed) = grove.retire(RecordingTrash::default(), false);
+        let (report, trashed) = grove.retire(RecordingTrash::new(), false);
 
         assert_eq!(
             trashed,
@@ -231,8 +299,8 @@ mod tests {
             ]
         );
         assert_eq!(outcomes(&report), [&Outcome::Trashed, &Outcome::Trashed]);
-        assert_eq!(report.entries()[0].cache(), CacheChange::Removed);
         assert_eq!(report.override_outcome(), &OverrideOutcome::Trashed);
+        assert_eq!(cache_changes(&report), [(grove.url.identity(), CacheChange::Removed)]);
         assert!(!grove.store().is_cached(&grove.url));
         assert!(!report.has_failures());
     }
@@ -243,7 +311,7 @@ mod tests {
         grove.seed_cache();
         fs::write(grove.directory.join("second/untracked.txt"), "local\n").unwrap();
 
-        let (report, trashed) = grove.retire(RecordingTrash::default(), false);
+        let (report, trashed) = grove.retire(RecordingTrash::new(), false);
 
         assert!(trashed.is_empty());
         assert!(matches!(
@@ -260,7 +328,7 @@ mod tests {
         let grove = Grove::new(&["first", "second"]);
         grove.seed_cache();
 
-        let (report, _) = grove.retire(RecordingTrash { fails: true, ..Default::default() }, false);
+        let (report, _) = grove.retire(RecordingTrash::failing(|_| true), false);
 
         assert!(grove.directory.join("first/.git").exists());
         assert!(grove.store().is_cached(&grove.url));
@@ -268,10 +336,25 @@ mod tests {
     }
 
     #[test]
+    fn a_partial_failure_keeps_the_cache_entry_a_remaining_checkout_still_uses() {
+        let grove = Grove::new(&["first", "second"]);
+        grove.seed_cache();
+
+        let trash = RecordingTrash::failing(|path| path.ends_with("second"));
+        let (report, trashed) = grove.retire(trash, false);
+
+        assert_eq!(trashed[0], grove.directory.join("first"));
+        assert!(grove.directory.join("second/.git").exists());
+        assert!(grove.store().is_cached(&grove.url));
+        assert_eq!(report.override_outcome(), &OverrideOutcome::Kept);
+    }
+
+    #[test]
     fn a_dry_run_plans_without_changing_anything() {
         let grove = Grove::new(&["first", "second"]);
+        grove.seed_cache();
 
-        let (report, trashed) = grove.retire(RecordingTrash::default(), true);
+        let (report, trashed) = grove.retire(RecordingTrash::new(), true);
 
         assert!(trashed.is_empty());
         assert_eq!(
@@ -279,6 +362,8 @@ mod tests {
             [&Outcome::Planned(Plan::Trash), &Outcome::Planned(Plan::Trash)]
         );
         assert_eq!(report.override_outcome(), &OverrideOutcome::WouldTrash);
+        assert_eq!(cache_changes(&report), [(grove.url.identity(), CacheChange::WouldRemove)]);
+        assert!(grove.store().is_cached(&grove.url));
         assert!(!report.has_failures());
     }
 
@@ -286,7 +371,7 @@ mod tests {
     fn retiring_again_after_the_repositories_are_gone_trashes_only_the_override() {
         let grove = Grove::new(&[]);
 
-        let (report, trashed) = grove.retire(RecordingTrash::default(), false);
+        let (report, trashed) = grove.retire(RecordingTrash::new(), false);
 
         assert_eq!(trashed, [grove.directory.join("grove.override.toml")]);
         assert!(report.entries().is_empty());
@@ -297,7 +382,7 @@ mod tests {
     fn a_failed_override_trash_is_reported_as_a_failure() {
         let grove = Grove::new(&[]);
 
-        let (report, _) = grove.retire(RecordingTrash { fails: true, ..Default::default() }, false);
+        let (report, _) = grove.retire(RecordingTrash::failing(|_| true), false);
 
         assert!(matches!(
             report.override_outcome(),

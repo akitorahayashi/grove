@@ -11,7 +11,7 @@ use super::validation;
 use crate::AppError;
 use crate::repositories::{
     RemoteUrl, RemovedRepository, RepositoryDefinition, RepositoryName, ResolutionError,
-    resolve_entry_path,
+    normalize_lexically, resolve_entry_path,
 };
 
 /// One override's retirement, settled under the root configuration's
@@ -70,7 +70,7 @@ impl Retirement {
                     error,
                 )
             })?;
-        let declared = declarations(&remaining)?;
+        let declared = declarations(&remaining, &root_directory)?;
         let retiring = retiring(&current, &remaining, &declared, &display_path)?;
         validate_containment(&retiring, &declared, &sources, &display_path)?;
 
@@ -118,41 +118,67 @@ fn paired_base(tree: &LoadedConfigTree, target: &Path) -> Result<PathBuf, AppErr
         })
 }
 
-/// The files the remaining configuration is read from: every loaded base file
-/// and every override still merged into one.
+/// The files the remaining configuration is read from, both through the paths
+/// that name them and where those paths lead: every loaded base file and every
+/// override still merged into one.
 fn sources(tree: &LoadedConfigTree, retired_base: &Path) -> Result<Vec<PathBuf>, AppError> {
     let mut sources = Vec::new();
     for file in &tree.files {
         sources.push(file.path.clone());
+        for include in &file.raw.include {
+            sources.push(on_disk(&normalize_lexically(&file.directory.join(include)))?);
+        }
         if file.path != retired_base
             && let Some(resolved) = resolve_sibling_override_path(&file.path)?
         {
+            sources.push(on_disk(&sibling_override_path(&file.path))?);
             sources.push(resolved);
         }
     }
     Ok(sources)
 }
 
-/// Every path the remaining configuration declares, live or removed, with the
-/// repository declared there.
-fn declarations(config: &ResolvedConfig) -> Result<Vec<(PathBuf, &RemoteUrl)>, AppError> {
+/// A path the remaining configuration declares, with the repository declared
+/// there: `route` is the path as written and `location` where it leads, both
+/// spelled as `on_disk` spells them.
+struct Declaration<'a> {
+    route: PathBuf,
+    location: PathBuf,
+    url: &'a RemoteUrl,
+}
+
+fn declarations<'a>(
+    config: &'a ResolvedConfig,
+    root: &Path,
+) -> Result<Vec<Declaration<'a>>, AppError> {
     config
         .repositories()
         .iter()
-        .map(|repository| (repository.path(), repository.url()))
-        .chain(config.removed().iter().map(|removed| (removed.path(), removed.url())))
-        .map(|(path, url)| Ok((on_disk(path)?, url)))
+        .map(|repository| (repository.display_path(), repository.path(), repository.url()))
+        .chain(
+            config
+                .removed()
+                .iter()
+                .map(|removed| (removed.display_path(), removed.path(), removed.url())),
+        )
+        .map(|(display_path, path, url)| {
+            Ok(Declaration {
+                route: on_disk(&root.join(display_path))?,
+                location: on_disk(path)?,
+                url,
+            })
+        })
         .collect()
 }
 
 /// Every declaration whose path the remaining configuration no longer
 /// declares. A live repository the remaining configuration keeps under another
-/// path moves back there, and a removed declaration keeps its destination only
-/// while that destination remains.
+/// path moves back there when both name the same repository, and a removed
+/// declaration keeps its destination only while that destination remains.
 fn retiring(
     current: &ResolvedConfig,
     remaining: &ResolvedConfig,
-    declared: &[(PathBuf, &RemoteUrl)],
+    declared: &[Declaration<'_>],
     label: &str,
 ) -> Result<Vec<RemovedRepository>, AppError> {
     let remains = |name: &RepositoryName| {
@@ -165,12 +191,21 @@ fn retiring(
         {
             continue;
         }
+        let kept = remaining.repositories().iter().find(|kept| kept.name() == repository.name());
+        let moved_to = match kept {
+            Some(kept) if kept.url().same_identity(repository.url()) => Some(kept.name().clone()),
+            Some(kept) => {
+                let subject = format!("repository '{}'", repository.name());
+                return Err(substitution(label, &subject, repository.url(), kept.url()));
+            }
+            None => None,
+        };
         retiring.push(RemovedRepository::new(
             repository.name().clone(),
             entry_path(repository, label)?,
             repository.display_path().to_string(),
             repository.url().clone(),
-            remains(repository.name()).then(|| repository.name().clone()),
+            moved_to,
         ));
     }
     for removed in current.removed() {
@@ -188,27 +223,31 @@ fn retiring(
     Ok(retiring)
 }
 
-/// Whether the remaining configuration declares `path` for the same repository.
-/// Declaring it for another one is a substitution retirement cannot settle:
-/// the checkout there serves the override's repository, not the one the
-/// remaining configuration expects.
+/// Whether the remaining configuration declares `path` for the same
+/// repository; declaring it for another one is a substitution.
 fn is_kept(
-    declared: &[(PathBuf, &RemoteUrl)],
+    declared: &[Declaration<'_>],
     path: &Path,
     url: &RemoteUrl,
     display_path: &str,
     label: &str,
 ) -> Result<bool, AppError> {
     let path = on_disk(path)?;
-    match declared.iter().find(|(kept, _)| *kept == path) {
+    match declared.iter().find(|kept| kept.location == path) {
         None => Ok(false),
-        Some((_, kept)) if kept.same_identity(url) => Ok(true),
-        Some((_, kept)) => Err(AppError::config_error(format!(
-            "{label}: '{display_path}' points at {url} with the override but at {kept} without \
-             it; remove that declaration from the override and settle the checkout by hand \
-             before retiring"
-        ))),
+        Some(kept) if kept.url.same_identity(url) => Ok(true),
+        Some(kept) => Err(substitution(label, &format!("'{display_path}'"), url, kept.url)),
     }
+}
+
+/// The override points `subject` at a different repository than the remaining
+/// configuration does, so neither keeping nor moving its checkout would leave
+/// the repository the remaining configuration expects.
+fn substitution(label: &str, subject: &str, url: &RemoteUrl, kept: &RemoteUrl) -> AppError {
+    AppError::config_error(format!(
+        "{label}: {subject} points at {url} with the override but at {kept} without it; remove \
+         that declaration from the override and settle the checkout by hand before retiring"
+    ))
 }
 
 /// Resolves as a removed declaration's path does, so a symbolic link at the
@@ -231,18 +270,20 @@ fn entry_path(repository: &RepositoryDefinition, label: &str) -> Result<PathBuf,
 
 /// Retiring moves or trashes whole directories, so none may hold, or sit
 /// inside, a path the remaining configuration declares, nor hold a file that
-/// configuration is read from.
+/// configuration is read from, whether as written or where it leads.
 fn validate_containment(
     retiring: &[RemovedRepository],
-    declared: &[(PathBuf, &RemoteUrl)],
+    declared: &[Declaration<'_>],
     sources: &[PathBuf],
     label: &str,
 ) -> Result<(), AppError> {
     for retired in retiring {
         let path = on_disk(retired.path())?;
-        let overlapping =
-            declared.iter().find(|(kept, _)| kept.starts_with(&path) || path.starts_with(kept));
-        if let Some((kept, _)) = overlapping {
+        let overlapping = declared
+            .iter()
+            .flat_map(|kept| [&kept.route, &kept.location])
+            .find(|kept| kept.starts_with(&path) || path.starts_with(kept));
+        if let Some(kept) = overlapping {
             return Err(AppError::config_error(format!(
                 "{label}: retiring '{}' would affect '{}', which remains configured",
                 path.display(),
@@ -261,16 +302,32 @@ fn validate_containment(
     Ok(())
 }
 
-/// The path as the filesystem spells it when it exists, so comparisons agree
-/// with canonical paths on case-insensitive volumes. A final symbolic link
-/// stays the link, as assessment treats it.
+/// The path with its leading part that holds no symbolic link spelled as the
+/// filesystem spells it, and the rest as written. Comparisons then agree with
+/// canonical paths on case-insensitive volumes, while a path through a link
+/// keeps naming the link, as assessment treats it.
 fn on_disk(path: &Path) -> Result<PathBuf, AppError> {
-    match path.symlink_metadata() {
-        Ok(metadata) if metadata.file_type().is_symlink() => Ok(path.to_path_buf()),
-        Ok(_) => Ok(path.canonicalize()?),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(path.to_path_buf()),
-        Err(err) => Err(err.into()),
+    let mut resolved = PathBuf::new();
+    let mut components = path.components();
+    for component in components.by_ref() {
+        let candidate = resolved.join(component);
+        match candidate.symlink_metadata() {
+            Ok(metadata) if !metadata.file_type().is_symlink() => {
+                resolved = candidate.canonicalize()?;
+            }
+            Ok(_) => {
+                resolved = candidate;
+                break;
+            }
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                resolved = candidate;
+                break;
+            }
+            Err(err) => return Err(err.into()),
+        }
     }
+    resolved.extend(components);
+    Ok(resolved)
 }
 
 #[cfg(test)]
@@ -448,6 +505,51 @@ mod tests {
         let error = grove.open(None).err().unwrap();
 
         assert!(error.to_string().contains("'base' points at"));
+    }
+
+    #[test]
+    fn fails_when_the_override_points_a_relocated_repository_at_another_url() {
+        let grove = Grove::new(
+            &base_with_one_repository(),
+            Some(&format!("[repos.base]\nurl = \"{WORK}\"\npath = \"other\"\n")),
+        );
+
+        let error = grove.open(None).err().unwrap();
+
+        assert!(error.to_string().contains("repository 'base' points at"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fails_when_a_retiring_repository_holds_the_path_to_an_included_file() {
+        let grove = Grove::new(
+            "version = 2\ninclude = [\"Work/repos.toml\"]\n",
+            Some(&format!("[repos]\nWork = \"{WORK}\"\n")),
+        );
+        grove.write("cfg/repos.toml", "version = 2\n");
+        fs::create_dir(grove.directory.join("Work")).unwrap();
+        std::os::unix::fs::symlink("../cfg/repos.toml", grove.directory.join("Work/repos.toml"))
+            .unwrap();
+
+        let error = grove.open(None).err().unwrap();
+
+        assert!(error.to_string().contains("which the remaining configuration is read from"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fails_when_a_retiring_repository_holds_the_path_to_a_remaining_repository() {
+        let grove = Grove::new(
+            &format!("version = 2\n[repos.kept]\nurl = \"{BASE}\"\npath = \"Work/link\"\n"),
+            Some(&format!("[repos]\nWork = \"{WORK}\"\n")),
+        );
+        fs::create_dir(grove.directory.join("real")).unwrap();
+        fs::create_dir(grove.directory.join("Work")).unwrap();
+        std::os::unix::fs::symlink("../real", grove.directory.join("Work/link")).unwrap();
+
+        let error = grove.open(None).err().unwrap();
+
+        assert!(error.to_string().contains("which remains configured"));
     }
 
     #[test]

@@ -146,9 +146,11 @@ that sync and refresh share, generic over each use case's outcome vocabulary and
 carrying the structured blocked-reason detail a caller renders beyond the
 message. It holds one module per subcommand and a facade that delegates to each
 without embedding command logic. Sync has removal, check, clone/fetch
-preparation, update, seeding, and optional zoxide phases. Retire has an
-assessment phase over every declaration leaving with the override and, only when
-none is blocked, a retiring phase, after which it trashes the override itself.
+preparation, update, seeding, and optional zoxide phases, and holds the root
+configuration directory's lock shared throughout. Retire has an assessment phase
+over every declaration leaving with the override and, only when none is blocked,
+a retiring phase, after which it trashes the override itself and then removes
+the clone cache entries only the retired declarations used.
 Refresh has check, fetch, and
 default-branch refresh phases. Status inspects repositories through bounded
 parallel workers. Fetching status additionally keys workers by Git common
@@ -194,9 +196,10 @@ never run repository-configured commands before observing the working tree, as
 `inspection` does. Convergence runs its few entries sequentially, outside
 `phases`, because its unit is a removed declaration rather than a repository
 definition; it assesses again under the repository lock before moving or
-trashing, and receives the Git client, trash, and cache from its caller. Sync
-removes a removed declaration's cache entry whatever its path's state, while
-retire keeps it for a blocked path, whose declaration stays in force.
+trashing, and receives the Git client, trash, and cache from its caller. Given
+the cache, as sync gives it, convergence removes a removed declaration's entry
+whatever its path's state; retire withholds it and settles the cache after the
+override.
 
 `trash` owns the operating system trash boundary behind a trait that the
 application context injects, so tests never touch a real trash. It has no
@@ -229,10 +232,11 @@ filesystem actors retain the residual race between the final content check and
 replacement. Its retirement session takes the same root-directory lock, loads
 the configuration with and without one override, expresses each declaration
 whose path leaves with the override as a removed declaration, and rejects a
-remaining configuration that fails validation, a path the two configurations
-declare for different repositories, a retiring path that overlaps a remaining
-one, and a retiring directory holding a file the remaining configuration is
-read from.
+remaining configuration that fails validation, a path or a repository name the
+two configurations give different repositories, a retiring path that overlaps a
+remaining one, and a retiring directory holding a file the remaining
+configuration is read from, comparing remaining paths both as written and where
+they lead.
 
 `repositories` owns validated repository values. `RemoteUrl` exposes raw text
 only through its process-argument accessor; `Display` and `Debug` are redacted,

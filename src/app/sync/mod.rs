@@ -116,6 +116,9 @@ pub(crate) fn execute_with_events(
     events: &impl EventSink<Phase>,
 ) -> Result<Report, AppError> {
     ctx.git().verify_available()?;
+    // Retirement takes this lock exclusively, so an override cannot disappear
+    // between loading the configuration and placing its repositories.
+    let _configuration_lock = config::share_root_lock(config_path)?;
     let config = if options.ignores_overrides() {
         config::load_without_overrides(config_path)?
     } else {
@@ -134,11 +137,10 @@ pub(crate) fn execute_with_events(
             removal::converge(
                 ctx.git(),
                 ctx.trash(),
-                &|| ctx.cache(),
+                Some(&|| ctx.cache()),
                 &config,
                 removed,
                 options.dry_run(),
-                removal::BlockedCache::Remove,
             )
         })?;
     let planned_moves = planned_moves(&removals);
