@@ -6,6 +6,7 @@ mod context;
 pub(crate) mod entry;
 pub(crate) mod init;
 pub(crate) mod refresh;
+pub(crate) mod replace;
 pub(crate) mod retire;
 pub(crate) mod status;
 pub(crate) mod sync;

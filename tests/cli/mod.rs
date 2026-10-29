@@ -3,6 +3,7 @@ mod cache;
 mod clone;
 mod init;
 mod refresh;
+mod replace;
 mod retire;
 mod status;
 mod sync;

@@ -115,7 +115,8 @@ nested path validation.
 Leaving a repository out of the configuration never removes it: an entry may be
 absent because overrides were ignored, because a machine has no override, or by
 mistake. Removal and renaming are declared instead, under `removed`, which
-mirrors the live tables.
+mirrors the live tables, or follow from replacing the configuration as a whole
+with `gv replace`.
 
 ```toml
 version = 2
@@ -151,6 +152,13 @@ symbolic link there is the path sync assesses, not its target. Each live
 repository is the `moved_to` of at most one removed entry. `gv sync` converges declared entries as
 described in [usage](usage.md#removed-repositories). A declaration can be
 dropped once every machine has synced it.
+
+A catalog that a tool generates and installs with `gv replace`
+([usage](usage.md#replace)) needs no removed declarations: replacing converges
+every path the candidate stops declaring, and moves a repository whose path
+changes under the same URL. Removed declarations remain for hand-edited files
+and for keeping a checkout across a rename that changes its URL, which only
+`moved_to` carries over.
 
 ## Overrides
 
@@ -224,7 +232,14 @@ another root leaves each including catalog to `gv validate`
 
 `gv validate` loads `grove.toml`, resolves includes, and validates the complete
 catalog without inspecting repository working trees or requiring network access.
-Configuration version 2 is the only supported version.
+Configuration version 2 is the only supported version. A base file's version,
+or its override's when the override declares one, is checked before the schema
+of either file, so a file written for another version reports that version
+rather than the fields this release does not know.
+
+A release that introduces configuration version N still reads version N−1 as
+the current configuration of `gv replace`, since the destination an earlier
+release wrote is what replacing converges from.
 
 Rejected configurations include malformed TOML, unknown fields, and wrong
 field types, plus:

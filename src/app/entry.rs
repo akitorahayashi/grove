@@ -1,11 +1,11 @@
-//! Report scaffolding shared by the sync and refresh use cases. The outcome
-//! vocabularies differ per use case, so the entry is generic over them.
+//! Report scaffolding shared by the sync, refresh, and replace use cases. The
+//! outcome vocabularies differ per use case, so the entry is generic over them.
 
 use crate::repositories::RepositoryDefinition;
 
 /// The structured counterpart of a diagnostic that a report entry carries
 /// beyond its message string, so a caller can render the offending values. This
-/// is report vocabulary shared by the sync and refresh entries.
+/// is report vocabulary shared by the sync, refresh, and replace entries.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum BlockedReasonDetails {

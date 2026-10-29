@@ -33,6 +33,7 @@ src/
       init.rs
       refresh/
         mod.rs
+      replace.rs
       retire.rs
       status.rs
       sync/
@@ -60,6 +61,9 @@ src/
       report.rs
       task.rs
       update.rs
+    replace/
+      mod.rs
+      repoint.rs
     retire.rs
     status.rs
     sync/
@@ -92,8 +96,10 @@ src/
     include.rs
     lock.rs
     mod.rs
+    replacement.rs
     resolved.rs
     retirement.rs
+    transition.rs
     validation.rs
   repositories/
     branch_name.rs
@@ -129,13 +135,18 @@ src/
 `cli` owns Clap parsing, stream selection, terminal-safe text, styling, progress,
 and command completion. Subcommand implementations live under `commands`, while
 `tty` owns the terminal presentation vocabulary built on the shared `output`
-sink. The progress pump, the blocked-reason detail rendering, the removal lines
-sync and retire print, and the repository-count wording are shared across the
-phase-emitting commands rather than duplicated per command. The column-aligned table is shared between the
+sink. The progress pump, the blocked-reason detail rendering, the removal and
+cache-entry lines sync, retire, and replace print, and the repository-count
+wording are shared across the commands rather than duplicated per command.
+Report lines go to stderr beside progress, except replace's, which `output`
+routes to stdout so a provisioning caller captures the report apart from
+errors. The column-aligned table is shared between the
 status and cache listings, which emit styling unconditionally and let `output`
 strip ANSI when the destination or environment calls for plain text.
 Configuration-reading subcommands resolve the `grove.toml` path before invoking
-their use case and name a file that discovery found above the current directory.
+their use case and name a file that discovery found above the current directory;
+replace leaves resolution to its use case, which accepts an absent file named by
+`--config`, and names the destination in its report.
 Add always names its resolved write destination and streams one ordered result
 per operand to stderr. Subcommands return completion or error values. The
 crate-root `cli` function returns `ExitCode`; `main` is the sole process
@@ -143,15 +154,19 @@ termination boundary. Output write failures propagate, and a closed stdout pipe
 has non-panicking handling.
 
 `app` owns the use cases, their default dependency wiring, and the report entry
-that sync and refresh share, generic over each use case's outcome vocabulary and
-carrying the structured blocked-reason detail a caller renders beyond the
-message. It holds one module per subcommand and a facade that delegates to each
-without embedding command logic. Sync has removal, check, clone/fetch
-preparation, update, seeding, and optional zoxide phases, and holds the root
-configuration directory's lock shared throughout. Retire has an assessment phase
+that sync, refresh, and replace share, generic over each use case's outcome
+vocabulary and carrying the structured blocked-reason detail a caller renders
+beyond the message. It holds one module per subcommand and a facade that
+delegates to each without embedding command logic. Sync has removal, check,
+clone/fetch preparation, update, seeding, and optional zoxide phases, and holds
+the root configuration directory's lock shared throughout. Retire has an assessment phase
 over every declaration leaving with the override and, only when none is blocked,
 a retiring phase, after which it trashes the override itself and then removes
-the clone cache entries only the retired declarations used.
+the clone cache entries only the retired declarations used. Replace assesses
+every removed declaration and origin repoint the candidate implies, acts only
+when none is blocked, writes the candidate only when every path converged, and
+then removes the clone cache entries only the converged declarations used; it
+neither clones nor fetches.
 Refresh has check, fetch, and
 default-branch refresh phases. Status inspects repositories through bounded
 parallel workers. Fetching status additionally keys workers by Git common
@@ -189,13 +204,15 @@ application errors.
 
 `inspection` owns repository readiness probing and the canonical diagnostics for
 the conditions the use cases share, so their reason vocabularies map from one
-probe and their shared messages cannot drift. Ownership requires the declared
+probe and their shared messages cannot drift. Its checkout probe settles what
+occupies a path removal and replace act on as a whole, keeping a symbolic link
+at the final component as the link. Ownership requires the declared
 path to be its worktree's root before the origin comparison, so a declared
 directory inside another worktree never borrows that repository's identity;
 plain status applies the same root check before its first `git status`.
 
 `removal` owns the assessment of removed declarations that status previews, the
-convergence sync and retire act through, the selection of declarations a
+convergence sync, retire, and replace act through, the selection of declarations a
 targeted command covers, and the outcome and blocked-reason vocabulary they
 report. Assessment is side-effect free and settles ownership with probes that
 never run repository-configured commands before observing the working tree, as
@@ -205,8 +222,9 @@ same tree and its unit is a removed declaration rather than a repository
 definition; it assesses again under the repository lock before moving or
 trashing, and receives the Git client, trash, and cache from its caller. Given
 the cache, as sync gives it, convergence removes a removed declaration's entry
-whatever its path's state; retire withholds it and settles the cache after the
-override.
+whatever its path's state; retire and replace withhold it and settle the cache
+once the override is trashed or the configuration written, keeping an entry a
+remaining repository shares.
 
 `trash` owns the operating system trash boundary behind a trait that the
 application context injects, so tests never touch a real trash. It has no
@@ -243,7 +261,15 @@ remaining configuration that fails validation, a path or a repository name the
 two configurations give different repositories, a retiring path that overlaps a
 remaining one, and a retiring directory holding a file the remaining
 configuration is read from, comparing remaining paths both as written and where
-they lead.
+they lead. Its replacement session takes the same root-directory lock, permits
+an absent destination only when `--config` names it, evaluates the current
+configuration from the bytes its final write compares against, evaluates the
+candidate as the root file with the real overrides and includes merged,
+classifies each path as kept, repointed, entering, leaving, or holding an
+unchanged or new removed declaration by exact URL equality, and writes the
+candidate through the addition session's compare-and-swap replacement. `transition` owns replacement's rules and the
+path comparison, declaration collection, and containment checks the retirement
+and replacement sessions share.
 
 `repositories` owns validated repository values. `RemoteUrl` exposes raw text
 only through its process-argument accessor; `Display` and `Debug` are redacted,

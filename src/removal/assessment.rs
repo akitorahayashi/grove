@@ -2,6 +2,7 @@ use std::path::Path;
 
 use crate::AppError;
 use crate::git::{Removal, RepositoryProbe};
+use crate::inspection::{self, Checkout};
 use crate::repositories::{RemovedRepository, RepositoryDefinition};
 
 /// What converging a removed declaration would do with its old path, decided
@@ -42,10 +43,10 @@ pub enum LocalState {
 impl BlockedReason {
     pub fn message(&self) -> String {
         match self {
-            Self::SymbolicLink => "path is a symbolic link".to_string(),
-            Self::NotAWorkTree => crate::inspection::destination_not_git_repository().to_string(),
-            Self::InsideAnotherRepository => "path is inside another Git repository".to_string(),
-            Self::MissingOrigin => crate::inspection::missing_origin().to_string(),
+            Self::SymbolicLink => inspection::symbolic_link().to_string(),
+            Self::NotAWorkTree => inspection::destination_not_git_repository().to_string(),
+            Self::InsideAnotherRepository => inspection::inside_another_repository().to_string(),
+            Self::MissingOrigin => inspection::missing_origin().to_string(),
             Self::RemoteUrlMismatch => "remote URL matches neither the removed nor the moved_to \
                                           URL; align the configured URL or the origin"
                 .to_string(),
@@ -71,35 +72,24 @@ impl LocalState {
     }
 }
 
-/// The probe order mirrors `inspection::ownership`: ownership is settled with
-/// `rev-parse` and `config --get`, which never run repository-configured
-/// commands, before `git status` may invoke a `core.fsmonitor` hook.
+/// The probe order mirrors `inspection::ownership`: ownership is settled
+/// through `inspection::checkout` before `git status` may invoke a
+/// `core.fsmonitor` hook.
 pub(crate) fn assess(
     git: &(impl RepositoryProbe + Removal),
     removed: &RemovedRepository,
     destination: Option<&RepositoryDefinition>,
 ) -> Result<Assessment, AppError> {
     let path = removed.path();
-    let metadata = match path.symlink_metadata() {
-        Ok(metadata) => metadata,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Assessment::Absent),
-        Err(err) => return Err(err.into()),
-    };
-    if metadata.file_type().is_symlink() {
-        return Ok(Assessment::Blocked(BlockedReason::SymbolicLink));
-    }
-    if !metadata.is_dir() {
-        return Ok(Assessment::Blocked(BlockedReason::NotAWorkTree));
-    }
-    match git.worktree_root(path)? {
-        None => return Ok(Assessment::Blocked(BlockedReason::NotAWorkTree)),
-        Some(root) if root != path.canonicalize()? => {
+    let origin = match inspection::checkout(git, path)? {
+        Checkout::Absent => return Ok(Assessment::Absent),
+        Checkout::SymbolicLink => return Ok(Assessment::Blocked(BlockedReason::SymbolicLink)),
+        Checkout::NotAWorkTree => return Ok(Assessment::Blocked(BlockedReason::NotAWorkTree)),
+        Checkout::InsideAnotherRepository => {
             return Ok(Assessment::Blocked(BlockedReason::InsideAnotherRepository));
         }
-        Some(_) => {}
-    }
-    let Some(origin) = git.remote_url(path)? else {
-        return Ok(Assessment::Blocked(BlockedReason::MissingOrigin));
+        Checkout::MissingOrigin => return Ok(Assessment::Blocked(BlockedReason::MissingOrigin)),
+        Checkout::Origin(origin) => origin,
     };
     // Exact equality, not the cache's `identity`: that key is a transfer hint
     // under which distinct SSH accounts or home-relative paths collide, too

@@ -1,13 +1,17 @@
-//! Repository readiness probing shared by the sync, refresh, and status use
-//! cases, and the canonical diagnostics for the conditions they share.
+//! Repository readiness probing shared by the sync, refresh, status, and
+//! replace use cases, and the canonical diagnostics for the conditions they
+//! share.
 //!
 //! The probes return neutral findings; each use case maps them to its own
 //! outcome vocabulary. Owning the shared message strings here keeps the
 //! per-use-case reason enums from drifting apart.
 
+use std::io;
+use std::path::Path;
+
 use crate::AppError;
 use crate::git::{BranchTracking, RepositoryProbe};
-use crate::repositories::{BranchName, RepositoryDefinition};
+use crate::repositories::{BranchName, RemoteUrl, RepositoryDefinition};
 
 /// Whether grove owns the repository at an existing path: a worktree rooted at
 /// the declared path whose origin matches the declaration.
@@ -63,6 +67,43 @@ pub(crate) fn is_worktree_root(
         return Ok(false);
     };
     Ok(root == repository.path().canonicalize()?)
+}
+
+/// What occupies a path grove would move, trash, or repoint as a whole
+/// checkout, up to the origin that settles who owns it.
+pub(crate) enum Checkout {
+    Absent,
+    SymbolicLink,
+    NotAWorkTree,
+    InsideAnotherRepository,
+    MissingOrigin,
+    Origin(RemoteUrl),
+}
+
+/// The final component is taken as written, so a symbolic link there is
+/// reported rather than followed into the directory it reaches. Like
+/// `ownership`, it probes with `rev-parse` and `config --get` alone, before
+/// any caller reaches a probe that may run repository-configured commands.
+pub(crate) fn checkout(git: &impl RepositoryProbe, path: &Path) -> Result<Checkout, AppError> {
+    let metadata = match path.symlink_metadata() {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Checkout::Absent),
+        Err(err) => return Err(err.into()),
+    };
+    if metadata.file_type().is_symlink() {
+        return Ok(Checkout::SymbolicLink);
+    }
+    if !metadata.is_dir() {
+        return Ok(Checkout::NotAWorkTree);
+    }
+    match git.worktree_root(path)? {
+        None => return Ok(Checkout::NotAWorkTree),
+        Some(root) if root != path.canonicalize()? => {
+            return Ok(Checkout::InsideAnotherRepository);
+        }
+        Some(_) => {}
+    }
+    Ok(git.remote_url(path)?.map_or(Checkout::MissingOrigin, Checkout::Origin))
 }
 
 /// A repository's operability at an existing path, independent of any use
@@ -145,6 +186,14 @@ pub(crate) fn branch_readiness(
 
 pub(crate) fn destination_not_git_repository() -> &'static str {
     "destination exists but is not a Git repository"
+}
+
+pub(crate) fn symbolic_link() -> &'static str {
+    "path is a symbolic link"
+}
+
+pub(crate) fn inside_another_repository() -> &'static str {
+    "path is inside another Git repository"
 }
 
 pub(crate) fn missing_origin() -> &'static str {

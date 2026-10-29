@@ -5,7 +5,7 @@ use clap::Args;
 
 use crate::AppError;
 use crate::app::api;
-use crate::app::retire::{CacheRemoval, OverrideOutcome, Phase, Report};
+use crate::app::retire::{OverrideOutcome, Phase, Report};
 use crate::phases::Summary as PhaseSummary;
 use crate::removal;
 
@@ -13,7 +13,8 @@ use crate::cli::Completion;
 use crate::cli::output::Output;
 use crate::cli::tty::progress::{ProgressPhase, run_with_progress};
 use crate::cli::tty::report::{
-    entry_line, print_count, print_count_with_elapsed, print_removals, safe_message,
+    entry_line, print_cache_drop, print_count, print_count_with_elapsed, print_removals,
+    safe_message,
 };
 use crate::cli::tty::table::Paint;
 
@@ -102,7 +103,7 @@ fn print_report(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
     print_removals(report.entries(), output)?;
     print_override(report, output)?;
     for entry in report.cache() {
-        print_cache_removal(entry, output)?;
+        print_cache_drop(entry, output)?;
     }
     Ok(())
 }
@@ -126,22 +127,5 @@ fn print_override(report: &Report, output: &mut Output<'_>) -> io::Result<()> {
             path,
             &safe_message(&format!("trash failed: {message}")),
         ),
-    }
-}
-
-fn print_cache_removal(entry: &CacheRemoval, output: &mut Output<'_>) -> io::Result<()> {
-    let identity = entry.identity();
-    if let Some(warning) = entry.warning() {
-        let detail = safe_message(&format!("clone cache entry not removed: {warning}"));
-        return entry_line(output, "!", Paint::Yellow, identity, &detail);
-    }
-    match entry.change() {
-        removal::CacheChange::WouldRemove => {
-            entry_line(output, "-", Paint::Cyan, identity, "clone cache entry would be removed")
-        }
-        removal::CacheChange::Removed => {
-            entry_line(output, "-", Paint::Green, identity, "clone cache entry removed")
-        }
-        _ => Ok(()),
     }
 }

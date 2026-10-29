@@ -80,7 +80,7 @@ pub(in crate::cli) fn write_line(
     output: &mut Output<'_>,
     arguments: Arguments<'_>,
 ) -> io::Result<()> {
-    output.stderr(format_args!("{arguments}\n"))
+    output.report(format_args!("{arguments}\n"))
 }
 
 pub(in crate::cli) fn safe_message(value: &str) -> String {
@@ -179,6 +179,26 @@ fn print_removal(entry: &removal::Entry, output: &mut Output<'_>) -> io::Result<
         write_line(output, format_args!("    {}", safe_message(warning).dimmed()))?;
     }
     Ok(())
+}
+
+pub(in crate::cli) fn print_cache_drop(
+    entry: &removal::CacheDrop,
+    output: &mut Output<'_>,
+) -> io::Result<()> {
+    let identity = entry.identity();
+    if let Some(warning) = entry.warning() {
+        let detail = safe_message(&format!("clone cache entry not removed: {warning}"));
+        return entry_line(output, "!", Paint::Yellow, identity, &detail);
+    }
+    match entry.change() {
+        removal::CacheChange::WouldRemove => {
+            entry_line(output, "-", Paint::Cyan, identity, "clone cache entry would be removed")
+        }
+        removal::CacheChange::Removed => {
+            entry_line(output, "-", Paint::Green, identity, "clone cache entry removed")
+        }
+        _ => Ok(()),
+    }
 }
 
 pub(in crate::cli) fn repositories(count: usize) -> String {

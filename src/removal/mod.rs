@@ -1,5 +1,5 @@
-//! Removed declarations: the assessment status previews, the convergence sync
-//! and retire act through, and the diagnostics they report.
+//! Removed declarations: the assessment status previews, the convergence sync,
+//! retire, and replace act through, and the diagnostics they report.
 //!
 //! Absence from the configuration never implies removal; only an explicit
 //! declaration reaches this module, and even then a directory grove cannot
@@ -17,7 +17,7 @@ use crate::repositories::{RemovedRepository, RepositoryDefinition};
 pub(crate) use assessment::{Assessment, assess};
 pub use assessment::{BlockedReason, LocalState};
 pub use convergence::{CacheChange, Entry, Outcome, Plan};
-pub(crate) use convergence::{converge, drop_cache_entry, run_phase};
+pub(crate) use convergence::{CacheDrop, converge, drop_cache_entries, run_phase};
 
 /// The removed declarations a command covers: all of them, or with explicit
 /// targets only those moving to a selected repository, so `gv sync <repo>`

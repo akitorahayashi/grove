@@ -916,6 +916,53 @@ url = "git@example.com:blog.git"
 }
 
 #[test]
+fn validate_reports_an_unsupported_version_before_fields_it_does_not_know() {
+    let ctx = TestContext::new();
+    let config = ctx.write_config(
+        r#"
+version = 3
+catalog = "future"
+
+[repos.blog]
+url = "git@example.com:blog.git"
+mirror = true
+"#,
+    );
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("validate")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unsupported config version 3"))
+        .stderr(predicate::str::contains("unknown field").not());
+}
+
+#[test]
+fn validate_reports_an_unsupported_version_before_override_fields_it_does_not_know() {
+    let ctx = TestContext::new();
+    let config = ctx.write_config(
+        r#"
+version = 3
+
+[repos.blog]
+url = "git@example.com:blog.git"
+"#,
+    );
+    ctx.write_config_at("grove.override.toml", "[repos.blog]\nmirror = true\n");
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("validate")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unsupported config version 3"))
+        .stderr(predicate::str::contains("unknown field").not());
+}
+
+#[test]
 fn validate_override_malformed_toml_fails() {
     let ctx = TestContext::new();
     let config = ctx.write_config(

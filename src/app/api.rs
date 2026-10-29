@@ -4,7 +4,9 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 use crate::AppError;
-use crate::app::{AppContext, add, cache, clone, init, refresh, retire, status, sync, validate};
+use crate::app::{
+    AppContext, add, cache, clone, init, refresh, replace, retire, status, sync, validate,
+};
 use crate::git::CommandGitClient;
 use crate::phases::{DiscardEvents, EventSink};
 
@@ -120,4 +122,13 @@ pub(crate) fn retire_with_events(
 ) -> Result<retire::Report, AppError> {
     let ctx = default_context();
     retire::execute(&ctx, config_path.as_deref(), target.as_deref(), dry_run, events)
+}
+
+pub(crate) fn replace(
+    config_path: Option<PathBuf>,
+    candidate: PathBuf,
+    dry_run: bool,
+) -> Result<replace::Report, AppError> {
+    let ctx = default_context();
+    replace::execute(&ctx, config_path.as_deref(), &candidate, dry_run)
 }

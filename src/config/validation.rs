@@ -27,7 +27,6 @@ pub(super) fn resolve(tree: LoadedConfigTree) -> Result<ResolvedConfig, AppError
     let mut paths = HashMap::new();
 
     for file in &tree.files {
-        validate_version(file)?;
         groups.extend(resolve_group_directories(file, &tree.root_directory)?);
 
         for entry in &file.raw.repositories {
@@ -231,20 +230,6 @@ fn resolve_group_directories(
     }
 
     Ok(groups)
-}
-
-fn validate_version(file: &LoadedConfigFile) -> Result<(), AppError> {
-    match file.raw.version {
-        Some(2) => Ok(()),
-        Some(version) => Err(AppError::config_error(format!(
-            "{}: unsupported config version {version}",
-            file.path.display()
-        ))),
-        None => Err(AppError::config_error(format!(
-            "{}: missing required field 'version'",
-            file.path.display()
-        ))),
-    }
 }
 
 fn required_field<'a>(

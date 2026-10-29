@@ -211,9 +211,63 @@ fn remove_cache_entry<'s>(
     Ok(())
 }
 
+/// A clone cache entry that only declarations leaving the configuration name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CacheDrop {
+    identity: String,
+    change: CacheChange,
+    warning: Option<String>,
+}
+
+impl CacheDrop {
+    pub(crate) fn identity(&self) -> &str {
+        &self.identity
+    }
+
+    pub(crate) fn change(&self) -> CacheChange {
+        self.change
+    }
+
+    pub(crate) fn warning(&self) -> Option<&str> {
+        self.warning.as_deref()
+    }
+}
+
+/// Each identity the departed URLs name goes once, unless a repository of
+/// `config`, the configuration that stays in force, shares it. A failure is a
+/// note: the cache never affects correctness.
+pub(crate) fn drop_cache_entries<'s, 'r>(
+    cache: &dyn Fn() -> Result<&'s Store, AppError>,
+    departed: impl IntoIterator<Item = &'r RemovedRepository>,
+    config: &ResolvedConfig,
+    dry_run: bool,
+) -> Result<Vec<CacheDrop>, AppError> {
+    let mut urls: Vec<&RemoteUrl> = Vec::new();
+    for removed in departed {
+        let url = removed.url();
+        let shared =
+            config.repositories().iter().any(|repository| repository.url().same_identity(url));
+        if !shared && !urls.iter().any(|seen| seen.same_identity(url)) {
+            urls.push(url);
+        }
+    }
+
+    let mut drops = Vec::new();
+    for url in urls {
+        let (change, warning) =
+            match cache().and_then(|cache| drop_cache_entry(cache, url, dry_run)) {
+                Ok(CacheChange::Untouched) => continue,
+                Ok(change) => (change, None),
+                Err(error) => (CacheChange::Untouched, Some(error.demote()?)),
+            };
+        drops.push(CacheDrop { identity: url.identity(), change, warning });
+    }
+    Ok(drops)
+}
+
 /// Removes the clone cache entry for `url`, or in a dry run reports whether
 /// there is one to remove.
-pub(crate) fn drop_cache_entry(
+fn drop_cache_entry(
     cache: &Store,
     url: &RemoteUrl,
     dry_run: bool,

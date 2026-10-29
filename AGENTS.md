@@ -6,8 +6,10 @@
 repositories declared in `grove.toml`. It clones missing repositories through a
 local object cache, reports repository state, and fast-forwards existing
 repositories' default branches through the system `git` command. Existing Git
-worktrees can be registered in the configuration with `gv add`, and `gv retire`
-removes an override together with the repositories only it declares. The crate
+worktrees can be registered in the configuration with `gv add`, `gv retire`
+removes an override together with the repositories only it declares, and
+`gv replace` converges the repositories to a candidate configuration offline
+before writing it as `grove.toml`. The crate
 ships both the binary and a library whose supported surface is the `src/lib.rs`
 facade.
 
@@ -22,11 +24,11 @@ src/
   trash.rs       The operating system trash boundary
   assets/        Templates embedded in the binary
   cli/           Clap parsing and rendering; commands/ holds one module per subcommand, tty/ the presentation over the single output sink
-  app/           One use case per subcommand, plus the default dependency wiring, the external-boundary context, and the report row sync and refresh share
+  app/           One use case per subcommand, plus the default dependency wiring, the external-boundary context, and the report row sync, refresh, and replace share
   cache/         The local clone cache store: entry layout, identity keying, locking, placement, seeding
   phases/        Bounded-parallel phase execution shared by the repository use cases
-  removal/       Removed declarations: the assessment status previews and the convergence sync and retire act through
-  config/        grove.toml discovery, format-preserving additions, override retirement, override/include loading, and validation
+  removal/       Removed declarations: the assessment status previews and the convergence sync, retire, and replace act through
+  config/        grove.toml discovery, format-preserving additions, override retirement, configuration replacement, override/include loading, and validation
   repositories/  Validated repository values: name, path, URL, branch, selection
   git/           The system `git` boundary: probes, process runner, cache entries, branch updates
   zoxide/        The optional zoxide boundary
@@ -64,6 +66,9 @@ domain depends on `app/` or `cli/`.
   passthrough forwards the caller's environment to Git.
 - Configuration additions preserve existing TOML formatting, validate the
   prospective merged tree, and replace one destination atomically.
+- A replacement writes its candidate only after every removal and origin
+  repoint it implies has converged, so the root configuration records the last
+  converged catalog.
 
 ## Testing
 

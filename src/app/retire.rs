@@ -8,8 +8,8 @@ use crate::app::AppContext;
 use crate::config::Retirement;
 use crate::git::{Removal, RepositoryProbe};
 use crate::phases::EventSink;
-use crate::removal::{self, CacheChange};
-use crate::repositories::{RemoteUrl, RemovedRepository};
+use crate::removal::{self, CacheDrop};
+use crate::repositories::RemovedRepository;
 use crate::trash::Trash;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,34 +28,12 @@ pub(crate) enum OverrideOutcome {
     TrashFailed(String),
 }
 
-/// A clone cache entry that only the retired declarations' URLs name.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CacheRemoval {
-    identity: String,
-    change: CacheChange,
-    warning: Option<String>,
-}
-
-impl CacheRemoval {
-    pub(crate) fn identity(&self) -> &str {
-        &self.identity
-    }
-
-    pub(crate) fn change(&self) -> CacheChange {
-        self.change
-    }
-
-    pub(crate) fn warning(&self) -> Option<&str> {
-        self.warning.as_deref()
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Report {
     override_display_path: String,
     entries: Vec<removal::Entry>,
     override_outcome: OverrideOutcome,
-    cache: Vec<CacheRemoval>,
+    cache: Vec<CacheDrop>,
 }
 
 impl Report {
@@ -73,7 +51,7 @@ impl Report {
         &self.override_outcome
     }
 
-    pub(crate) fn cache(&self) -> &[CacheRemoval] {
+    pub(crate) fn cache(&self) -> &[CacheDrop] {
         &self.cache
     }
 
@@ -104,13 +82,16 @@ pub(crate) fn execute<Z>(
             removal::converge(ctx.git(), ctx.trash(), None, remaining, removed, dry_run)
         }
     };
+    let drop_cache = |dry_run| {
+        removal::drop_cache_entries(&|| ctx.cache(), retirement.retiring(), remaining, dry_run)
+    };
 
     let (assessed, _) = removal::run_phase(&retiring, Phase::Assessing, events, converge(true))?;
     if assessed.iter().any(is_blocked) {
         return Ok(report(&retirement, assessed, OverrideOutcome::Kept, Vec::new()));
     }
     if dry_run {
-        let cache = drop_cache(ctx, &retirement, true)?;
+        let cache = drop_cache(true)?;
         return Ok(report(&retirement, assessed, OverrideOutcome::WouldTrash, cache));
     }
 
@@ -122,42 +103,8 @@ pub(crate) fn execute<Z>(
         let outcome = OverrideOutcome::TrashFailed(error.demote()?);
         return Ok(report(&retirement, retired, outcome, Vec::new()));
     }
-    let cache = drop_cache(ctx, &retirement, false)?;
+    let cache = drop_cache(false)?;
     Ok(report(&retirement, retired, OverrideOutcome::Trashed, cache))
-}
-
-/// Each identity the retired URLs name goes once, unless a remaining
-/// repository shares it. A failure is a note: the cache never affects
-/// correctness.
-fn drop_cache<Z>(
-    ctx: &AppContext<impl RepositoryProbe + Removal, Z, impl Trash>,
-    retirement: &Retirement,
-    dry_run: bool,
-) -> Result<Vec<CacheRemoval>, AppError> {
-    let mut urls: Vec<&RemoteUrl> = Vec::new();
-    for removed in retirement.retiring() {
-        let url = removed.url();
-        let shared = retirement
-            .remaining()
-            .repositories()
-            .iter()
-            .any(|repository| repository.url().same_identity(url));
-        if !shared && !urls.iter().any(|seen| seen.same_identity(url)) {
-            urls.push(url);
-        }
-    }
-
-    let mut removals = Vec::new();
-    for url in urls {
-        let (change, warning) =
-            match ctx.cache().and_then(|cache| removal::drop_cache_entry(cache, url, dry_run)) {
-                Ok(CacheChange::Untouched) => continue,
-                Ok(change) => (change, None),
-                Err(error) => (CacheChange::Untouched, Some(error.demote()?)),
-            };
-        removals.push(CacheRemoval { identity: url.identity(), change, warning });
-    }
-    Ok(removals)
 }
 
 fn is_blocked(entry: &removal::Entry) -> bool {
@@ -168,7 +115,7 @@ fn report(
     retirement: &Retirement,
     entries: Vec<removal::Entry>,
     override_outcome: OverrideOutcome,
-    cache: Vec<CacheRemoval>,
+    cache: Vec<CacheDrop>,
 ) -> Report {
     Report {
         override_display_path: retirement.display_path().to_string(),

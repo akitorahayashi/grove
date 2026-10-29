@@ -5,9 +5,10 @@ use toml::{Table, Value};
 
 use crate::AppError;
 
+const SUPPORTED_VERSION: u32 = 2;
+
 #[derive(Debug)]
 pub(super) struct RawConfigFile {
-    pub version: Option<u32>,
     pub include: Vec<String>,
     pub groups: Vec<String>,
     pub repositories: Vec<RawEntry<RawRepository>>,
@@ -119,17 +120,33 @@ fn merge_value(base: &mut Value, overlay: Value) {
     }
 }
 
+/// The version a base file has once its override merges in, which must be the
+/// supported one. It is read before either file's schema, so a file written for
+/// another version reports that version rather than the fields this one does
+/// not know.
+pub(super) fn check_version(version: Option<&Value>, label: &str) -> Result<(), AppError> {
+    match parse_version(version.cloned(), label)? {
+        Some(SUPPORTED_VERSION) => Ok(()),
+        Some(version) => {
+            Err(AppError::config_error(format!("{label}: unsupported config version {version}")))
+        }
+        None => Err(AppError::config_error(format!("{label}: missing required field 'version'"))),
+    }
+}
+
+/// One file's schema, with `version` optional: an override's replaces the base
+/// file's, and `check_version` settles the result before either decodes.
 pub(super) fn decode(mut root: Table, label: &str) -> Result<RawConfigFile, AppError> {
     reject_unknown_root_fields(&root, label)?;
 
-    let version = parse_version(root.remove("version"), label)?;
+    parse_version(root.remove("version"), label)?;
     let include = parse_include(root.remove("include"), label)?;
     let mut repositories = parse_repositories(root.remove("repos"), "repos", label)?;
     let (groups, grouped_repositories) = parse_groups(root.remove("groups"), "groups", label)?;
     repositories.extend(grouped_repositories);
     let removed = parse_removed(root.remove("removed"), label)?;
 
-    Ok(RawConfigFile { version, include, groups, repositories, removed })
+    Ok(RawConfigFile { include, groups, repositories, removed })
 }
 
 /// Removed groups are not recorded as group directories: a group that only

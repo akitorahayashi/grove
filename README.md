@@ -25,7 +25,7 @@ gv status
 
 ## Documentation
 
-- [Usage](docs/usage.md) — commands, status/sync/refresh/clone-cache behavior, requirements, and the library API
+- [Usage](docs/usage.md) — commands, status/sync/refresh/replace/clone-cache behavior, requirements, and the library API
 - [Configuration](docs/config.md) — `grove.toml` schema, path resolution, includes, and validation rules
 - [Architecture](docs/architecture.md) — source layout, module boundaries, and conventions
 - [Testing](docs/testing.md) — test layout, verify commands, coverage, and CI

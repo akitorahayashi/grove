@@ -5,15 +5,19 @@ mod discovery;
 mod file;
 mod include;
 mod lock;
+mod replacement;
 mod resolved;
 mod retirement;
+mod transition;
 mod validation;
 
-pub(crate) use addition::{Addition, EditSession};
+pub(crate) use addition::{Addition, EditSession, Persistence};
 pub(crate) use discovery::locate;
 pub(crate) use lock::DirectoryLock;
+pub(crate) use replacement::Replacement;
 pub use resolved::ResolvedConfig;
 pub(crate) use retirement::Retirement;
+pub(crate) use transition::Repoint;
 
 use std::path::Path;
 
@@ -21,7 +25,8 @@ use crate::AppError;
 use crate::repositories::redact_urls_for_display;
 
 /// Shares the root configuration directory's lock with other readers while
-/// keeping out `gv add` and `gv retire`, which take it exclusively.
+/// keeping out `gv add`, `gv retire`, and `gv replace`, which take it
+/// exclusively.
 pub(crate) fn share_root_lock(explicit_config: Option<&Path>) -> Result<DirectoryLock, AppError> {
     let root_path = locate(explicit_config)?;
     let directory = root_path

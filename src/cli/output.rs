@@ -10,6 +10,16 @@ pub(in crate::cli) struct Output<'a> {
     stderr: &'a mut dyn Write,
     stdout_choice: ColorChoice,
     stderr_choice: ColorChoice,
+    report: ReportStream,
+}
+
+/// Where report lines go. The commands that act on repositories report on
+/// stderr beside their progress; `gv replace` reports on stdout, leaving stderr
+/// to errors, so a provisioning caller captures the two apart.
+#[derive(Clone, Copy)]
+enum ReportStream {
+    Stdout,
+    Stderr,
 }
 
 impl<'a> Output<'a> {
@@ -22,6 +32,7 @@ impl<'a> Output<'a> {
             stderr,
             stdout_choice: AutoStream::choice(&io::stdout()),
             stderr_choice: AutoStream::choice(&io::stderr()),
+            report: ReportStream::Stderr,
         }
     }
 
@@ -32,6 +43,18 @@ impl<'a> Output<'a> {
             stderr,
             stdout_choice: ColorChoice::Never,
             stderr_choice: ColorChoice::Never,
+            report: ReportStream::Stderr,
+        }
+    }
+
+    /// The same sink with its report lines on stdout.
+    pub(in crate::cli) fn reporting_on_stdout(&mut self) -> Output<'_> {
+        Output {
+            stdout: &mut *self.stdout,
+            stderr: &mut *self.stderr,
+            stdout_choice: self.stdout_choice,
+            stderr_choice: self.stderr_choice,
+            report: ReportStream::Stdout,
         }
     }
 
@@ -41,6 +64,13 @@ impl<'a> Output<'a> {
 
     pub(in crate::cli) fn stderr(&mut self, arguments: Arguments<'_>) -> io::Result<()> {
         write_adapted(self.stderr, self.stderr_choice, arguments)
+    }
+
+    pub(in crate::cli) fn report(&mut self, arguments: Arguments<'_>) -> io::Result<()> {
+        match self.report {
+            ReportStream::Stdout => self.stdout(arguments),
+            ReportStream::Stderr => self.stderr(arguments),
+        }
     }
 }
 

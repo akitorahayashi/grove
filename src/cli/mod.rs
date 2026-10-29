@@ -45,6 +45,10 @@ enum Commands {
         about = "Update existing repositories and switch to their default branches"
     )]
     Refresh(commands::refresh::RefreshCommand),
+    #[command(
+        about = "Converge repositories to a candidate configuration, then write it as grove.toml"
+    )]
+    Replace(commands::replace::ReplaceCommand),
     #[command(about = "Retire an override, trashing the repositories only it declares")]
     Retire(commands::retire::RetireCommand),
     #[command(
@@ -97,6 +101,7 @@ fn run_with_args(args: impl IntoIterator<Item = OsString>, output: &mut Output<'
         Commands::Clone(command) => commands::clone::run(cli.config, command, output),
         Commands::Init(command) => commands::init::run(cli.config, command, output),
         Commands::Refresh(command) => commands::refresh::run(cli.config, command, output),
+        Commands::Replace(command) => commands::replace::run(cli.config, command, output),
         Commands::Retire(command) => commands::retire::run(cli.config, command, output),
         Commands::Sync(command) => commands::sync::run(cli.config, command, output),
         Commands::Status(command) => commands::status::run(cli.config, command, output),

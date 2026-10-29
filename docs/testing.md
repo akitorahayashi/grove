@@ -11,7 +11,7 @@ binaries plus a shared fixture module:
 
 - `tests/cli.rs` is the crate root for CLI boundary behavior. It pulls in
 `tests/cli/`, one file per subcommand: `add.rs`, `cache.rs`, `clone.rs`, `init.rs`,
-  `retire.rs`, `status.rs`, and `validate.rs`, plus responsibility-oriented `refresh/` and
+  `replace.rs`, `retire.rs`, `status.rs`, and `validate.rs`, plus responsibility-oriented `refresh/` and
   `sync/` modules. `refresh/` splits out `planning` and `safety`; `sync/`
   splits out `planning`, `cache`, `progress`, `removal`, and `zoxide`. Each `mod.rs`
   keeps the module wiring and its subcommand's core flow.

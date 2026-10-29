@@ -49,3 +49,29 @@ pub(crate) fn locate(explicit_config: Option<&Path>) -> Result<PathBuf, AppError
         start.display()
     )))
 }
+
+/// The root configuration a replacement writes, located as `locate` locates
+/// it, except that an explicitly named file may be absent, since replacing
+/// creates it; its directory must exist. An entry that exists but cannot be
+/// resolved, such as a broken symbolic link, still fails rather than being
+/// taken for an absent file.
+pub(super) fn locate_destination(explicit_config: Option<&Path>) -> Result<PathBuf, AppError> {
+    let Some(path) = explicit_config else {
+        return locate(None);
+    };
+    match std::fs::symlink_metadata(path) {
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+        _ => return locate(explicit_config),
+    }
+    let name = path.file_name().ok_or_else(|| {
+        AppError::config_error(format!("{}: not a configuration file path", path.display()))
+    })?;
+    let directory = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
+    let directory = directory
+        .canonicalize()
+        .map_err(|err| super::source_error(format!("{}: {err}", directory.display()), err))?;
+    Ok(directory.join(name))
+}

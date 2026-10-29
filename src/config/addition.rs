@@ -405,12 +405,18 @@ fn insert_group_repository(
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum Persistence {
+pub(crate) enum Persistence {
     Durable,
     DurabilityUnconfirmed(String),
 }
 
-fn persist(path: &Path, baseline: Option<&str>, contents: &[u8]) -> Result<Persistence, AppError> {
+/// Replaces `path` atomically with `contents` when it still holds `baseline`,
+/// or is still absent when `baseline` is `None`.
+pub(super) fn persist(
+    path: &Path,
+    baseline: Option<&str>,
+    contents: &[u8],
+) -> Result<Persistence, AppError> {
     persist_with_directory_sync(path, baseline, contents, File::sync_all)
 }
 
@@ -424,7 +430,7 @@ fn persist_with_directory_sync(
         (Some(expected), Ok(actual)) if actual == expected => {}
         (Some(_), Ok(_)) => {
             return Err(AppError::config_error(format!(
-                "{} changed while gv add was running; no changes were written",
+                "{} changed after grove read it; no changes were written",
                 path.display()
             )));
         }
@@ -432,7 +438,7 @@ fn persist_with_directory_sync(
         (None, Err(error)) if error.kind() == io::ErrorKind::NotFound => {}
         (None, _) => {
             return Err(AppError::config_error(format!(
-                "{} appeared while gv add was running; no changes were written",
+                "{} appeared after grove found it absent; no changes were written",
                 path.display()
             )));
         }
@@ -690,7 +696,7 @@ mod tests {
 
         let error = persist(&path, Some("original\n"), b"replacement\n").unwrap_err();
 
-        assert!(error.to_string().contains("changed while gv add was running"));
+        assert!(error.to_string().contains("changed after grove read it"));
         assert_eq!(fs::read_to_string(path).unwrap(), "changed\n");
     }
 

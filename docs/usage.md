@@ -30,6 +30,10 @@ gv retire --dry-run
 gv retire
 gv retire work/repositories.override.toml
 
+gv replace --dry-run /tmp/catalog/grove.toml
+gv replace /tmp/catalog/grove.toml
+gv --config ~/workspace/grove.toml replace /tmp/catalog/grove.toml
+
 gv clone git@github.com:company/frontend.git
 gv clone git@github.com:company/frontend.git frontend
 gv clone frontend
@@ -48,8 +52,9 @@ directory.
 `gv validate`, with the alias `gv vl`, checks `grove.toml` without inspecting
 repositories.
 `gv retire` removes an override together with the repositories and clone cache
-entries only it declares. It has no alias, because a short form would sit one
-keystroke from `gv rf`.
+entries only it declares. `gv replace` converges the repositories to a candidate
+configuration and then writes the candidate as the root configuration. Neither
+has an alias, because a short form would sit one keystroke from `gv rf`.
 
 `gv clone`, with the alias `gv cl`, and `gv cache`, with the alias `gv c`, expose the
 local clone cache from the command line. `gv cache list`, with the alias `gv c ls`,
@@ -135,8 +140,8 @@ existing repositories' default branches. Missing repositories are cloned through
 commands, and an existing repository grove could reach whose URL has no cache
 entry seeds one from its local objects (see Clone Cache). Sync holds the root
 configuration directory's lock for its whole run, shared with other syncs, so
-`gv add` and `gv retire` wait until it finishes. Independent repository
-tasks run concurrently with at most eight live tasks. Linked worktrees that
+`gv add`, `gv retire`, and `gv replace` wait until it finishes. Independent
+repository tasks run concurrently with at most eight live tasks. Linked worktrees that
 share a Git common directory remain serialized.
 
 The update flow is:
@@ -266,8 +271,9 @@ remote-tracking refs, which may be older than the remote repository.
 `gv retire [<override>]` removes an override file together with the
 repositories and clone cache entries only it declares, so deleting the override
 leaves nothing unmanaged behind. Leaving a repository out of the configuration
-never removes it ([configuration](config.md#removed-repositories)); retiring is
-the explicit act that does. Without an operand the root configuration's sibling
+never removes it ([configuration](config.md#removed-repositories)); retiring an
+override, like replacing the configuration (see [Replace](#replace)), is an
+explicit act that does. Without an operand the root configuration's sibling
 override retires; an operand names the override of the root or of an included
 file, through a symbolic link or its target.
 
@@ -315,13 +321,99 @@ acted on, and the override then moves to the operating system trash; a symbolic
 link there moves as the link. A repository that gains local-only state between
 the two assessments blocks, and the override then stays for a later run, which
 skips paths already gone. The root configuration's directory stays locked
-throughout, and `gv add` and `gv sync` take the same lock, so neither acts on an
-override retirement is removing.
+throughout, and `gv add`, `gv replace`, and `gv sync` take the same lock, so
+none acts on an override retirement is removing.
 
 `gv retire --dry-run` reports the assessment, the cache entries that would be
 removed, and whether the override would move to the trash, without changing
 anything; a blocked repository fails it too. Empty group directories and zoxide
 entries are left as they are.
+
+## Replace
+
+`gv replace [--dry-run] <candidate>` converges the disk from the root
+configuration to a candidate file, then writes the candidate in its place. A
+provisioning tool that renders a catalog runs it instead of writing
+`grove.toml` itself, so the file on disk always records the last catalog this
+machine converged to. Replacing works offline: cloning the repositories the
+candidate adds and fast-forwarding stay with `gv sync`. The report goes to
+stdout and errors to stderr.
+
+The destination is the root configuration that `--config` names or discovery
+finds. Only a file named by `--config` may be absent; the current configuration
+is then empty, and the file's directory must exist. A destination that exists
+but cannot be read or fails validation, and a candidate that cannot be read,
+stop the command before any change; an existing destination is never taken for
+an empty one.
+
+The candidate is evaluated as the root file itself, so the destination's sibling
+override and the candidate's includes merge into it as they merge into the
+root; a candidate they make invalid stops the command with a message naming the
+candidate. The current configuration and the candidate's are then compared path
+by path, a path counting where it leads. URLs agree only when they are equal
+exactly, as for removal:
+
+| Candidate's configuration at the path | Current configuration at the path | Action |
+|---|---|---|
+| live repository | live or removed, same URL | kept |
+| live repository | live or removed, another URL | origin repointed |
+| live repository | not declared | left for `gv sync` to clone |
+| removed declaration | removed, same URL | left for `gv sync` to converge |
+| removed declaration | anything else | converged as `gv sync` converges it |
+| not declared | live repository | converged as a removed declaration, moving to the live repository the candidate newly declares with the same URL when exactly one does, no other leaving repository has that URL, and no removed declaration already moves there |
+| not declared | removed declaration | converged; `moved_to` applies only while its destination stays live |
+
+An override's declarations are on both sides, so the repositories and removed
+declarations only an override holds are left as they are.
+
+Converged declarations are assessed by the table under
+[Removed repositories](#removed-repositories). An origin is repointed only from
+the URL the current configuration declares:
+
+| Path | Action | Report |
+|---|---|---|
+| does not exist | nothing | none |
+| is a symbolic link, not a Git worktree root, or without origin | left in place | blocked |
+| has an origin equal to the current URL | `git remote set-url origin <candidate URL>` | repointed |
+| has an origin equal to the candidate's URL | nothing | none |
+| has any other origin | left in place | blocked, with the actual and expected URLs |
+
+A `git remote set-url` that fails blocks, reported as `origin not repointed`
+with Git's message, and keeps the destination as it was.
+
+A leaving repository at the grove root, and a converged path with something on
+disk that holds or sits inside a path the candidate's configuration declares,
+or holds a file that configuration is read from — the destination, an included
+file, or an override — stop the command before any change. A converged path
+with nothing on disk is neither moved nor trashed, so the candidate may declare
+paths beneath it.
+
+Replacing acts on the candidate as a whole. Every path is assessed first; when
+any is blocked, nothing is moved, trashed, repointed, removed from the cache, or
+written, and the command fails after reporting every assessment. Otherwise each
+path is assessed again under its repository lock and acted on, and the
+candidate is then written atomically, provided the destination still holds the
+bytes the current configuration was read from. A path that blocks in between
+leaves the destination as it was, and a later run skips what is already done. A
+destination already holding the candidate's bytes is not rewritten, and a
+missing one is created owner-only. Once the candidate is written, the clone
+cache entries for the converged declarations' URLs that no live repository of
+the candidate's configuration shares are removed; a failure is reported as a
+note. When nothing is blocked, the report closes with the number of live
+repositories that have nothing at their path, for `gv sync` to clone, unless
+there are none. The root configuration's directory stays
+locked throughout, and `gv add`, `gv retire`, and `gv sync` take the same lock.
+
+`gv replace --dry-run` reports the assessment, the cache entries that would be
+removed, and whether the destination would be written, without changing
+anything; a path a planned move fills is not counted as missing.
+
+| Result | Exit status |
+|---|---|
+| written, or already current | 0 |
+| dry run with nothing blocked | 0 |
+| anything blocked, in a dry run too | 1 |
+| an error, a failed write, or a write whose durability is unconfirmed | 1 |
 
 ## Clone cache
 
@@ -421,8 +513,8 @@ or release support.
   aliases keep working. `GIT_CONFIG` is refused: it replaces the file
   `git config` reads, so the origin grove verifies would no longer be the one
   `git fetch` contacts. Git exports `GIT_INDEX_FILE` to pre-commit hooks, so
-  `status`, `sync`, `refresh`, `add`, and the clone cache refuse to run from
-  one. Raw `gv clone` passes the environment to its final `git clone`
+  `status`, `sync`, `refresh`, `add`, `retire`, `replace`, and the clone cache
+  refuse to run from one. Raw `gv clone` passes the environment to its final `git clone`
   unchanged; only its cache preparation and shorthand resolution are refused.
 - zoxide is optional. Registration requires `zoxide query --list --all` and
   `zoxide add`.

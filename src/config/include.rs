@@ -77,7 +77,19 @@ fn load_tree_from(
     replacement: Option<SourceReplacement<'_>>,
     override_files: OverrideFiles<'_>,
 ) -> Result<LoadedConfigTree, AppError> {
-    let root = load_one(&root_path.canonicalize()?, replacement, override_files)?;
+    let root_path = match root_path.canonicalize() {
+        Ok(path) => path,
+        // A replacement may stand for a root file a first `gv replace` has yet
+        // to create; the caller hands it over already canonical.
+        Err(err)
+            if err.kind() == io::ErrorKind::NotFound
+                && replacement.is_some_and(|replacement| replacement.path == root_path) =>
+        {
+            root_path.to_path_buf()
+        }
+        Err(err) => return Err(err.into()),
+    };
+    let root = load_one(&root_path, replacement, override_files)?;
     let root_directory = root
         .path
         .parent()
@@ -111,7 +123,6 @@ fn load_tree_from(
         children.push(child);
     }
 
-    let root_path = root.path.clone();
     let mut files = Vec::with_capacity(children.len() + 1);
     files.push(root);
     files.extend(children);
@@ -131,12 +142,21 @@ fn load_one(
     let label = path.display().to_string();
     let contents = read_source(path, replacement)?;
     let mut table = file::parse_table(&contents, &label)?;
-
+    let mut overlay = None;
     if override_files.merges_into(path)
         && let Some((override_path, override_contents)) = read_sibling_override(path, replacement)?
     {
         let override_label = override_path.display().to_string();
-        let override_table = file::parse_table(&override_contents, &override_label)?;
+        overlay = Some((file::parse_table(&override_contents, &override_label)?, override_label));
+    }
+
+    match &overlay {
+        Some((override_table, override_label)) if override_table.contains_key("version") => {
+            file::check_version(override_table.get("version"), override_label)?;
+        }
+        _ => file::check_version(table.get("version"), &label)?,
+    }
+    if let Some((override_table, override_label)) = overlay {
         // Standalone decode first, so a schema error confined to the override
         // (unknown field, wrong type) is attributed to it, not to the base
         // file it's about to merge into.
