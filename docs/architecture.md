@@ -261,7 +261,8 @@ drop only progress refreshes that a later carriage-return segment overwrote; `pr
 corresponding command families. `environment` owns the preflight that
 availability checks run: managed commands select their repository by working
 directory, so inherited variables from `git rev-parse --local-env-vars` other
-than configuration and `GIT_PREFIX` are refused. Raw clone passthrough builds
+than `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`, and `GIT_PREFIX` are refused,
+`GIT_CONFIG` included because it swaps the file the origin is read from. Raw clone passthrough builds
 its command without that preflight. `symbolic_ref` reads symbolic-ref targets in
 full, and range and merge operands use full ref names, so a tag sharing a
 branch's name cannot redirect observation or mutation. Worktree branch and

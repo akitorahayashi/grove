@@ -415,10 +415,12 @@ or release support.
   that `git rev-parse --local-env-vars` lists, such as `GIT_DIR`,
   `GIT_WORK_TREE`, `GIT_INDEX_FILE`, or `GIT_OBJECT_DIRECTORY`, because it
   would route them away from the configured repository. The error names the
-  variables, never their values, and how to unset them. `GIT_CONFIG`,
+  variables, never their values, and how to unset them.
   `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`, and `GIT_PREFIX` stay
   permitted, so `git -c`, environment-supplied configuration, and Git shell
-  aliases keep working. Git exports `GIT_INDEX_FILE` to pre-commit hooks, so
+  aliases keep working. `GIT_CONFIG` is refused: it replaces the file
+  `git config` reads, so the origin grove verifies would no longer be the one
+  `git fetch` contacts. Git exports `GIT_INDEX_FILE` to pre-commit hooks, so
   `status`, `sync`, `refresh`, `add`, and the clone cache refuse to run from
   one. Raw `gv clone` passes the environment to its final `git clone`
   unchanged; only its cache preparation and shorthand resolution are refused.

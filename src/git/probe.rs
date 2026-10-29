@@ -50,16 +50,7 @@ impl RepositoryProbe for CommandGitClient {
     fn common_directory(&self, repository: &Path) -> Result<PathBuf, AppError> {
         let args = ["rev-parse", "--git-common-dir"];
         let output = self.git_required(repository, &args)?;
-        let value = stdout(&output);
-        let value = value.trim();
-        if value.is_empty() {
-            return Err(AppError::git_command_failed(
-                format_probe(repository, &args),
-                "Git returned an empty common directory",
-            ));
-        }
-
-        let path = PathBuf::from(value);
+        let path = output_path(repository, &args, &output)?;
         let path = if path.is_absolute() { path } else { repository.join(path) };
         fs::canonicalize(&path).map_err(|err| {
             io::Error::new(
@@ -77,8 +68,7 @@ impl RepositoryProbe for CommandGitClient {
 
         let args = ["rev-parse", "--show-toplevel"];
         let output = self.git_required(repository, &args)?;
-        let value = strict_output_line(repository, &args, &output)?;
-        let path = PathBuf::from(value);
+        let path = output_path(repository, &args, &output)?;
         if !path.is_absolute() {
             return Err(malformed_output(repository, &args, "non-absolute path"));
         }
@@ -268,19 +258,28 @@ pub(super) fn malformed_output(repository: &Path, args: &[&str], output: &str) -
     AppError::git_command_failed(format_probe(repository, args), description)
 }
 
-fn strict_output_line(
-    repository: &Path,
-    args: &[&str],
-    output: &Output,
-) -> Result<String, AppError> {
-    let bytes = output.stdout.strip_suffix(b"\n").unwrap_or(&output.stdout);
-    let bytes = bytes.strip_suffix(b"\r").unwrap_or(bytes);
-    if bytes.is_empty() || bytes.contains(&b'\n') || bytes.contains(&b'\r') {
-        return Err(malformed_output(repository, args, "invalid line count"));
-    }
-    std::str::from_utf8(bytes)
-        .map(str::to_string)
-        .map_err(|_| malformed_output(repository, args, "non-UTF-8 output"))
+/// A path Git printed alone on a line. Git writes the path's bytes verbatim
+/// and ends them with one newline; on Unix every other byte, an embedded
+/// newline or invalid UTF-8 included, belongs to the path.
+fn output_path(repository: &Path, args: &[&str], output: &Output) -> Result<PathBuf, AppError> {
+    output
+        .stdout
+        .strip_suffix(b"\n")
+        .filter(|bytes| !bytes.is_empty())
+        .and_then(path_from_bytes)
+        .ok_or_else(|| malformed_output(repository, args, &stdout(output)))
+}
+
+#[cfg(unix)]
+fn path_from_bytes(bytes: &[u8]) -> Option<PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+
+    Some(PathBuf::from(std::ffi::OsStr::from_bytes(bytes)))
+}
+
+#[cfg(not(unix))]
+fn path_from_bytes(bytes: &[u8]) -> Option<PathBuf> {
+    std::str::from_utf8(bytes).ok().map(PathBuf::from)
 }
 
 pub(super) fn parse_git_version(output: &str) -> Option<(u32, u32, u32)> {
@@ -471,6 +470,35 @@ mod tests {
             .branch_tracking(&repository, &BranchName::new("main").unwrap());
 
         assert_eq!(result.unwrap(), BranchTracking::MissingLocal);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn path_output_keeps_every_byte_but_the_terminating_newline() {
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::process::ExitStatusExt;
+        use std::path::Path;
+        use std::process::{ExitStatus, Output};
+
+        let output = |stdout: &[u8]| Output {
+            status: ExitStatus::from_raw(0),
+            stdout: stdout.to_vec(),
+            stderr: Vec::new(),
+        };
+        let parse =
+            |stdout: &[u8]| super::output_path(Path::new("/srv"), &["rev-parse"], &output(stdout));
+
+        for (stdout, path) in [
+            (&b"/srv/line\nbreak\n"[..], &b"/srv/line\nbreak"[..]),
+            (b"/srv/latin-\xff\n", b"/srv/latin-\xff"),
+            (b"/srv/carriage\r\n", b"/srv/carriage\r"),
+            (b" /srv/padded \n", b" /srv/padded "),
+        ] {
+            assert_eq!(parse(stdout).unwrap().as_os_str().as_bytes(), path, "{stdout:?}");
+        }
+        for malformed in [&b""[..], b"\n", b"/srv/unterminated"] {
+            assert!(parse(malformed).is_err(), "{malformed:?}");
+        }
     }
 
     #[test]

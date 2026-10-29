@@ -254,3 +254,91 @@ fn refresh_updates_a_repository_at_the_grove_root() {
 
     assert!(ctx.workspace().join("second.txt").is_file());
 }
+
+/// `GIT_CONFIG` swaps the file `git config` reads, so without the preflight
+/// the ownership probe would see the configured URL while `git fetch` still
+/// contacted the repository's actual origin.
+#[cfg(unix)]
+#[test]
+fn refresh_rejects_an_inherited_git_config_that_would_fake_the_origin() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    let actual = ctx.write_single_repository_config("blog", &remote.url(), None);
+    ctx.cli().arg("--config").arg(&actual).arg("sync").assert().success();
+    let repository = ctx.workspace().join("blog");
+    let configured = "https://example.com/configured.git";
+    let config = ctx.write_single_repository_config("blog", configured, None);
+    let fake = ctx.root().join("fake-config");
+    std::fs::write(&fake, format!("[remote \"origin\"]\n\turl = {configured}\n")).unwrap();
+    let marker = ctx.root().join("fetch-ran");
+    let path = path_with_wrapper(
+        &ctx,
+        "refresh-git-config",
+        &format!("if [ \"$1\" = fetch ]; then : > \"{}\"; fi", marker.display()),
+    );
+    let before = repository_state(&repository);
+
+    ctx.cli()
+        .env("PATH", path)
+        .env("GIT_CONFIG", &fake)
+        .arg("--config")
+        .arg(config)
+        .arg("refresh")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("GIT_CONFIG"))
+        .stderr(predicate::str::contains(fake.to_str().unwrap()).not());
+
+    assert!(!marker.exists(), "refresh fetched an origin the configuration does not declare");
+    assert_eq!(repository_state(&repository), before);
+}
+
+/// A grove whose root directory carries `name`, holding one clone that is a
+/// commit behind its remote. Git prints such paths byte for byte.
+fn grove_under(ctx: &TestContext, name: &std::ffi::OsStr) -> (std::path::PathBuf, String) {
+    let remote = ctx.create_remote("blog");
+    let root = ctx.root().join(name);
+    std::fs::create_dir(&root).unwrap();
+    run_git(&root, &["clone", &remote.url(), "blog"]);
+    std::fs::write(
+        root.join("grove.toml"),
+        format!("version = 2\n[repos]\nblog = \"{}\"\n", remote.url()),
+    )
+    .unwrap();
+    remote.add_commit("second.txt", "second\n");
+    let tip = git_stdout(std::path::Path::new(&remote.url()), &["rev-parse", "refs/heads/main"]);
+    (root, tip)
+}
+
+fn assert_status_and_refresh_manage(ctx: &TestContext, root: &std::path::Path, tip: &str) {
+    ctx.cli()
+        .arg("--config")
+        .arg(root.join("grove.toml"))
+        .arg("status")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("clean"));
+    ctx.cli().arg("--config").arg(root.join("grove.toml")).arg("refresh").assert().success();
+
+    assert_eq!(git_stdout(&root.join("blog"), &["rev-parse", "refs/heads/main"]), tip);
+}
+
+#[test]
+fn a_repository_under_a_directory_name_with_a_newline_is_managed() {
+    let ctx = TestContext::new();
+    let (root, tip) = grove_under(&ctx, std::ffi::OsStr::new("grove\nroot"));
+
+    assert_status_and_refresh_manage(&ctx, &root, &tip);
+}
+
+/// Linux only: APFS refuses directory names that are not valid UTF-8.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_repository_under_a_non_utf8_directory_name_is_managed() {
+    use std::os::unix::ffi::OsStrExt;
+
+    let ctx = TestContext::new();
+    let (root, tip) = grove_under(&ctx, std::ffi::OsStr::from_bytes(b"grove-\xff"));
+
+    assert_status_and_refresh_manage(&ctx, &root, &tip);
+}

@@ -9,11 +9,13 @@ use crate::repositories::redact_urls_for_display;
 
 /// Variables Git lists as repository-local that still belong to the caller:
 /// `GIT_CONFIG_PARAMETERS` and `GIT_CONFIG_COUNT` carry `git -c` and CI
-/// credential settings, `GIT_CONFIG` affects only `git config`, and Git
-/// exports `GIT_PREFIX` to every hook and shell alias without selecting
-/// anything.
-const PERMITTED: [&str; 4] =
-    ["GIT_CONFIG", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT", "GIT_PREFIX"];
+/// credential settings, and Git exports `GIT_PREFIX` to every hook and shell
+/// alias without selecting anything. `GIT_CONFIG` is not among them: it
+/// replaces the file `git config` reads and writes, so the ownership probe
+/// would report another file's `remote.origin.url` while `git fetch` still
+/// contacts the repository's own origin, and cache refspec writes would land
+/// in that file.
+const PERMITTED: [&str; 3] = ["GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT", "GIT_PREFIX"];
 
 impl CommandGitClient {
     /// Managed commands select their repository by working directory alone,
@@ -81,7 +83,7 @@ mod tests {
     use super::routing_overrides;
 
     #[test]
-    fn rejects_inherited_selectors_but_permits_configuration_and_hook_context() {
+    fn rejects_inherited_selectors_but_permits_injected_configuration_and_hook_context() {
         let local = "GIT_ALTERNATE_OBJECT_DIRECTORIES\nGIT_CONFIG\nGIT_CONFIG_PARAMETERS\n\
                      GIT_CONFIG_COUNT\nGIT_OBJECT_DIRECTORY\nGIT_DIR\nGIT_WORK_TREE\n\
                      GIT_INDEX_FILE\nGIT_PREFIX\nGIT_COMMON_DIR\n";
@@ -99,7 +101,10 @@ mod tests {
         .map(OsString::from)
         .collect::<BTreeSet<_>>();
 
-        assert_eq!(routing_overrides(local, &inherited), ["GIT_DIR", "GIT_INDEX_FILE"]);
+        assert_eq!(
+            routing_overrides(local, &inherited),
+            ["GIT_CONFIG", "GIT_DIR", "GIT_INDEX_FILE"]
+        );
     }
 
     #[test]
