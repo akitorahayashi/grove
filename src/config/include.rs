@@ -20,10 +20,22 @@ pub(super) struct LoadedConfigTree {
     pub files: Vec<LoadedConfigFile>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum OverrideFiles {
+#[derive(Clone, Copy)]
+enum OverrideFiles<'a> {
     Merge,
     Ignore,
+    /// Every override except the one paired with this base file.
+    Exclude(&'a Path),
+}
+
+impl OverrideFiles<'_> {
+    fn merges_into(self, base: &Path) -> bool {
+        match self {
+            Self::Merge => true,
+            Self::Ignore => false,
+            Self::Exclude(excluded) => base != excluded,
+        }
+    }
 }
 
 pub(super) fn load_tree(root_path: &Path) -> Result<LoadedConfigTree, AppError> {
@@ -32,6 +44,14 @@ pub(super) fn load_tree(root_path: &Path) -> Result<LoadedConfigTree, AppError> 
 
 pub(super) fn load_tree_without_overrides(root_path: &Path) -> Result<LoadedConfigTree, AppError> {
     load_tree_from(root_path, None, OverrideFiles::Ignore)
+}
+
+/// `base` is a loaded file's canonical path, as `LoadedConfigFile::path` holds it.
+pub(super) fn load_tree_without_override_of(
+    root_path: &Path,
+    base: &Path,
+) -> Result<LoadedConfigTree, AppError> {
+    load_tree_from(root_path, None, OverrideFiles::Exclude(base))
 }
 
 pub(super) fn load_tree_with_replacement(
@@ -55,7 +75,7 @@ struct SourceReplacement<'a> {
 fn load_tree_from(
     root_path: &Path,
     replacement: Option<SourceReplacement<'_>>,
-    override_files: OverrideFiles,
+    override_files: OverrideFiles<'_>,
 ) -> Result<LoadedConfigTree, AppError> {
     let root = load_one(&root_path.canonicalize()?, replacement, override_files)?;
     let root_directory = root
@@ -102,7 +122,7 @@ fn load_tree_from(
 fn load_one(
     path: &Path,
     replacement: Option<SourceReplacement<'_>>,
-    override_files: OverrideFiles,
+    override_files: OverrideFiles<'_>,
 ) -> Result<LoadedConfigFile, AppError> {
     let directory = path
         .parent()
@@ -112,7 +132,7 @@ fn load_one(
     let contents = read_source(path, replacement)?;
     let mut table = file::parse_table(&contents, &label)?;
 
-    if override_files == OverrideFiles::Merge
+    if override_files.merges_into(path)
         && let Some((override_path, override_contents)) = read_sibling_override(path, replacement)?
     {
         let override_label = override_path.display().to_string();

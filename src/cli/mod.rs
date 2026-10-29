@@ -45,6 +45,8 @@ enum Commands {
         about = "Update existing repositories and switch to their default branches"
     )]
     Refresh(commands::refresh::RefreshCommand),
+    #[command(about = "Retire an override, trashing the repositories only it declares")]
+    Retire(commands::retire::RetireCommand),
     #[command(
         visible_alias = "s",
         about = "Clone missing repositories and safely update existing repositories"
@@ -95,6 +97,7 @@ fn run_with_args(args: impl IntoIterator<Item = OsString>, output: &mut Output<'
         Commands::Clone(command) => commands::clone::run(cli.config, command, output),
         Commands::Init(command) => commands::init::run(cli.config, command, output),
         Commands::Refresh(command) => commands::refresh::run(cli.config, command, output),
+        Commands::Retire(command) => commands::retire::run(cli.config, command, output),
         Commands::Sync(command) => commands::sync::run(cli.config, command, output),
         Commands::Status(command) => commands::status::run(cli.config, command, output),
         Commands::Validate(command) => commands::validate::run(cli.config, command, output),

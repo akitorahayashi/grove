@@ -28,11 +28,10 @@ pub use app::status::{
     StatusReport,
 };
 pub use app::sync::{
-    BlockedReason as SyncBlockedReason, CacheRemoval as SyncCacheRemoval, Entry as SyncEntry,
-    Outcome as SyncOutcome, PhaseSummaries as SyncPhaseSummaries, PhaseSummary as SyncPhaseSummary,
-    Plan as SyncPlan, RemovalEntry as SyncRemovalEntry, RemovalOutcome as SyncRemovalOutcome,
-    RemovalPlan as SyncRemovalPlan, Report as SyncReport, SkippedReason as SyncSkippedReason,
-    SyncOptions, ZoxideEntry, ZoxideOutcome, ZoxideReport,
+    BlockedReason as SyncBlockedReason, Entry as SyncEntry, Outcome as SyncOutcome,
+    PhaseSummaries as SyncPhaseSummaries, PhaseSummary as SyncPhaseSummary, Plan as SyncPlan,
+    Report as SyncReport, SkippedReason as SyncSkippedReason, SyncOptions, ZoxideEntry,
+    ZoxideOutcome, ZoxideReport,
 };
 pub use app::validate::Report as ValidationReport;
 pub use cache::Outcome as CacheOutcome;
@@ -41,4 +40,8 @@ pub use error::{
     AppError, AppErrorKind, ArgumentError, CacheError, ConfigError, GitError, InternalError,
     ProcessErrorKind, ZoxideError,
 };
-pub use removal::{BlockedReason as RemovalBlockedReason, LocalState as RemovalLocalState};
+pub use removal::{
+    BlockedReason as RemovalBlockedReason, CacheChange as SyncCacheRemoval,
+    Entry as SyncRemovalEntry, LocalState as RemovalLocalState, Outcome as SyncRemovalOutcome,
+    Plan as SyncRemovalPlan,
+};

@@ -6,6 +6,7 @@ use owo_colors::OwoColorize;
 
 use crate::app::entry::BlockedReasonDetails;
 use crate::cache::Outcome as CacheOutcome;
+use crate::removal;
 use crate::repositories::redact_urls_for_display;
 
 use crate::cli::output::{Output, terminal_text};
@@ -121,6 +122,61 @@ pub(in crate::cli) fn print_blocked_details(
             output,
             format_args!("    {}", format!("expected: {}", safe_message(expected)).dimmed()),
         )?;
+    }
+    Ok(())
+}
+
+pub(in crate::cli) fn print_removals(
+    entries: &[removal::Entry],
+    output: &mut Output<'_>,
+) -> io::Result<()> {
+    let mut entries = entries.iter().collect::<Vec<_>>();
+    entries.sort_by_key(|entry| entry.repository());
+
+    for entry in entries {
+        print_removal(entry, output)?;
+    }
+    Ok(())
+}
+
+fn print_removal(entry: &removal::Entry, output: &mut Output<'_>) -> io::Result<()> {
+    let repository = entry.repository();
+    match entry.outcome() {
+        removal::Outcome::Planned(removal::Plan::Move { to }) => {
+            let detail = terminal_text(&format!("would move to {to}"));
+            entry_line(output, ">", Paint::Cyan, repository, &detail)?;
+        }
+        removal::Outcome::Planned(removal::Plan::Trash) => {
+            entry_line(output, "-", Paint::Cyan, repository, "would move to the trash")?;
+        }
+        removal::Outcome::Moved { to } => {
+            let detail = terminal_text(&format!("moved to {to}"));
+            entry_line(output, ">", Paint::Green, repository, &detail)?;
+        }
+        removal::Outcome::Trashed => {
+            entry_line(output, "-", Paint::Green, repository, "moved to the trash")?;
+        }
+        removal::Outcome::Blocked { reason } => {
+            entry_line(output, "x", Paint::Red, repository, &safe_message(&reason.message()))?;
+        }
+        removal::Outcome::Absent => {
+            write_line(
+                output,
+                format_args!(" {} {}", "=".cyan(), terminal_text(repository).bold()),
+            )?;
+        }
+    }
+
+    let cache = match entry.cache() {
+        removal::CacheChange::Removed => Some("clone cache entry removed"),
+        removal::CacheChange::WouldRemove => Some("clone cache entry would be removed"),
+        _ => None,
+    };
+    if let Some(cache) = cache {
+        write_line(output, format_args!("    {}", cache.dimmed()))?;
+    }
+    if let Some(warning) = entry.warning() {
+        write_line(output, format_args!("    {}", safe_message(warning).dimmed()))?;
     }
     Ok(())
 }
