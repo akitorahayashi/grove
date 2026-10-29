@@ -6,7 +6,7 @@ use std::process::Output;
 use super::command::{command_message, format_probe};
 use super::{
     BranchTracking, CommandGitClient, GitProgressSink, RepositoryLock, RepositoryProbe,
-    WorktreeStatus, default_branch, tracking, worktree,
+    WorktreeStatus, symbolic_ref, tracking, worktree,
 };
 use crate::AppError;
 use crate::repositories::{BranchName, RemoteUrl, redact_urls_for_display};
@@ -32,7 +32,7 @@ impl RepositoryProbe for CommandGitClient {
                 version.0, version.1, version.2
             )));
         }
-        Ok(())
+        self.reject_routing_environment()
     }
 
     fn lock_repository(&self, common_directory: &Path) -> Result<RepositoryLock, AppError> {
@@ -50,16 +50,7 @@ impl RepositoryProbe for CommandGitClient {
     fn common_directory(&self, repository: &Path) -> Result<PathBuf, AppError> {
         let args = ["rev-parse", "--git-common-dir"];
         let output = self.git_required(repository, &args)?;
-        let value = stdout(&output);
-        let value = value.trim();
-        if value.is_empty() {
-            return Err(AppError::git_command_failed(
-                format_probe(repository, &args),
-                "Git returned an empty common directory",
-            ));
-        }
-
-        let path = PathBuf::from(value);
+        let path = output_path(repository, &args, &output)?;
         let path = if path.is_absolute() { path } else { repository.join(path) };
         fs::canonicalize(&path).map_err(|err| {
             io::Error::new(
@@ -70,24 +61,6 @@ impl RepositoryProbe for CommandGitClient {
         })
     }
 
-    fn is_work_tree(&self, repository: &Path) -> Result<bool, AppError> {
-        let args = ["rev-parse", "--is-inside-work-tree"];
-        let output = self.git_probe(repository, &args)?;
-        if !output.status.success() {
-            if output.status.code() == Some(128)
-                && command_message(&output).contains("not a git repository")
-            {
-                return Ok(false);
-            }
-            return Err(probe_failure(repository, &args, &output));
-        }
-        match stdout(&output).trim() {
-            "true" => Ok(true),
-            "false" => Ok(false),
-            value => Err(malformed_output(repository, &args, value)),
-        }
-    }
-
     fn worktree_root(&self, repository: &Path) -> Result<Option<PathBuf>, AppError> {
         if !self.is_work_tree(repository)? {
             return Ok(None);
@@ -95,8 +68,7 @@ impl RepositoryProbe for CommandGitClient {
 
         let args = ["rev-parse", "--show-toplevel"];
         let output = self.git_required(repository, &args)?;
-        let value = strict_output_line(repository, &args, &output)?;
-        let path = PathBuf::from(value);
+        let path = output_path(repository, &args, &output)?;
         if !path.is_absolute() {
             return Err(malformed_output(repository, &args, "non-absolute path"));
         }
@@ -158,19 +130,14 @@ impl RepositoryProbe for CommandGitClient {
             return Ok(Some(configured.clone()));
         }
 
-        let args = ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"];
+        let args = ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"];
         let output = self.git_probe(repository, &args)?;
         let Some(output) = optional_probe(repository, &args, output, 1)? else {
             return Ok(None);
         };
-        let value = required_line(repository, &args, &output)?;
-        let Some(parsed) = default_branch::parse_origin_head(&value) else {
-            return Err(malformed_output(repository, &args, &value));
-        };
-        let Ok(branch) = BranchName::new(&parsed) else {
-            return Err(malformed_output(repository, &args, &value));
-        };
-        Ok(Some(branch))
+        symbolic_ref::branch(&output.stdout, "refs/remotes/origin/")
+            .map(Some)
+            .ok_or_else(|| malformed_output(repository, &args, &stdout(&output)))
     }
 
     fn branch_tracking(
@@ -191,15 +158,31 @@ impl RepositoryProbe for CommandGitClient {
 }
 
 impl CommandGitClient {
+    fn is_work_tree(&self, repository: &Path) -> Result<bool, AppError> {
+        let args = ["rev-parse", "--is-inside-work-tree"];
+        let output = self.git_probe(repository, &args)?;
+        if !output.status.success() {
+            if output.status.code() == Some(128)
+                && command_message(&output).contains("not a git repository")
+            {
+                return Ok(false);
+            }
+            return Err(probe_failure(repository, &args, &output));
+        }
+        match stdout(&output).trim() {
+            "true" => Ok(true),
+            "false" => Ok(false),
+            value => Err(malformed_output(repository, &args, value)),
+        }
+    }
+
     fn symbolic_head_branch(&self, repository: &Path) -> Result<Option<String>, AppError> {
-        let args = ["symbolic-ref", "--quiet", "--short", "HEAD"];
+        let args = ["symbolic-ref", "--quiet", "HEAD"];
         let output = self.git_probe(repository, &args)?;
         match optional_probe(repository, &args, output, 1)? {
-            Some(output) => {
-                let value = required_line(repository, &args, &output)?;
-                BranchName::new(&value).map_err(|_| malformed_output(repository, &args, &value))?;
-                Ok(Some(value))
-            }
+            Some(output) => symbolic_ref::branch(&output.stdout, "refs/heads/")
+                .map(|branch| Some(branch.as_str().to_string()))
+                .ok_or_else(|| malformed_output(repository, &args, &stdout(&output))),
             None => Ok(None),
         }
     }
@@ -224,7 +207,7 @@ impl CommandGitClient {
         repository: &Path,
         branch: &BranchName,
     ) -> Result<(u32, u32), AppError> {
-        let range = format!("{branch}...origin/{branch}");
+        let range = format!("refs/heads/{branch}...refs/remotes/origin/{branch}");
         let args = ["rev-list", "--left-right", "--count", &range];
         let output = self.git_required(repository, &args)?;
         let output_text = stdout(&output);
@@ -258,19 +241,6 @@ pub(super) fn optional_probe(
     }
 }
 
-pub(super) fn required_line(
-    repository: &Path,
-    args: &[&str],
-    output: &Output,
-) -> Result<String, AppError> {
-    let value = stdout(output);
-    let trimmed = value.trim();
-    if trimmed.is_empty() || trimmed.split_whitespace().count() != 1 {
-        return Err(malformed_output(repository, args, &value));
-    }
-    Ok(trimmed.to_string())
-}
-
 fn probe_failure(repository: &Path, args: &[&str], output: &Output) -> AppError {
     AppError::git_command_failed_status(
         format_probe(repository, args),
@@ -288,19 +258,28 @@ pub(super) fn malformed_output(repository: &Path, args: &[&str], output: &str) -
     AppError::git_command_failed(format_probe(repository, args), description)
 }
 
-fn strict_output_line(
-    repository: &Path,
-    args: &[&str],
-    output: &Output,
-) -> Result<String, AppError> {
-    let bytes = output.stdout.strip_suffix(b"\n").unwrap_or(&output.stdout);
-    let bytes = bytes.strip_suffix(b"\r").unwrap_or(bytes);
-    if bytes.is_empty() || bytes.contains(&b'\n') || bytes.contains(&b'\r') {
-        return Err(malformed_output(repository, args, "invalid line count"));
-    }
-    std::str::from_utf8(bytes)
-        .map(str::to_string)
-        .map_err(|_| malformed_output(repository, args, "non-UTF-8 output"))
+/// A path Git printed alone on a line. Git writes the path's bytes verbatim
+/// and ends them with one newline; on Unix every other byte, an embedded
+/// newline or invalid UTF-8 included, belongs to the path.
+fn output_path(repository: &Path, args: &[&str], output: &Output) -> Result<PathBuf, AppError> {
+    output
+        .stdout
+        .strip_suffix(b"\n")
+        .filter(|bytes| !bytes.is_empty())
+        .and_then(path_from_bytes)
+        .ok_or_else(|| malformed_output(repository, args, &stdout(output)))
+}
+
+#[cfg(unix)]
+fn path_from_bytes(bytes: &[u8]) -> Option<PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+
+    Some(PathBuf::from(std::ffi::OsStr::from_bytes(bytes)))
+}
+
+#[cfg(not(unix))]
+fn path_from_bytes(bytes: &[u8]) -> Option<PathBuf> {
+    std::str::from_utf8(bytes).ok().map(PathBuf::from)
 }
 
 pub(super) fn parse_git_version(output: &str) -> Option<(u32, u32, u32)> {
@@ -325,7 +304,8 @@ mod tests {
     use tempfile::TempDir;
 
     use super::super::command::tests::{
-        create_updatable_repository, git_wrapper, initialize_committed_repository, run_git,
+        create_updatable_repository, git_stdout, git_wrapper, initialize_committed_repository,
+        run_git,
     };
     use crate::git::{BranchTracking, CommandGitClient, RepositoryProbe};
     use crate::repositories::BranchName;
@@ -339,7 +319,7 @@ mod tests {
         initialize_committed_repository(&main);
         run_git(&main, &["worktree", "add", "-b", "linked", linked.to_str().unwrap()]);
 
-        let client = CommandGitClient::default();
+        let client = CommandGitClient::isolated();
         assert_eq!(
             client.common_directory(&main).unwrap(),
             client.common_directory(&linked).unwrap()
@@ -354,7 +334,7 @@ mod tests {
         let nested = repository.join("nested");
         std::fs::create_dir(&nested).unwrap();
 
-        let resolved = CommandGitClient::default().worktree_root(&nested).unwrap();
+        let resolved = CommandGitClient::isolated().worktree_root(&nested).unwrap();
 
         assert_eq!(resolved, Some(repository.canonicalize().unwrap()));
     }
@@ -364,7 +344,7 @@ mod tests {
         let root = TempDir::new().unwrap();
         let bare = root.path().join("bare.git");
         run_git(root.path(), &["init", "--bare", bare.to_str().unwrap()]);
-        let client = CommandGitClient::default();
+        let client = CommandGitClient::isolated();
 
         assert_eq!(client.worktree_root(root.path()).unwrap(), None);
         assert_eq!(client.worktree_root(&bare).unwrap(), None);
@@ -377,7 +357,7 @@ mod tests {
         run_git(root.path(), &["init", "-b", "main", repository.to_str().unwrap()]);
         std::fs::write(repository.join(".git").join("config"), "[bad\n").unwrap();
 
-        let result = CommandGitClient::default().worktree_status(&repository);
+        let result = CommandGitClient::isolated().worktree_status(&repository);
 
         assert!(result.is_err_and(|err| {
             err.to_string().contains("git command failed") && err.to_string().contains("status")
@@ -391,7 +371,7 @@ mod tests {
         run_git(root.path(), &["init", "-b", "main", repository.to_str().unwrap()]);
         std::fs::write(repository.join(".git").join("config"), "[bad\n").unwrap();
 
-        let result = CommandGitClient::default().remote_url(&repository);
+        let result = CommandGitClient::isolated().remote_url(&repository);
 
         assert!(result.is_err_and(|err| {
             err.to_string().contains("git command failed") && err.to_string().contains("config")
@@ -404,7 +384,7 @@ mod tests {
         let repository = root.path().join("repo");
         initialize_committed_repository(&repository);
         run_git(&repository, &["checkout", "--detach"]);
-        let client = CommandGitClient::default();
+        let client = CommandGitClient::isolated();
 
         assert_eq!(client.worktree_status(&repository).unwrap().unwrap().branch(), None);
         assert_eq!(client.remote_url(&repository).unwrap(), None);
@@ -419,7 +399,7 @@ mod tests {
         let root = TempDir::new().unwrap();
         let repository = root.path().join("repo");
         initialize_committed_repository(&repository);
-        let client = CommandGitClient::default();
+        let client = CommandGitClient::isolated();
 
         run_git(&repository, &["switch", "-c", "(detached)"]);
         let named = client.worktree_status(&repository).unwrap().unwrap();
@@ -436,7 +416,7 @@ mod tests {
         let root = TempDir::new().unwrap();
         let repository = root.path().join("repo");
         run_git(root.path(), &["init", "-b", "main", repository.to_str().unwrap()]);
-        let client = CommandGitClient::default();
+        let client = CommandGitClient::isolated();
 
         let unborn = client.worktree_status(&repository).unwrap().unwrap();
         assert_eq!(unborn.branch(), Some("main"));
@@ -456,7 +436,7 @@ mod tests {
         let configured = BranchName::new("release/stable").unwrap();
 
         let branch =
-            CommandGitClient::default().default_branch(&repository, Some(&configured)).unwrap();
+            CommandGitClient::isolated().default_branch(&repository, Some(&configured)).unwrap();
 
         assert_eq!(branch, Some(configured));
     }
@@ -492,6 +472,35 @@ mod tests {
         assert_eq!(result.unwrap(), BranchTracking::MissingLocal);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn path_output_keeps_every_byte_but_the_terminating_newline() {
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::process::ExitStatusExt;
+        use std::path::Path;
+        use std::process::{ExitStatus, Output};
+
+        let output = |stdout: &[u8]| Output {
+            status: ExitStatus::from_raw(0),
+            stdout: stdout.to_vec(),
+            stderr: Vec::new(),
+        };
+        let parse =
+            |stdout: &[u8]| super::output_path(Path::new("/srv"), &["rev-parse"], &output(stdout));
+
+        for (stdout, path) in [
+            (&b"/srv/line\nbreak\n"[..], &b"/srv/line\nbreak"[..]),
+            (b"/srv/latin-\xff\n", b"/srv/latin-\xff"),
+            (b"/srv/carriage\r\n", b"/srv/carriage\r"),
+            (b" /srv/padded \n", b" /srv/padded "),
+        ] {
+            assert_eq!(parse(stdout).unwrap().as_os_str().as_bytes(), path, "{stdout:?}");
+        }
+        for malformed in [&b""[..], b"\n", b"/srv/unterminated"] {
+            assert!(parse(malformed).is_err(), "{malformed:?}");
+        }
+    }
+
     #[test]
     fn parses_supported_git_versions() {
         assert_eq!(super::parse_git_version("git version 2.23.0\n"), Some((2, 23, 0)));
@@ -500,5 +509,40 @@ mod tests {
             Some((2, 39, 5))
         );
         assert_eq!(super::parse_git_version("unexpected"), None);
+    }
+
+    #[test]
+    fn origin_head_and_tracking_read_full_refs_under_colliding_tags() {
+        let root = TempDir::new().unwrap();
+        let repository = create_updatable_repository(root.path());
+        run_git(&repository, &["tag", "origin/main", "refs/heads/feature"]);
+        run_git(&repository, &["tag", "main", "refs/remotes/origin/main"]);
+        let client = CommandGitClient::isolated();
+
+        let branch = client.default_branch(&repository, None).unwrap().unwrap();
+        let tracking = client.branch_tracking(&repository, &branch).unwrap();
+
+        assert_eq!(branch.as_str(), "main");
+        let behind = git_stdout(
+            &repository,
+            &["rev-list", "--count", "refs/heads/main..refs/remotes/origin/main"],
+        );
+        assert_eq!(
+            tracking,
+            BranchTracking::Divergence { ahead: 0, behind: behind.parse().unwrap() }
+        );
+    }
+
+    #[test]
+    fn current_branch_fallback_reads_the_full_ref_under_a_colliding_tag() {
+        let root = TempDir::new().unwrap();
+        let repository = root.path().join("repo");
+        initialize_committed_repository(&repository);
+        run_git(&repository, &["switch", "-c", "(detached)"]);
+        run_git(&repository, &["tag", "(detached)"]);
+
+        let status = CommandGitClient::isolated().worktree_status(&repository).unwrap().unwrap();
+
+        assert_eq!(status.branch(), Some("(detached)"));
     }
 }

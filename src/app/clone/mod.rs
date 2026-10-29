@@ -99,6 +99,7 @@ pub(crate) fn execute_command<G: CacheEntry + CloneCommand + RepositoryProbe, Z>
     let mut invocation = CloneInvocation::new(arguments);
     let resolved = match invocation.repository().and_then(cache_shorthand) {
         Some(shorthand) => {
+            ctx.git().verify_available()?;
             let url = ctx.cache()?.resolve(ctx.git(), &shorthand)?;
             invocation = invocation.with_repository(&url);
             Some((shorthand, url))
@@ -109,13 +110,15 @@ pub(crate) fn execute_command<G: CacheEntry + CloneCommand + RepositoryProbe, Z>
         CloneCacheDecision::Eligible { url, insertion_index } => {
             let mut progress = NoopGitProgressSink;
             match ctx
-                .cache()
+                .git()
+                .verify_available()
+                .and_then(|()| ctx.cache())
                 .and_then(|store| store.prepare_clone_reference(ctx.git(), url, &mut progress))
             {
                 Ok((reference, outcome)) => {
                     (Some((reference, *insertion_index)), CommandCache::Used(outcome))
                 }
-                Err(error) => (None, CommandCache::Unavailable(error.to_string())),
+                Err(error) => (None, CommandCache::Unavailable(error.demote()?)),
             }
         }
         CloneCacheDecision::Bypassed(reason) => (None, CommandCache::Bypassed(reason)),
@@ -167,7 +170,135 @@ fn default_destination_name(url: &str) -> Result<String, AppError> {
 
 #[cfg(test)]
 mod tests {
-    use super::default_destination_name;
+    use std::ffi::OsString;
+    use std::path::{Path, PathBuf};
+    use std::process::ExitStatus;
+
+    use tempfile::TempDir;
+
+    use super::{default_destination_name, execute_command};
+    use crate::AppError;
+    use crate::app::AppContext;
+    use crate::cache::Store;
+    use crate::git::{
+        BranchTracking, CacheEntry, CloneCommand, CloneInvocation, GitProgressSink,
+        RepositoryProbe, WorktreeStatus,
+    };
+    use crate::repositories::{BranchName, RemoteUrl};
+
+    /// Cache preparation fails internally, and reaching the final clone fails
+    /// the test.
+    struct InternalCacheFailure;
+
+    impl CacheEntry for InternalCacheFailure {
+        fn cache_create(
+            &self,
+            _url: &RemoteUrl,
+            _entry: &Path,
+            _branch: Option<&str>,
+            _reference: Option<&Path>,
+            _progress: &mut dyn GitProgressSink,
+        ) -> Result<String, AppError> {
+            Err(AppError::internal("injected cache failure"))
+        }
+
+        fn cache_update(
+            &self,
+            _entry: &Path,
+            _url: &RemoteUrl,
+            _progress: &mut dyn GitProgressSink,
+        ) -> Result<(), AppError> {
+            unreachable!("no entry exists to update")
+        }
+
+        fn cache_retarget(
+            &self,
+            _entry: &Path,
+            _url: &RemoteUrl,
+            _branch: &str,
+            _progress: &mut dyn GitProgressSink,
+        ) -> Result<(), AppError> {
+            unreachable!("no entry exists to retarget")
+        }
+
+        fn cache_verify(&self, _entry: &Path) -> Result<bool, AppError> {
+            unreachable!("no entry exists to verify")
+        }
+
+        fn clone_with_reference(
+            &self,
+            _url: &RemoteUrl,
+            _destination: &Path,
+            _reference: &Path,
+            _progress: &mut dyn GitProgressSink,
+        ) -> Result<(), AppError> {
+            unreachable!("raw clone never places through the cache")
+        }
+    }
+
+    impl CloneCommand for InternalCacheFailure {
+        fn clone_command(
+            &self,
+            _invocation: &CloneInvocation,
+            _reference: Option<(&Path, usize)>,
+        ) -> Result<ExitStatus, AppError> {
+            unreachable!("an internal cache failure must not reach the final clone")
+        }
+    }
+
+    impl RepositoryProbe for InternalCacheFailure {
+        fn verify_available(&self) -> Result<(), AppError> {
+            Ok(())
+        }
+
+        fn fetch(&self, _: &Path, _: &mut dyn GitProgressSink) -> Result<(), AppError> {
+            unreachable!()
+        }
+
+        fn common_directory(&self, _: &Path) -> Result<PathBuf, AppError> {
+            unreachable!()
+        }
+
+        fn worktree_root(&self, _: &Path) -> Result<Option<PathBuf>, AppError> {
+            unreachable!()
+        }
+
+        fn worktree_status(&self, _: &Path) -> Result<Option<WorktreeStatus>, AppError> {
+            unreachable!()
+        }
+
+        fn remote_url(&self, _: &Path) -> Result<Option<RemoteUrl>, AppError> {
+            unreachable!()
+        }
+
+        fn default_branch(
+            &self,
+            _: &Path,
+            _: Option<&BranchName>,
+        ) -> Result<Option<BranchName>, AppError> {
+            unreachable!()
+        }
+
+        fn branch_tracking(&self, _: &Path, _: &BranchName) -> Result<BranchTracking, AppError> {
+            unreachable!()
+        }
+    }
+
+    #[test]
+    fn an_internal_cache_failure_aborts_before_the_final_clone() {
+        let root = TempDir::new().unwrap();
+        let ctx = AppContext::new(InternalCacheFailure)
+            .with_cache(Store::with_root(root.path().join("cache")));
+        let destination = root.path().join("cloned");
+
+        let error = execute_command(
+            &ctx,
+            vec![OsString::from("https://example.com/repo.git"), destination.clone().into()],
+        )
+        .unwrap_err();
+
+        assert!(error.is_internal(), "{error}");
+    }
 
     #[test]
     fn infers_name_from_path_tail() {

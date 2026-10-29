@@ -1,8 +1,8 @@
 use predicates::prelude::*;
 
-#[cfg(unix)]
-use crate::harness::path_with_wrapper;
 use crate::harness::{TestContext, run_git};
+#[cfg(unix)]
+use crate::harness::{fsmonitor_marker, path_with_wrapper};
 
 #[test]
 fn status_reports_missing_repositories_without_fetching() {
@@ -565,4 +565,57 @@ gone = "{gone}"
         .stdout(predicate::str::contains("gone").not());
 
     assert!(ctx.workspace().join("old/.git").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn status_rejects_inherited_routing_before_observing_repositories() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
+    ctx.cli().arg("--config").arg(&config).arg("sync").assert().success();
+    let marker = fsmonitor_marker(&ctx, &ctx.workspace().join("blog"));
+
+    ctx.cli()
+        .env("GIT_OBJECT_DIRECTORY", ctx.root().join("foreign-objects"))
+        .arg("--config")
+        .arg(&config)
+        .arg("status")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("GIT_OBJECT_DIRECTORY"));
+    assert!(!marker.exists(), "status observed a repository under inherited routing");
+
+    ctx.cli().arg("--config").arg(config).arg("status").assert().success();
+    assert!(marker.exists(), "the fsmonitor marker never detects `git status`");
+}
+
+#[cfg(unix)]
+#[test]
+fn status_reports_a_declared_directory_inside_another_worktree_without_observing_it() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("outer");
+    let outer = ctx.workspace().join("outer");
+    run_git(ctx.workspace(), &["clone", &remote.url(), outer.to_str().unwrap()]);
+    std::fs::create_dir(outer.join("sub")).unwrap();
+    let config = ctx.write_config(&format!(
+        "version = 2\n[repos.sub]\npath = \"outer/sub\"\nurl = \"{}\"\n",
+        remote.url()
+    ));
+    let marker = fsmonitor_marker(&ctx, &outer);
+
+    for fetch in [false, true] {
+        let mut command = ctx.cli();
+        command.arg("--config").arg(&config).arg("status");
+        if fetch {
+            command.arg("--fetch");
+        }
+        command
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("invalid"))
+            .stdout(predicate::str::contains("main").not());
+    }
+
+    assert!(!marker.exists(), "status ran the enclosing repository's fsmonitor hook");
 }

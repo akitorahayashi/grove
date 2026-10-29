@@ -299,7 +299,6 @@ message_error!(CacheError);
 message_error!(ArgumentError);
 message_error!(InternalError);
 
-#[derive(Debug)]
 pub struct ConfigError {
     message: String,
     source: Option<Box<dyn Error + Send + Sync>>,
@@ -316,6 +315,18 @@ impl ConfigError {
 
     pub fn message(&self) -> &str {
         &self.message
+    }
+}
+
+/// The source is omitted: a parser error's own rendering quotes the raw
+/// document, which can carry URL credentials the redacted message drops.
+impl fmt::Debug for ConfigError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ConfigError")
+            .field("message", &self.message)
+            .field("has_source", &self.source.is_some())
+            .finish()
     }
 }
 

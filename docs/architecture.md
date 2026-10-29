@@ -109,11 +109,12 @@ src/
     cache_entry.rs
     client.rs
     command.rs
-    default_branch.rs
+    environment.rs
     mod.rs
     probe.rs
     progress.rs
     removal.rs
+    symbolic_ref.rs
     tracking.rs
     update.rs
     worktree.rs
@@ -168,15 +169,17 @@ seeding from an existing local clone. `shorthand` owns naming an entry by the
 trailing segments of its identity, which `gv clone` resolves to the entry's
 origin URL. A failed entry refresh rebuilds the
 entry from the requested URL, so heuristic identity sharing reduces transfer
-at worst and never blocks placement. Placement, seeding, listing, named
+at worst and never blocks placement. An internal failure is never treated as
+a stale entry: it propagates without a rebuild or placement. Placement, seeding, listing, named
 removal, and whole-cache cleaning use one lock order across processes. The
 owner-only cache root records its format version and is emptied under the
 exclusive global lock when the recorded format is not current; it contains
 stable lock files and only real entry directories are inspected. The sync, clone, and cache use cases share it.
 
 `phases` owns phase-structured bounded-parallel execution. `events` owns the
-phase-generic event, sink, and progress adapter; `run` owns the check and worker
-phase envelopes; `workers` owns the bounded worker pool; `slots` owns the
+phase-generic event, sink, and progress adapter; `run` owns the check, worker,
+and sequential phase envelopes, which share one event order and keep an
+action's error primary over a failure to report it; `workers` owns the bounded worker pool; `slots` owns the
 selection-ordered result slots and the invariant that every selected item ends
 with exactly one result. Each use case supplies its own phase marker,
 per-repository action, and change predicate. Worker execution is bounded by the
@@ -186,15 +189,19 @@ application errors.
 
 `inspection` owns repository readiness probing and the canonical diagnostics for
 the conditions the use cases share, so their reason vocabularies map from one
-probe and their shared messages cannot drift.
+probe and their shared messages cannot drift. Ownership requires the declared
+path to be its worktree's root before the origin comparison, so a declared
+directory inside another worktree never borrows that repository's identity;
+plain status applies the same root check before its first `git status`.
 
 `removal` owns the assessment of removed declarations that status previews, the
 convergence sync and retire act through, the selection of declarations a
 targeted command covers, and the outcome and blocked-reason vocabulary they
 report. Assessment is side-effect free and settles ownership with probes that
 never run repository-configured commands before observing the working tree, as
-`inspection` does. Convergence runs its few entries sequentially, outside
-`phases`, because its unit is a removed declaration rather than a repository
+`inspection` does. Convergence runs its few entries through the sequential
+phase envelope, because a move must not race another entry's probes over the
+same tree and its unit is a removed declaration rather than a repository
 definition; it assesses again under the repository lock before moving or
 trashing, and receives the Git client, trash, and cache from its caller. Given
 the cache, as sync gives it, convergence removes a removed declaration's entry
@@ -249,8 +256,16 @@ identity while retaining the configured display path.
 fetch execution, worktree-root and origin discovery for configuration additions,
 default-branch mutation, and the local-only state and origin repointing that
 removal needs. `command` owns the common process runner and bounded progress
-diagnostics; `probe`, `cache_entry`, `branch_update`, and `removal` own their
-corresponding command families. Worktree branch and
+diagnostics, which keep every finished stderr line whatever its content and
+drop only progress refreshes that a later carriage-return segment overwrote; `probe`, `cache_entry`, `branch_update`, and `removal` own their
+corresponding command families. `environment` owns the preflight that
+availability checks run: managed commands select their repository by working
+directory, so inherited variables from `git rev-parse --local-env-vars` other
+than `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`, and `GIT_PREFIX` are refused,
+`GIT_CONFIG` included because it swaps the file the origin is read from. Raw clone passthrough builds
+its command without that preflight. `symbolic_ref` reads symbolic-ref targets in
+full, and range and merge operands use full ref names, so a tag sharing a
+branch's name cannot redirect observation or mutation. Worktree branch and
 cleanliness come from one Porcelain v2 observation. Local and remote
 default-branch refs come from one exact ref observation, while divergence,
 origin HEAD, remote URL, and the Git common directory retain their separate
@@ -274,7 +289,8 @@ whether cache injection preserves the requested semantics. Eligible invocations
 insert `--reference-if-able` and `--dissociate` immediately before the operands;
 all other invocations execute unchanged. A repository operand that is a cache
 shorthand is first replaced with its resolved URL and the invocation is
-classified again. This keeps Git authoritative for
+classified again. A failed cache preparation falls back to the unchanged
+invocation unless the failure is internal, which aborts before Git runs. This keeps Git authoritative for
 diagnostics and lets an entry removed after cache preparation degrade to a
 normal clone rather than a failure.
 
@@ -287,6 +303,11 @@ categories, domain accessors expose typed configuration, cache, argument, Git,
 and zoxide details, and the standard error source chain retains underlying
 parsing, I/O, and process-spawn failures. Process exits expose command, exit
 status, and bounded diagnostics while `Display` remains the human rendering.
+`demote` is the one rule for per-repository failures: a boundary failure
+becomes the entry's reported message, while an internal failure aborts the run.
+`config` redacts URL credentials from every message it builds around a parser,
+decoder, or I/O source, and `ConfigError`'s `Debug` omits that source, because
+parser errors quote the raw document.
 
 ## Public facade
 

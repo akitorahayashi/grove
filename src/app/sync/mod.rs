@@ -276,7 +276,7 @@ fn update_phase(
         Phase::Updating,
         tasks,
         parallelism,
-        |task| Ok((task.index(), update::repository(git, task))),
+        |task| update::repository(git, task).map(|entry| (task.index(), entry)),
         |(_, entry)| {
             matches!(
                 entry.outcome(),

@@ -46,9 +46,9 @@ impl BlockedReason {
             Self::NotAWorkTree => crate::inspection::destination_not_git_repository().to_string(),
             Self::InsideAnotherRepository => "path is inside another Git repository".to_string(),
             Self::MissingOrigin => crate::inspection::missing_origin().to_string(),
-            Self::RemoteUrlMismatch => {
-                "remote URL matches neither the removed nor the moved_to URL".to_string()
-            }
+            Self::RemoteUrlMismatch => "remote URL matches neither the removed nor the moved_to \
+                                          URL; align the configured URL or the origin"
+                .to_string(),
             Self::LinkedWorktree => "path is a linked worktree".to_string(),
             Self::HasLinkedWorktrees => "repository has linked worktrees".to_string(),
             Self::LocalState(states) => {
@@ -101,8 +101,11 @@ pub(crate) fn assess(
     let Some(origin) = git.remote_url(path)? else {
         return Ok(Assessment::Blocked(BlockedReason::MissingOrigin));
     };
-    let owned = origin.same_identity(removed.url())
-        || destination.is_some_and(|destination| origin.same_identity(destination.url()));
+    // Exact equality, not the cache's `identity`: that key is a transfer hint
+    // under which distinct SSH accounts or home-relative paths collide, too
+    // weak to authorize moving or trashing a directory.
+    let owned = origin.matches(removed.url())
+        || destination.is_some_and(|destination| origin.matches(destination.url()));
     if !owned {
         return Ok(Assessment::Blocked(BlockedReason::RemoteUrlMismatch));
     }

@@ -36,7 +36,7 @@ pub(in crate::cli) fn run(
     let entries = report.entries();
 
     if show_detail && entries.len() == 1 {
-        print_detail(&entries[0], output.stdout_is_terminal(), output)?;
+        print_detail(&entries[0], output)?;
     } else {
         print_table(entries, output)?;
     }
@@ -82,106 +82,65 @@ fn print_table(entries: &[StatusEntry], output: &mut Output<'_>) -> io::Result<(
     table.render(output)
 }
 
-fn print_detail(entry: &StatusEntry, styled: bool, output: &mut Output<'_>) -> io::Result<()> {
+fn print_detail(entry: &StatusEntry, output: &mut Output<'_>) -> io::Result<()> {
     let name = terminal_text(entry.name());
     output.stdout(format_args!("\n"))?;
-    print_title(&name, styled, output)?;
-    print_detail_separator(name.len(), styled, output)?;
-    print_section("Repository", styled, output)?;
-    print_field("Path", &terminal_text(entry.display_path()), styled, output)?;
+    print_title(&name, output)?;
+    print_detail_separator(name.len(), output)?;
+    print_section("Repository", output)?;
+    print_field("Path", &terminal_text(entry.display_path()), output)?;
     print_field(
         "Absolute path",
         &terminal_text(&entry.absolute_path().display().to_string()),
-        styled,
         output,
     )?;
-    print_field("URL", &terminal_text(entry.url()), styled, output)?;
-    print_field(
-        "Config",
-        &terminal_text(&entry.source_config().display().to_string()),
-        styled,
-        output,
-    )?;
+    print_field("URL", &terminal_text(entry.url()), output)?;
+    print_field("Config", &terminal_text(&entry.source_config().display().to_string()), output)?;
 
     output.stdout(format_args!("\n"))?;
-    print_section("Status", styled, output)?;
-    print_field("State", entry.condition().as_str(), styled, output)?;
-    print_field("Branch", &branch(entry), styled, output)?;
-    print_field("Default", &default_branch_name(entry), styled, output)?;
-    print_field("Tracking", &tracking(entry), styled, output)?;
+    print_section("Status", output)?;
+    print_field("State", entry.condition().as_str(), output)?;
+    print_field("Branch", &branch(entry), output)?;
+    print_field("Default", &default_branch_name(entry), output)?;
+    print_field("Tracking", &tracking(entry), output)?;
 
     if entry.condition().message().is_some() || entry.remote_mismatch().is_some() {
         output.stdout(format_args!("\n"))?;
-        print_section("Diagnostics", styled, output)?;
+        print_section("Diagnostics", output)?;
         if let Some(message) = entry.condition().message() {
-            print_field("Reason", &terminal_text(message), styled, output)?;
+            print_field("Reason", &terminal_text(message), output)?;
         }
         if let Some(mismatch) = entry.remote_mismatch() {
-            print_diagnostic_line("Remote URL does not match grove.toml", styled, output)?;
-            print_diagnostic_field("Actual", &terminal_text(mismatch.actual()), styled, output)?;
-            print_diagnostic_field(
-                "Expected",
-                &terminal_text(mismatch.expected()),
-                styled,
-                output,
-            )?;
+            print_diagnostic_line("Remote URL does not match grove.toml", output)?;
+            print_diagnostic_field("Actual", &terminal_text(mismatch.actual()), output)?;
+            print_diagnostic_field("Expected", &terminal_text(mismatch.expected()), output)?;
         }
     }
     Ok(())
 }
 
-fn print_title(title: &str, styled: bool, output: &mut Output<'_>) -> io::Result<()> {
-    if styled {
-        output.stdout(format_args!("{}\n", title.bold()))
-    } else {
-        output.stdout(format_args!("{title}\n"))
-    }
+fn print_title(title: &str, output: &mut Output<'_>) -> io::Result<()> {
+    output.stdout(format_args!("{}\n", title.bold()))
 }
 
-fn print_detail_separator(width: usize, styled: bool, output: &mut Output<'_>) -> io::Result<()> {
-    let separator = "-".repeat(width.max(4));
-    if styled {
-        output.stdout(format_args!("{}\n", separator.dimmed()))
-    } else {
-        output.stdout(format_args!("{separator}\n"))
-    }
+fn print_detail_separator(width: usize, output: &mut Output<'_>) -> io::Result<()> {
+    output.stdout(format_args!("{}\n", "-".repeat(width.max(4)).dimmed()))
 }
 
-fn print_section(section: &str, styled: bool, output: &mut Output<'_>) -> io::Result<()> {
-    if styled {
-        output.stdout(format_args!("{}\n", section.yellow().bold()))
-    } else {
-        output.stdout(format_args!("{section}\n"))
-    }
+fn print_section(section: &str, output: &mut Output<'_>) -> io::Result<()> {
+    output.stdout(format_args!("{}\n", section.yellow().bold()))
 }
 
-fn print_field(label: &str, value: &str, styled: bool, output: &mut Output<'_>) -> io::Result<()> {
-    if styled {
-        output.stdout(format_args!("  {}  {}\n", format!("{label}:").dimmed(), value))
-    } else {
-        output.stdout(format_args!("  {label:<14} {value}\n", label = format!("{label}:")))
-    }
+fn print_field(label: &str, value: &str, output: &mut Output<'_>) -> io::Result<()> {
+    output.stdout(format_args!("  {:<14} {value}\n", format!("{label}:").dimmed()))
 }
 
-fn print_diagnostic_line(value: &str, styled: bool, output: &mut Output<'_>) -> io::Result<()> {
-    if styled {
-        output.stdout(format_args!("  {}\n", value.red()))
-    } else {
-        output.stdout(format_args!("  {value}\n"))
-    }
+fn print_diagnostic_line(value: &str, output: &mut Output<'_>) -> io::Result<()> {
+    output.stdout(format_args!("  {}\n", value.red()))
 }
 
-fn print_diagnostic_field(
-    label: &str,
-    value: &str,
-    styled: bool,
-    output: &mut Output<'_>,
-) -> io::Result<()> {
-    if styled {
-        output.stdout(format_args!("    {} {}\n", format!("{label}:").dimmed(), value))
-    } else {
-        output.stdout(format_args!("    {label:<9} {value}\n", label = format!("{label}:")))
-    }
+fn print_diagnostic_field(label: &str, value: &str, output: &mut Output<'_>) -> io::Result<()> {
+    output.stdout(format_args!("    {:<9} {value}\n", format!("{label}:").dimmed()))
 }
 
 fn branch(entry: &StatusEntry) -> String {

@@ -91,12 +91,65 @@ where
     ordered.into_complete()
 }
 
+/// Also owns `Rendezvous`, which the use-case concurrency tests import: they
+/// assert the same bounded parallelism this module provides.
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::{Arc, Barrier};
+    use std::sync::{Condvar, Mutex};
+    use std::time::{Duration, Instant};
 
     use super::{map, map_keyed};
+
+    /// A one-shot barrier with a bounded wait. A serialization regression or a
+    /// panic before arrival would strand `std::sync::Barrier` waiters forever;
+    /// here the first waiter to reach the deadline breaks the rendezvous, every
+    /// waiter is released, and each one fails its test with a panic.
+    pub(crate) struct Rendezvous {
+        parties: usize,
+        arrivals: Mutex<Arrivals>,
+        changed: Condvar,
+    }
+
+    struct Arrivals {
+        count: usize,
+        broken: bool,
+    }
+
+    impl Rendezvous {
+        const DEADLINE: Duration = Duration::from_secs(10);
+
+        pub(crate) fn new(parties: usize) -> Self {
+            Self {
+                parties,
+                arrivals: Mutex::new(Arrivals { count: 0, broken: false }),
+                changed: Condvar::new(),
+            }
+        }
+
+        pub(crate) fn wait(&self) {
+            let deadline = Instant::now() + Self::DEADLINE;
+            let mut arrivals = self.arrivals.lock().unwrap();
+            arrivals.count += 1;
+            self.changed.notify_all();
+            while arrivals.count < self.parties && !arrivals.broken {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    arrivals.broken = true;
+                    self.changed.notify_all();
+                    break;
+                }
+                arrivals = self.changed.wait_timeout(arrivals, remaining).unwrap().0;
+            }
+            let arrived = arrivals.count;
+            drop(arrivals);
+            assert!(
+                arrived >= self.parties,
+                "only {arrived} of {} parties arrived together",
+                self.parties
+            );
+        }
+    }
 
     #[test]
     fn preserves_order_and_handles_zero_items() {
@@ -106,7 +159,7 @@ mod tests {
 
     #[test]
     fn limits_live_work_to_eight_tasks() {
-        let barrier = Barrier::new(8);
+        let rendezvous = Rendezvous::new(8);
         let active = AtomicUsize::new(0);
         let peak = AtomicUsize::new(0);
         let items = (0..16).collect::<Vec<_>>();
@@ -114,7 +167,7 @@ mod tests {
         map(&items, 64, |_| {
             let now = active.fetch_add(1, Ordering::SeqCst) + 1;
             peak.fetch_max(now, Ordering::SeqCst);
-            barrier.wait();
+            rendezvous.wait();
             active.fetch_sub(1, Ordering::SeqCst);
         })
         .unwrap();
@@ -124,7 +177,7 @@ mod tests {
 
     #[test]
     fn serializes_shared_keys_while_independent_keys_overlap() {
-        let barrier = Arc::new(Barrier::new(2));
+        let rendezvous = Rendezvous::new(2);
         let active_a = AtomicUsize::new(0);
         let active_b = AtomicUsize::new(0);
 
@@ -136,7 +189,7 @@ mod tests {
                 let active = if item.0 == 'a' { &active_a } else { &active_b };
                 assert_eq!(active.fetch_add(1, Ordering::SeqCst), 0);
                 if item.1 == 1 || item.1 == 3 {
-                    barrier.wait();
+                    rendezvous.wait();
                 }
                 active.fetch_sub(1, Ordering::SeqCst);
                 item.1

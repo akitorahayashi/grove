@@ -113,6 +113,29 @@ url = "GIT+SSH://user:credential@example.com/repo.git?access%5Ftoken=secret-valu
 }
 
 #[test]
+fn validate_follows_git_literal_branch_names_without_git() {
+    let ctx = TestContext::new();
+    let config = ctx.write_config(
+        "version = 2\n[repos.blog]\nurl = \"git@example.com:blog.git\"\ndefault_branch = \"release/caf\u{e9}\u{a0}\"\n",
+    );
+    ctx.cli().env("PATH", "").arg("--config").arg(&config).arg("validate").assert().success();
+
+    for reserved in ["HEAD", "@"] {
+        let config = ctx.write_config(&format!(
+            "version = 2\n[repos.blog]\nurl = \"git@example.com:blog.git\"\ndefault_branch = \"{reserved}\"\n"
+        ));
+        ctx.cli()
+            .env("PATH", "")
+            .arg("--config")
+            .arg(config)
+            .arg("validate")
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("default_branch"));
+    }
+}
+
+#[test]
 fn validate_does_not_require_git() {
     let ctx = TestContext::new();
     let config = ctx.write_config(

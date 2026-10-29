@@ -1,11 +1,10 @@
 use std::fs;
-use std::time::Instant;
 
 use crate::AppError;
 use crate::cache::Store;
 use crate::config::ResolvedConfig;
 use crate::git::{Removal, RepositoryProbe};
-use crate::phases::{Event, EventSink, Summary};
+use crate::phases::{self, EventSink, Summary};
 use crate::repositories::{RemoteUrl, RemovedRepository, RepositoryDefinition, RepositoryName};
 use crate::trash::Trash;
 
@@ -83,33 +82,14 @@ pub(crate) fn run_phase<P: Copy>(
     events: &impl EventSink<P>,
     mut converge: impl FnMut(&RemovedRepository) -> Result<Entry, AppError>,
 ) -> Result<(Vec<Entry>, Summary), AppError> {
-    if removed.is_empty() {
-        return Ok((Vec::new(), Summary::default()));
-    }
-
-    events.emit(Event::PhaseStarted { phase, total: removed.len() })?;
-    let started = Instant::now();
-    let mut entries = Vec::new();
-    for removed in removed {
-        let repository = removed.display_path().to_string();
-        events.emit(Event::RepositoryStarted { repository: repository.clone(), phase })?;
-        let entry = match converge(removed) {
-            Ok(entry) => entry,
-            Err(error) => {
-                events.emit(Event::PhaseFailed { phase })?;
-                return Err(error);
-            }
-        };
-        events.emit(Event::RepositoryFinished { repository, phase })?;
-        entries.push(entry);
-    }
-
-    let changed = entries
-        .iter()
-        .filter(|entry| matches!(entry.outcome, Outcome::Moved { .. } | Outcome::Trashed))
-        .count();
-    let summary = Summary::new(changed, started.elapsed());
-    events.emit(Event::PhaseCompleted { phase, summary })?;
+    let (mut entries, summary) = phases::run_sequential(
+        events,
+        phase,
+        removed,
+        |removed| removed.display_path(),
+        |removed| converge(removed),
+        |entry| matches!(entry.outcome, Outcome::Moved { .. } | Outcome::Trashed),
+    )?;
     entries.retain(Entry::is_reportable);
     Ok((entries, summary))
 }
@@ -315,7 +295,7 @@ mod tests {
         dry_run: bool,
         with_cache: bool,
     ) -> (Vec<Entry>, Summary) {
-        let git = CommandGitClient::default();
+        let git = CommandGitClient::isolated();
         let store = Store::with_root(root.path().join("cache"));
         let cache = || Ok(&store);
         let cache: Option<&dyn Fn() -> _> = with_cache.then_some(&cache);
@@ -329,7 +309,7 @@ mod tests {
     fn seed_cache(root: &TempDir, config: &config::ResolvedConfig, old: &Path) -> Store {
         let store = Store::with_root(root.path().join("cache"));
         let url = config.removed()[0].url();
-        let git = CommandGitClient::default();
+        let git = CommandGitClient::isolated();
         store.seed_from_local(&git, url, &old.join(".git"), &mut NoopGitProgressSink).unwrap();
         store
     }
@@ -385,5 +365,83 @@ mod tests {
 
         assert_eq!(removed[0].cache(), CacheChange::Removed);
         assert!(!store.is_cached(config.removed()[0].url()));
+    }
+
+    /// A clean clone at `old`, declared removed with `declared` and
+    /// optionally moving to a live `new` repository at `moved_to`, whose
+    /// origin is then repointed at `origin`.
+    fn declared_with_origin(
+        declared: &str,
+        moved_to: Option<&str>,
+        origin: &str,
+    ) -> (TempDir, config::ResolvedConfig) {
+        let (root, old, _) = workspace();
+        run_git(&old, &["remote", "set-url", "origin", origin]);
+        let mut contents = match moved_to {
+            Some(_) => format!(
+                "version = 2\n[removed.repos]\nold = {{ url = \"{declared}\", moved_to = \"new\" }}\n"
+            ),
+            None => format!("version = 2\n[removed.repos]\nold = \"{declared}\"\n"),
+        };
+        if let Some(url) = moved_to {
+            contents.push_str(&format!("[repos]\nnew = \"{url}\"\n"));
+        }
+        let config_path = root.path().join("workspace/grove.toml");
+        std::fs::write(&config_path, contents).unwrap();
+        let config = config::load(Some(&config_path)).unwrap();
+        (root, config)
+    }
+
+    fn removal_outcome(root: &TempDir, config: &config::ResolvedConfig) -> Outcome {
+        let trash = RecordingTrash::default();
+        let (entries, _) = converge_all(&trash, root, config, true, false);
+        assert!(trash.trashed.lock().unwrap().is_empty());
+        entries[0].outcome().clone()
+    }
+
+    #[test]
+    fn a_shared_cache_identity_never_authorizes_removal() {
+        for (declared, origin) in [
+            ("alice@example.com:repo.git", "bob@example.com:repo.git"),
+            ("https://example.com/org/repo.git", "git@example.com:org/repo.git"),
+            ("example.com:repo.git", "example.com:/repo.git"),
+        ] {
+            let (root, config) = declared_with_origin(declared, None, origin);
+            assert_eq!(
+                removal_outcome(&root, &config),
+                Outcome::Blocked { reason: BlockedReason::RemoteUrlMismatch },
+                "{origin} authorized removing {declared}"
+            );
+
+            let (root, config) =
+                declared_with_origin("https://example.com/old.git", Some(declared), origin);
+            assert_eq!(
+                removal_outcome(&root, &config),
+                Outcome::Blocked { reason: BlockedReason::RemoteUrlMismatch },
+                "{origin} authorized moving to {declared}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_exact_match_to_either_configured_url_authorizes_removal() {
+        let (root, config) = declared_with_origin(
+            "git@example.com:org/old.git",
+            None,
+            "git@example.com:org/old.git",
+        );
+        assert_eq!(removal_outcome(&root, &config), Outcome::Planned(Plan::Trash));
+
+        for origin in ["git@example.com:org/old.git", "git@example.com:org/new.git"] {
+            let (root, config) = declared_with_origin(
+                "git@example.com:org/old.git",
+                Some("git@example.com:org/new.git"),
+                origin,
+            );
+            assert!(
+                matches!(removal_outcome(&root, &config), Outcome::Planned(Plan::Move { .. })),
+                "{origin} should authorize the move"
+            );
+        }
     }
 }

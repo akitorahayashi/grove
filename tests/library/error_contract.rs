@@ -16,6 +16,24 @@ fn malformed_configuration_retains_the_toml_source() {
 }
 
 #[test]
+fn malformed_configuration_diagnostics_redact_url_credentials() {
+    let ctx = TestContext::new();
+    let config = ctx.write_config(
+        "version = 2\n[repos.blog]\nurl = \"https://user:synthetic-password@example.com/repo.git?access_token=synthetic-token\n",
+    );
+
+    let error = grove::validate(Some(config)).expect_err("malformed TOML should fail");
+
+    let configuration = error.configuration_error().expect("configuration detail should exist");
+    for rendered in [error.to_string(), format!("{error:?}"), configuration.message().to_string()] {
+        assert!(rendered.contains("example.com/repo.git"), "{rendered}");
+        assert!(!rendered.contains("synthetic-password"), "{rendered}");
+        assert!(!rendered.contains("synthetic-token"), "{rendered}");
+    }
+    assert!(configuration.source().is_some_and(|source| source.is::<toml::de::Error>()));
+}
+
+#[test]
 fn missing_configuration_retains_the_io_source() {
     let ctx = TestContext::new();
     let missing = ctx.workspace().join("missing.toml");

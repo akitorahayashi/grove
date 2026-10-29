@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::Read;
 use std::os::fd::FromRawFd;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use crate::harness::{TestContext, path_with_wrapper};
@@ -47,9 +47,8 @@ fn sync_progress_completes_when_stderr_is_a_terminal() {
         output
     });
 
-    let mut child = Command::new(assert_cmd::cargo::cargo_bin!("gv"))
-        .current_dir(ctx.workspace())
-        .env("XDG_CACHE_HOME", ctx.cache_home())
+    let mut child = ctx
+        .gv_process()
         .env("PATH", path)
         .arg("--config")
         .arg(config)

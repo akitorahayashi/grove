@@ -58,6 +58,10 @@ domain depends on `app/` or `cli/`.
   and never spawns threads itself.
 - `git stash`, `git reset --hard`, `git rebase`, `git clean`, forced checkout,
   and forced push are never issued.
+- Managed Git commands select their repository by working directory and full
+  ref names alone: `RepositoryProbe::verify_available` refuses inherited
+  repository-routing variables before any probe, and only raw `gv clone`
+  passthrough forwards the caller's environment to Git.
 - Configuration additions preserve existing TOML formatting, validate the
   prospective merged tree, and replace one destination atomically.
 
@@ -67,8 +71,8 @@ Unit tests are colocated as `#[cfg(test)] mod tests` at the foot of the module
 they verify. Integration tests live in `tests/` as two Cargo binaries —
 `tests/cli.rs` for CLI boundary behavior and `tests/library.rs` for the `lib.rs`
 facade — sharing `tests/harness/`, which owns the temporary workspace, the
-isolated cache home, the pre-wired `gv` command, and Git remote creation. Layout
-and CI stages are in docs/testing.md.
+isolated cache home, Git process isolation, the pre-wired `gv` command, and Git
+remote creation. Layout and CI stages are in docs/testing.md.
 
 ## Verify Commands
 

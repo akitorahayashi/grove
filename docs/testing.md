@@ -21,16 +21,36 @@ binaries plus a shared fixture module:
 - `tests/harness/test_context.rs` provides `TestContext`, shared by both
   binaries: a temporary workspace and cache home, a `gv` command pre-wired to
   them, and Git remote/seed repository setup through `run_git`.
-- `tests/harness/git_process.rs` owns shared local-commit and Git-wrapper
-  fixtures used by failure-path suites.
+- `tests/harness/git_process.rs` owns Git process isolation and the shared
+  local-commit and Git-wrapper fixtures used by failure-path suites.
 
 Filesystem and process tests use temporary directories. Nothing reaches the
 real trash: unit tests inject a trash double, and the CLI tests that trash
 repositories or an override run on Linux only, with `XDG_DATA_HOME` inside their
 temporary directory. Git observation parsers
-are tested against independent machine-readable fixtures. Status concurrency
-tests use synchronization primitives rather than elapsed-time assumptions and
-assert the externally visible ordering rather than Git invocation counts.
+are tested against independent machine-readable fixtures. Concurrency tests
+use a deadline-bounded rendezvous rather than elapsed-time assumptions, so a
+parallelism regression fails instead of hanging, and they assert the externally
+visible ordering rather than Git invocation counts.
+
+## Git process isolation
+
+Fixture Git processes and `gv` children run without any inherited `GIT_*`
+variable and with `GIT_CONFIG_GLOBAL=/dev/null` and `GIT_CONFIG_NOSYSTEM=1`,
+so a developer's signing, hooks, aliases, or an ambient `GIT_DIR` neither
+break fixture setup nor redirect it. Global-configuration isolation relies on
+`GIT_CONFIG_GLOBAL`, which Git 2.32 introduced. Isolation is applied per child;
+the test process environment is never mutated. A test sets its own variables
+after the harness, so tests of the production environment policy inject
+repository selectors deliberately.
+
+| Owner | Isolated processes |
+| --- | --- |
+| `tests/harness/git_process.rs` | `git_command`, `run_git`, `git_stdout`, and the `gv` children from `TestContext::cli` and `TestContext::gv_process` |
+| `src/git/command.rs` tests | Unit fixture Git processes and `CommandGitClient::isolated` clients |
+
+Library integration tests run grove in the test process, so the Git processes
+grove spawns there inherit the test process environment.
 
 ## Verify commands
 

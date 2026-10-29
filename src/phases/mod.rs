@@ -13,5 +13,7 @@ mod slots;
 
 pub use events::Summary;
 pub(crate) use events::{DiscardEvents, Event, EventProgress, EventSink};
-pub(crate) use run::{Task, run_check, run_workers};
+pub(crate) use run::{Task, run_check, run_sequential, run_workers};
 pub(crate) use slots::Slots;
+#[cfg(test)]
+pub(crate) use workers::tests::Rendezvous;

@@ -174,7 +174,7 @@ pub(super) fn resolve_sibling_override_path(path: &Path) -> Result<Option<PathBu
     match fs::symlink_metadata(&override_path) {
         Ok(_) => {
             let resolved = override_path.canonicalize().map_err(|err| {
-                AppError::config_source(format!("{}: {err}", override_path.display()), err)
+                super::source_error(format!("{}: {err}", override_path.display()), err)
             })?;
             if !resolved.is_file() {
                 return Err(AppError::config_error(format!(
@@ -185,9 +185,7 @@ pub(super) fn resolve_sibling_override_path(path: &Path) -> Result<Option<PathBu
             Ok(Some(resolved))
         }
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(err) => {
-            Err(AppError::config_source(format!("{}: {err}", override_path.display()), err))
-        }
+        Err(err) => Err(super::source_error(format!("{}: {err}", override_path.display()), err)),
     }
 }
 

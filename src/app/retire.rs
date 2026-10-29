@@ -258,14 +258,14 @@ mod tests {
 
         fn seed_cache(&self) {
             let source = self.directory.join("first/.git");
-            let git = CommandGitClient::default();
+            let git = CommandGitClient::isolated();
             self.store()
                 .seed_from_local(&git, &self.url, &source, &mut NoopGitProgressSink)
                 .unwrap();
         }
 
         fn retire(&self, trash: RecordingTrash, dry_run: bool) -> (Report, Vec<PathBuf>) {
-            let ctx = AppContext::new(CommandGitClient::default())
+            let ctx = AppContext::new(CommandGitClient::isolated())
                 .with_trash(trash)
                 .with_cache(self.store());
             let config = self.directory.join("grove.toml");

@@ -11,22 +11,42 @@ use crate::repositories::redact_urls_for_display;
 #[derive(Debug, Clone)]
 pub struct CommandGitClient {
     executable: OsString,
+    #[cfg(test)]
+    isolated: bool,
 }
 
 impl Default for CommandGitClient {
     fn default() -> Self {
-        Self { executable: OsString::from("git") }
+        Self {
+            executable: OsString::from("git"),
+            #[cfg(test)]
+            isolated: false,
+        }
     }
 }
 
 impl CommandGitClient {
+    /// A client whose Git processes run under the fixtures' isolated
+    /// configuration, so a developer's global hooks, signing, or inherited
+    /// repository selectors cannot change what a unit test observes.
+    #[cfg(test)]
+    pub(crate) fn isolated() -> Self {
+        Self::with_executable("git")
+    }
+
     #[cfg(test)]
     pub(in crate::git) fn with_executable(executable: impl AsRef<std::ffi::OsStr>) -> Self {
-        Self { executable: executable.as_ref().to_os_string() }
+        Self { executable: executable.as_ref().to_os_string(), isolated: true }
     }
 
     pub(super) fn command(&self) -> Command {
-        Command::new(&self.executable)
+        #[cfg_attr(not(test), allow(unused_mut))]
+        let mut command = Command::new(&self.executable);
+        #[cfg(test)]
+        if self.isolated {
+            tests::isolate(&mut command);
+        }
+        command
     }
 
     pub(super) fn git_required(
@@ -93,6 +113,7 @@ pub(super) fn run_with_progress(
     };
     let mut buffer = [0; 4096];
     let mut pending = BoundedDiagnosticBytes::default();
+    let mut overwritten = BoundedDiagnosticBytes::default();
     let mut diagnostics = DiagnosticTail::default();
     let mut processing_error = None;
 
@@ -112,31 +133,37 @@ pub(super) fn run_with_progress(
             break;
         }
         for byte in &buffer[..read] {
-            if *byte == b'\r' || *byte == b'\n' {
-                let pending_truncated = pending.truncated();
-                if let Some(error) = process_progress_line(
-                    pending.as_slice(),
-                    pending_truncated,
-                    progress,
-                    &mut diagnostics,
-                    processing_error.is_none(),
-                ) {
-                    processing_error = Some(error);
+            match *byte {
+                b'\r' => {
+                    if pending.is_empty() {
+                        continue;
+                    }
+                    let emit = processing_error.is_none();
+                    if let Some(error) = emit_progress(pending.as_slice(), progress, emit) {
+                        processing_error = Some(error);
+                    }
+                    overwritten = std::mem::take(&mut pending);
                 }
-                pending.clear();
-            } else {
-                pending.push(*byte);
+                b'\n' => {
+                    let emit = processing_error.is_none();
+                    if let Some(error) = finish_line(
+                        &mut pending,
+                        &mut overwritten,
+                        progress,
+                        &mut diagnostics,
+                        emit,
+                    ) {
+                        processing_error = Some(error);
+                    }
+                }
+                byte => pending.push(byte),
             }
         }
     }
-    let pending_truncated = pending.truncated();
-    if let Some(error) = process_progress_line(
-        pending.as_slice(),
-        pending_truncated,
-        progress,
-        &mut diagnostics,
-        processing_error.is_none(),
-    ) {
+    let emit = processing_error.is_none();
+    if let Some(error) =
+        finish_line(&mut pending, &mut overwritten, progress, &mut diagnostics, emit)
+    {
         processing_error = Some(error);
     }
 
@@ -231,25 +258,39 @@ impl DiagnosticTail {
     }
 }
 
-fn process_progress_line(
-    line: &[u8],
-    line_truncated: bool,
+/// Ends a line at `\n` or end of output. The diagnostic tail keeps what a
+/// terminal would leave visible: every finished line, whatever its content,
+/// so a fatal message that happens to look like progress survives. A segment
+/// ended by `\r` and then overwritten by further text is a transient progress
+/// refresh and is dropped; one followed directly by `\n` stays visible.
+fn finish_line(
+    pending: &mut BoundedDiagnosticBytes,
+    overwritten: &mut BoundedDiagnosticBytes,
     progress: &mut dyn GitProgressSink,
     diagnostics: &mut DiagnosticTail,
     emit: bool,
 ) -> Option<AppError> {
-    if line.is_empty() {
+    let mut error = None;
+    let mut line = if pending.is_empty() {
+        std::mem::take(overwritten)
+    } else {
+        error = emit_progress(pending.as_slice(), progress, emit);
+        overwritten.clear();
+        std::mem::take(pending)
+    };
+    if !line.is_empty() {
+        let truncated = line.truncated();
+        diagnostics.push(line.as_slice(), truncated);
+    }
+    error
+}
+
+fn emit_progress(line: &[u8], progress: &mut dyn GitProgressSink, emit: bool) -> Option<AppError> {
+    if !emit {
         return None;
     }
-    let line = String::from_utf8_lossy(line);
-    if let Some(parsed) = parse_git_progress(&line) {
-        if emit {
-            return progress.progress(parsed).err();
-        }
-    } else {
-        diagnostics.push(line.as_bytes(), line_truncated);
-    }
-    None
+    let parsed = parse_git_progress(&String::from_utf8_lossy(line))?;
+    progress.progress(parsed).err()
 }
 
 pub(super) fn command_message(output: &Output) -> String {
@@ -319,6 +360,36 @@ pub(crate) mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn progress_failures_keep_finished_lines_that_resemble_progress() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = TempDir::new().unwrap();
+        let script = root.path().join("diagnostic-script");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\ni=0\nwhile [ \"$i\" -lt 500 ]; do\n  printf 'Receiving objects: %d%% (%d/500)\\r' $((i / 5)) \"$i\" >&2\n  i=$((i + 1))\ndone\nprintf 'Receiving objects: 100%% (500/500), done.\\n' >&2\nprintf 'fatal: server is 100%% unavailable\\n' >&2\nprintf 'error: 3/4 (75%%) of mirrors refused\\r\\n' >&2\nexit 42\n",
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&script).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&script, permissions).unwrap();
+        let mut progress = RecordingProgressSink::default();
+
+        let error =
+            super::run_with_progress(Command::new(script), "git fetch".to_string(), &mut progress)
+                .unwrap_err();
+
+        let git = error.git_error().expect("a Git failure");
+        assert_eq!(git.exit_code(), Some(42));
+        assert!(git.diagnostic().contains("fatal: server is 100% unavailable"), "{error}");
+        assert!(git.diagnostic().contains("error: 3/4 (75%) of mirrors refused"), "{error}");
+        assert!(git.diagnostic().contains("Receiving objects: 100% (500/500), done."));
+        assert!(!git.diagnostic().contains("(250/500)"), "{error}");
+        assert!(progress.count > 500, "progress events were {}", progress.count);
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn progress_sink_failure_waits_for_git_child() {
         let root = TempDir::new().unwrap();
         let repository = root.path().join("repository");
@@ -340,19 +411,29 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn create_updatable_repository(root: &Path) -> std::path::PathBuf {
+        create_updatable_repository_on(root, "main")
+    }
+
+    /// A clone on `feature` whose default branch `branch` is one commit behind
+    /// its fetched remote-tracking ref.
+    pub(crate) fn create_updatable_repository_on(root: &Path, branch: &str) -> std::path::PathBuf {
         let remote = root.join("remote.git");
         let seed = root.join("seed");
         let repository = root.join("repository");
-        run_git(root, &["init", "--bare", "--initial-branch=main", remote.to_str().unwrap()]);
+        run_git(
+            root,
+            &["init", "--bare", &format!("--initial-branch={branch}"), remote.to_str().unwrap()],
+        );
         initialize_committed_repository(&seed);
+        run_git(&seed, &["branch", "-m", branch]);
         run_git(&seed, &["remote", "add", "origin", remote.to_str().unwrap()]);
-        run_git(&seed, &["push", "-u", "origin", "main"]);
+        run_git(&seed, &["push", "-u", "origin", branch]);
         run_git(root, &["clone", remote.to_str().unwrap(), repository.to_str().unwrap()]);
         run_git(&repository, &["switch", "-c", "feature"]);
         std::fs::write(seed.join("remote.txt"), "remote\n").unwrap();
         run_git(&seed, &["add", "remote.txt"]);
         commit(&seed, "remote");
-        run_git(&seed, &["push", "origin", "main"]);
+        run_git(&seed, &["push", "origin", branch]);
         run_git(&repository, &["fetch", "origin"]);
         repository
     }
@@ -383,7 +464,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn git_stdout(directory: &Path, args: &[&str]) -> String {
-        let output = Command::new("git").current_dir(directory).args(args).output().unwrap();
+        let output = git(directory).args(args).output().unwrap();
         assert!(output.status.success(), "git {} failed", args.join(" "));
         String::from_utf8_lossy(&output.stdout).trim().to_string()
     }
@@ -405,13 +486,45 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn run_git(directory: &Path, args: &[&str]) {
-        let output = Command::new("git").current_dir(directory).args(args).output().unwrap();
+        let output = git(directory).args(args).output().unwrap();
         assert!(
             output.status.success(),
             "git {} failed: {}",
             args.join(" "),
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    /// Strips every inherited `GIT_*` variable and replaces global and system
+    /// configuration with nothing, so fixtures and isolated clients neither read
+    /// a developer's signing or hook settings nor follow an ambient `GIT_DIR`.
+    /// Applied per command; the test process environment is never mutated.
+    pub(crate) fn isolate(command: &mut Command) {
+        for (name, _) in std::env::vars_os() {
+            if name.to_str().is_some_and(|name| name.starts_with("GIT_")) {
+                command.env_remove(name);
+            }
+        }
+        command.env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_NOSYSTEM", "1");
+    }
+
+    fn git(directory: &Path) -> Command {
+        let mut command = Command::new("git");
+        command.current_dir(directory);
+        isolate(&mut command);
+        command
+    }
+
+    #[derive(Default)]
+    struct RecordingProgressSink {
+        count: usize,
+    }
+
+    impl GitProgressSink for RecordingProgressSink {
+        fn progress(&mut self, _progress: GitProgress) -> Result<(), AppError> {
+            self.count += 1;
+            Ok(())
+        }
     }
 
     struct FailingProgressSink;

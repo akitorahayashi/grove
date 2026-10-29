@@ -43,13 +43,13 @@ impl PhaseTask for Task<'_> {
     }
 }
 
-pub(super) fn repository(git: &impl DefaultBranch, task: &Task<'_>) -> Entry {
+pub(super) fn repository(git: &impl DefaultBranch, task: &Task<'_>) -> Result<Entry, AppError> {
     match update_repository(git, task) {
-        Ok(entry) => entry,
-        Err(err) => Entry::new(
+        Ok(entry) => Ok(entry),
+        Err(err) => Ok(Entry::new(
             task.repository,
-            Outcome::Blocked { reason: BlockedReason::UpdateFailed(err.to_string()) },
-        ),
+            Outcome::Blocked { reason: BlockedReason::UpdateFailed(err.demote()?) },
+        )),
     }
 }
 
@@ -134,5 +134,74 @@ fn restoration_message(primary: String, restoration: Restoration) -> String {
         Restoration::Failed(restoration) => {
             format!("{primary}; restoring the original branch also failed: {restoration}")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+
+    use super::{Task, repository};
+    use crate::AppError;
+    use crate::app::sync::{BlockedReason, Outcome};
+    use crate::git::{DefaultBranch, GitRefreshOutcome, GitUpdateOutcome};
+    use crate::repositories::{BranchName, RemoteUrl, RepositoryDefinition, RepositoryName};
+
+    struct FailingUpdate(fn() -> AppError);
+
+    impl DefaultBranch for FailingUpdate {
+        fn update_default_branch(
+            &self,
+            _repository: &Path,
+            _branch: &BranchName,
+        ) -> Result<GitUpdateOutcome, AppError> {
+            Err((self.0)())
+        }
+
+        fn refresh_default_branch(
+            &self,
+            _repository: &Path,
+            _branch: &BranchName,
+        ) -> Result<GitRefreshOutcome, AppError> {
+            unreachable!("sync never refreshes")
+        }
+    }
+
+    fn definition() -> RepositoryDefinition {
+        RepositoryDefinition::new(
+            RepositoryName::new("blog").unwrap(),
+            PathBuf::from("/workspace/blog"),
+            "blog".to_string(),
+            RemoteUrl::new("https://example.com/blog.git").unwrap(),
+            None,
+            PathBuf::from("/workspace/grove.toml"),
+            PathBuf::from("/workspace"),
+        )
+    }
+
+    #[test]
+    fn a_git_failure_blocks_the_repository_but_an_internal_failure_aborts() {
+        let definition = definition();
+        let task = Task::new(
+            0,
+            &definition,
+            PathBuf::from("/workspace/blog/.git"),
+            BranchName::new("main").unwrap(),
+        );
+
+        let blocked = repository(
+            &FailingUpdate(|| AppError::git_command_failed("git merge", "merge refused")),
+            &task,
+        )
+        .unwrap();
+        assert!(matches!(
+            blocked.outcome(),
+            Outcome::Blocked { reason: BlockedReason::UpdateFailed(message) }
+                if message.contains("merge refused")
+        ));
+
+        let error =
+            repository(&FailingUpdate(|| AppError::internal("lock poisoned")), &task).unwrap_err();
+        assert!(error.is_internal());
     }
 }

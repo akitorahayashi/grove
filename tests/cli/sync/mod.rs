@@ -1,6 +1,10 @@
 use predicates::prelude::*;
 
-use crate::harness::{TestContext, commit_file, current_branch, path_with_wrapper, run_git};
+#[cfg(unix)]
+use crate::harness::fsmonitor_marker;
+use crate::harness::{
+    TestContext, commit_file, current_branch, path_with_wrapper, repository_state, run_git,
+};
 
 mod cache;
 mod overrides;
@@ -312,7 +316,7 @@ fn sync_redacts_credentials_in_successful_clone_output() {
 PATH="/usr/bin:/bin:$PATH"
 if [ "$1" = --version ]; then echo 'git version 2.40.0'; fi
 if [ "$1" = clone ]; then for arg in "$@"; do dest="$arg"; done; mkdir -p "$dest"; fi
-if [ "$1" = symbolic-ref ]; then echo main; fi
+if [ "$1" = symbolic-ref ]; then echo refs/heads/main; fi
 exit 0
 "#,
     )
@@ -516,23 +520,13 @@ fn sync_blocks_non_repository_missing_origin_and_detached_head() {
 #[cfg(unix)]
 #[test]
 fn sync_declines_a_mismatched_repository_without_running_its_fsmonitor_hook() {
-    use std::os::unix::fs::PermissionsExt;
-
     let ctx = TestContext::new();
     let remote = ctx.create_remote("blog");
     let matching_config = ctx.write_single_repository_config("blog", &remote.url(), None);
     ctx.cli().arg("--config").arg(&matching_config).arg("sync").assert().success();
 
     let repository = ctx.workspace().join("blog");
-    let sentinel = ctx.root().join("fsmonitor-ran");
-    let hook = ctx.root().join("fsmonitor-hook");
-    std::fs::write(&hook, format!("#!/bin/sh\n: > \"{}\"\nexit 1\n", sentinel.display()))
-        .expect("failed to write fsmonitor hook");
-    let mut permissions =
-        std::fs::metadata(&hook).expect("failed to inspect fsmonitor hook").permissions();
-    permissions.set_mode(0o755);
-    std::fs::set_permissions(&hook, permissions).expect("failed to chmod fsmonitor hook");
-    run_git(&repository, &["config", "core.fsmonitor", hook.to_str().unwrap()]);
+    let sentinel = fsmonitor_marker(&ctx, &repository);
     run_git(&repository, &["remote", "set-url", "origin", "https://example.com/other.git"]);
 
     let mismatched_config =
@@ -740,4 +734,82 @@ fn sync_discovers_config_from_a_subdirectory_and_names_it() {
         .stderr(predicate::str::contains("+ blog"));
 
     assert!(ctx.workspace().join("blog").join(".git").exists());
+}
+
+#[test]
+fn sync_rejects_inherited_index_routing_before_cloning_or_caching() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    let config = ctx.write_single_repository_config("blog", &remote.url(), None);
+    let index = ctx.root().join("foreign-index");
+
+    ctx.cli()
+        .env("GIT_INDEX_FILE", &index)
+        .arg("--config")
+        .arg(config)
+        .arg("sync")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("GIT_INDEX_FILE"))
+        .stderr(predicate::str::contains("unset it"))
+        .stderr(predicate::str::contains(index.to_str().unwrap()).not());
+
+    assert!(!ctx.workspace().join("blog").exists());
+    assert!(!ctx.cache_root().exists());
+    assert!(!index.exists());
+}
+
+/// Configuration carried by the environment is the caller's intent, not
+/// repository routing: the configured URL only resolves through the inherited
+/// `insteadOf` rule, and Git's hook context variable is present as it is in
+/// every hook.
+#[test]
+fn sync_honors_inherited_git_configuration() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("blog");
+    let remotes = std::path::Path::new(&remote.url()).parent().unwrap().display().to_string();
+    let config = ctx.write_single_repository_config("blog", "grove-test:blog.git", None);
+
+    ctx.cli()
+        .env("GIT_CONFIG_COUNT", "1")
+        .env("GIT_CONFIG_KEY_0", format!("url.{remotes}/.insteadOf"))
+        .env("GIT_CONFIG_VALUE_0", "grove-test:")
+        .env("GIT_CONFIG_PARAMETERS", "'gc.auto'='0'")
+        .env("GIT_PREFIX", "nested/")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .arg("--config")
+        .arg(config)
+        .arg("sync")
+        .assert()
+        .success();
+
+    assert!(ctx.workspace().join("blog/README.md").is_file());
+}
+
+#[cfg(unix)]
+#[test]
+fn sync_blocks_a_declared_directory_inside_another_worktree() {
+    let ctx = TestContext::new();
+    let remote = ctx.create_remote("outer");
+    let outer = ctx.workspace().join("outer");
+    run_git(ctx.workspace(), &["clone", &remote.url(), outer.to_str().unwrap()]);
+    std::fs::create_dir(outer.join("sub")).unwrap();
+    remote.add_commit("second.txt", "second\n");
+    let config = ctx.write_config(&format!(
+        "version = 2\n[repos.sub]\npath = \"outer/sub\"\nurl = \"{}\"\n",
+        remote.url()
+    ));
+    let before = repository_state(&outer);
+    let marker = fsmonitor_marker(&ctx, &outer);
+
+    ctx.cli()
+        .arg("--config")
+        .arg(config)
+        .arg("sync")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not a Git repository"));
+
+    assert!(!marker.exists(), "sync ran the enclosing repository's fsmonitor hook");
+    assert_eq!(repository_state(&outer), before);
 }

@@ -63,7 +63,7 @@ impl Retirement {
                 Ok((validation::resolve(tree)?, sources))
             })
             .map_err(|error| {
-                AppError::config_source(
+                super::source_error(
                     format!(
                         "{display_path}: retiring it would leave an invalid configuration: {error}"
                     ),
@@ -101,7 +101,7 @@ impl Retirement {
 fn paired_base(tree: &LoadedConfigTree, target: &Path) -> Result<PathBuf, AppError> {
     let resolved = target
         .canonicalize()
-        .map_err(|err| AppError::config_source(format!("{}: {err}", target.display()), err))?;
+        .map_err(|err| super::source_error(format!("{}: {err}", target.display()), err))?;
     tree.files
         .iter()
         .map(|file| &file.path)
@@ -173,8 +173,10 @@ fn declarations<'a>(
 
 /// Every declaration whose path the remaining configuration no longer
 /// declares. A live repository the remaining configuration keeps under another
-/// path moves back there when both name the same repository, and a removed
-/// declaration keeps its destination only while that destination remains.
+/// path moves back there only when both declare the same URL exactly: the
+/// cache's `identity` would let another SSH account's repository be moved
+/// and repointed. A removed declaration keeps its destination only while that
+/// destination remains.
 fn retiring(
     current: &ResolvedConfig,
     remaining: &ResolvedConfig,
@@ -193,7 +195,7 @@ fn retiring(
         }
         let kept = remaining.repositories().iter().find(|kept| kept.name() == repository.name());
         let moved_to = match kept {
-            Some(kept) if kept.url().same_identity(repository.url()) => Some(kept.name().clone()),
+            Some(kept) if kept.url().matches(repository.url()) => Some(kept.name().clone()),
             Some(kept) => {
                 let subject = format!("repository '{}'", repository.name());
                 return Err(substitution(label, &subject, repository.url(), kept.url()));
@@ -517,6 +519,22 @@ mod tests {
         let error = grove.open(None).err().unwrap();
 
         assert!(error.to_string().contains("repository 'base' points at"));
+    }
+
+    /// The cache identity treats these as one repository, but moving the
+    /// checkout back would repoint it at another account's repository.
+    #[test]
+    fn fails_when_the_override_relocates_a_repository_to_a_url_sharing_only_its_identity() {
+        for url in ["bob@example.com:company/base.git", "https://example.com/company/base.git"] {
+            let grove = Grove::new(
+                &base_with_one_repository(),
+                Some(&format!("[repos.base]\nurl = \"{url}\"\npath = \"other\"\n")),
+            );
+
+            let error = grove.open(None).err().unwrap();
+
+            assert!(error.to_string().contains("repository 'base' points at"), "{url}: {error}");
+        }
     }
 
     #[cfg(unix)]

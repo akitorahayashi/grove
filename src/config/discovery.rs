@@ -15,7 +15,7 @@ pub(crate) fn locate(explicit_config: Option<&Path>) -> Result<PathBuf, AppError
     if let Some(path) = explicit_config {
         return path
             .canonicalize()
-            .map_err(|err| AppError::config_source(format!("{}: {err}", path.display()), err));
+            .map_err(|err| super::source_error(format!("{}: {err}", path.display()), err));
     }
 
     let start = std::env::current_dir()?;
@@ -27,7 +27,7 @@ pub(crate) fn locate(explicit_config: Option<&Path>) -> Result<PathBuf, AppError
         match std::fs::symlink_metadata(&candidate) {
             Ok(_) => {
                 let resolved = candidate.canonicalize().map_err(|err| {
-                    AppError::config_source(format!("{}: {err}", candidate.display()), err)
+                    super::source_error(format!("{}: {err}", candidate.display()), err)
                 })?;
                 if !resolved.is_file() {
                     return Err(AppError::config_error(format!(
@@ -39,10 +39,7 @@ pub(crate) fn locate(explicit_config: Option<&Path>) -> Result<PathBuf, AppError
             }
             Err(err) if err.kind() == io::ErrorKind::NotFound => {}
             Err(err) => {
-                return Err(AppError::config_source(
-                    format!("{}: {err}", candidate.display()),
-                    err,
-                ));
+                return Err(super::source_error(format!("{}: {err}", candidate.display()), err));
             }
         }
     }

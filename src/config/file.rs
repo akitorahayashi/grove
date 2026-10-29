@@ -62,7 +62,7 @@ impl FromUrl for RawRemovedRepository {
 pub(super) fn parse_table(contents: &str, label: &str) -> Result<Table, AppError> {
     contents
         .parse::<Table>()
-        .map_err(|err| AppError::config_source(format!("{label}: invalid TOML: {err}"), err))
+        .map_err(|err| super::source_error(format!("{label}: invalid TOML: {err}"), err))
 }
 
 /// Merges `overlay` into `base` in place: nested tables merge recursively so a
@@ -181,7 +181,7 @@ fn parse_include(value: Option<Value>, label: &str) -> Result<Vec<String>, AppEr
     let Some(value) = value else {
         return Ok(Vec::new());
     };
-    value.try_into().map_err(|err| AppError::config_source(format!("{label}: include: {err}"), err))
+    value.try_into().map_err(|err| super::source_error(format!("{label}: include: {err}"), err))
 }
 
 fn parse_repositories<T: DeserializeOwned + FromUrl>(
@@ -265,7 +265,7 @@ fn parse_repository_table<T: DeserializeOwned + FromUrl>(
             let repository = match value {
                 Value::String(url) => T::from_url(url),
                 Value::Table(fields) => fields.try_into().map_err(|err| {
-                    AppError::config_source(format!("{label}: repository '{name}': {err}"), err)
+                    super::source_error(format!("{label}: repository '{name}': {err}"), err)
                 })?,
                 _ => {
                     return Err(AppError::config_error(format!(
